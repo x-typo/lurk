@@ -28,6 +28,10 @@ export function Subreddits({ resetKey }: SubredditsProps) {
     setActiveSubreddit(null);
   }, []);
 
+  const openHome = useCallback(() => {
+    Linking.openURL(HOME_URL);
+  }, []);
+
   if (activeSubreddit) {
     return (
       <View style={styles.container}>
@@ -38,10 +42,6 @@ export function Subreddits({ resetKey }: SubredditsProps) {
       </View>
     );
   }
-
-  const openHome = useCallback(() => {
-    Linking.openURL(HOME_URL);
-  }, []);
 
   return (
     <View style={styles.pickerContainer}>
