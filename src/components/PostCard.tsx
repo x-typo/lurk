@@ -20,33 +20,13 @@ import Animated, {
 } from "react-native-reanimated";
 import { RedditPost } from "../types/reddit";
 import { colors } from "../constants/colors";
+import { decodeHtmlEntities, formatTimeAgo, formatScore } from "../utils/format";
 
 const SCREEN_WIDTH = Dimensions.get("window").width;
 const SWIPE_THRESHOLD = 100;
 
 interface PostCardProps {
   post: RedditPost;
-}
-
-function formatTimeAgo(utcSeconds: number): string {
-  const now = Date.now() / 1000;
-  const diff = now - utcSeconds;
-
-  if (diff < 60) return "now";
-  if (diff < 3600) return `${Math.floor(diff / 60)}m`;
-  if (diff < 86400) return `${Math.floor(diff / 3600)}h`;
-  if (diff < 604800) return `${Math.floor(diff / 86400)}d`;
-  return `${Math.floor(diff / 604800)}w`;
-}
-
-function formatScore(score: number): string {
-  if (score >= 1000000) return `${(score / 1000000).toFixed(1)}M`;
-  if (score >= 1000) return `${(score / 1000).toFixed(1)}k`;
-  return score.toString();
-}
-
-function decodeHtmlEntities(str: string): string {
-  return str.replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">");
 }
 
 interface ImageData {
@@ -144,14 +124,9 @@ export function PostCard({ post }: PostCardProps) {
     setDetailVisible(true);
   }, []);
 
-  const tapGesture = Gesture.Tap().onEnd(() => {
-    // Tap on card (non-media area) does nothing - title has its own handler
-  });
-
   const panGesture = Gesture.Pan()
     .activeOffsetX([-20, 20])
     .onUpdate((event) => {
-      // Only allow swipe right (positive translationX)
       translateX.value = Math.max(0, event.translationX);
     })
     .onEnd((event) => {
@@ -165,12 +140,10 @@ export function PostCard({ post }: PostCardProps) {
     transform: [{ translateX: translateX.value }],
   }));
 
-  const composedGesture = Gesture.Race(panGesture, tapGesture);
-
   return (
     <View style={styles.swipeContainer}>
       <View style={styles.swipeBackgroundLeft} />
-      <GestureDetector gesture={composedGesture}>
+      <GestureDetector gesture={panGesture}>
         <Animated.View style={[styles.container, animatedStyle]}>
           <TouchableOpacity onPress={openDetail} activeOpacity={0.7}>
             <View style={styles.header}>
