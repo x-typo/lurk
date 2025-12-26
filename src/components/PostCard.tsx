@@ -10,6 +10,7 @@ import {
 } from "react-native";
 import { ImageViewer } from "./ImageViewer";
 import { VideoPlayer } from "./VideoPlayer";
+import { PostDetail } from "./PostDetail";
 import { Gesture, GestureDetector } from "react-native-gesture-handler";
 import Animated, {
   useSharedValue,
@@ -107,6 +108,7 @@ export function PostCard({ post }: PostCardProps) {
   const isGallery = galleryImages.length > 1;
   const [imageViewerVisible, setImageViewerVisible] = useState(false);
   const [videoPlayerVisible, setVideoPlayerVisible] = useState(false);
+  const [detailVisible, setDetailVisible] = useState(false);
   const translateX = useSharedValue(0);
 
   const viewerImages = useMemo(() => {
@@ -138,6 +140,14 @@ export function PostCard({ post }: PostCardProps) {
     Linking.openURL(url);
   }, [post.permalink]);
 
+  const openDetail = useCallback(() => {
+    setDetailVisible(true);
+  }, []);
+
+  const tapGesture = Gesture.Tap().onEnd(() => {
+    runOnJS(openDetail)();
+  });
+
   const panGesture = Gesture.Pan()
     .activeOffsetX([-20, 20])
     .onUpdate((event) => {
@@ -155,10 +165,12 @@ export function PostCard({ post }: PostCardProps) {
     transform: [{ translateX: translateX.value }],
   }));
 
+  const composedGesture = Gesture.Race(panGesture, tapGesture);
+
   return (
     <View style={styles.swipeContainer}>
       <View style={styles.swipeBackgroundLeft} />
-      <GestureDetector gesture={panGesture}>
+      <GestureDetector gesture={composedGesture}>
         <Animated.View style={[styles.container, animatedStyle]}>
           <View style={styles.header}>
             <Text style={styles.subreddit}>{post.subreddit_name_prefixed}</Text>
@@ -211,6 +223,7 @@ export function PostCard({ post }: PostCardProps) {
 
           <View style={styles.footer}>
             <Text style={styles.score}>{formatScore(post.score)}</Text>
+            <Text style={styles.upvoteIcon}>△</Text>
             <Text style={styles.dot}>•</Text>
             <Text style={styles.comments}>
               {formatScore(post.num_comments)} comments
@@ -236,6 +249,12 @@ export function PostCard({ post }: PostCardProps) {
           onClose={() => setVideoPlayerVisible(false)}
         />
       )}
+
+      <PostDetail
+        post={post}
+        visible={detailVisible}
+        onClose={() => setDetailVisible(false)}
+      />
     </View>
   );
 }
@@ -340,6 +359,11 @@ const styles = StyleSheet.create({
   score: {
     color: colors.textSecondary,
     fontSize: 13,
+  },
+  upvoteIcon: {
+    color: colors.textSecondary,
+    fontSize: 12,
+    marginLeft: 4,
   },
   comments: {
     color: colors.textSecondary,
