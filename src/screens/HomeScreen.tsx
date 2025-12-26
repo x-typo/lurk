@@ -21,16 +21,19 @@ export function HomeScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [after, setAfter] = useState<string | null>(null);
   const [loadingMore, setLoadingMore] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   const loadPosts = useCallback(async () => {
     if (!accessToken) return;
 
     try {
       setLoading(true);
+      setError(null);
       const response = await fetchHomePosts(accessToken, 'hot');
       setPosts(response.data.children.map((child) => child.data));
       setAfter(response.data.after);
     } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to load posts');
       console.error('Failed to load home posts:', err);
     } finally {
       setLoading(false);
@@ -100,6 +103,14 @@ export function HomeScreen() {
     );
   }
 
+  if (error) {
+    return (
+      <View style={styles.centered}>
+        <Text style={styles.errorText}>{error}</Text>
+      </View>
+    );
+  }
+
   return (
     <FlatList
       data={posts}
@@ -151,5 +162,9 @@ const styles = StyleSheet.create({
   },
   footer: {
     padding: 20,
+  },
+  errorText: {
+    color: colors.textSecondary,
+    fontSize: 16,
   },
 });
