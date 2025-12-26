@@ -153,9 +153,6 @@ export function PostDetail({ post, visible, onClose }: PostDetailProps) {
           <TouchableOpacity onPress={onClose} style={styles.closeButton}>
             <Text style={styles.closeText}>Close</Text>
           </TouchableOpacity>
-          <TouchableOpacity onPress={openInSafari} style={styles.safariButton}>
-            <Text style={styles.safariText}>Open in Safari</Text>
-          </TouchableOpacity>
         </View>
 
         <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
@@ -219,6 +216,10 @@ export function PostDetail({ post, visible, onClose }: PostDetailProps) {
             <Text style={styles.dot}>•</Text>
             <Text style={styles.stat}>{formatScore(post.num_comments)} comments</Text>
           </View>
+
+          <TouchableOpacity onPress={openInSafari} style={styles.safariButton}>
+            <Text style={styles.safariText}>Open in Safari</Text>
+          </TouchableOpacity>
         </ScrollView>
       </View>
 
@@ -267,13 +268,16 @@ const styles = StyleSheet.create({
   },
   safariButton: {
     backgroundColor: colors.primary,
-    paddingHorizontal: 12,
-    paddingVertical: 6,
+    paddingHorizontal: 24,
+    paddingVertical: 12,
     borderRadius: 8,
+    alignSelf: 'center',
+    marginTop: 24,
+    marginBottom: 16,
   },
   safariText: {
     color: colors.text,
-    fontSize: 15,
+    fontSize: 16,
     fontWeight: '600',
   },
   content: {
