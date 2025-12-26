@@ -3,7 +3,6 @@ import { View, StyleSheet } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
-import { AuthProvider } from './src/context/AuthContext';
 import { TopTabBar } from './src/components/TopTabBar';
 import { Popular } from './src/screens/Popular';
 import { Subreddits } from './src/screens/Subreddits';
@@ -40,13 +39,11 @@ export default function App() {
   return (
     <GestureHandlerRootView style={styles.root}>
       <SafeAreaProvider>
-        <AuthProvider>
-          <StatusBar style="light" />
-          <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
-            <View style={styles.content}>{content}</View>
-            <TopTabBar tabs={TABS} activeTab={activeTab} onTabPress={handleTabPress} />
-          </SafeAreaView>
-        </AuthProvider>
+        <StatusBar style="light" />
+        <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
+          <View style={styles.content}>{content}</View>
+          <TopTabBar tabs={TABS} activeTab={activeTab} onTabPress={handleTabPress} />
+        </SafeAreaView>
       </SafeAreaProvider>
     </GestureHandlerRootView>
   );

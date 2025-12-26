@@ -6,6 +6,8 @@ import { colors } from '../constants/colors';
 const SUBREDDITS = [
   { name: 'r/ClaudeAI', key: 'ClaudeAI' },
   { name: 'r/ClaudeCode', key: 'ClaudeCode' },
+  { name: 'r/Codex', key: 'codex' },
+  { name: 'r/Singularity', key: 'singularity' },
 ];
 
 interface SubredditsProps {
