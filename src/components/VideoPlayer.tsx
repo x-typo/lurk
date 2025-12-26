@@ -1,4 +1,4 @@
-import React, { useState, useRef, useCallback } from "react";
+import React, { useCallback, useEffect } from "react";
 import {
   Modal,
   View,
@@ -8,8 +8,13 @@ import {
   ActivityIndicator,
   Text,
 } from "react-native";
-import { Video, ResizeMode, AVPlaybackStatus } from "expo-av";
-import { GestureHandlerRootView, Gesture, GestureDetector } from "react-native-gesture-handler";
+import { useVideoPlayer, VideoView } from "expo-video";
+import { useEvent } from "expo";
+import {
+  GestureHandlerRootView,
+  Gesture,
+  GestureDetector,
+} from "react-native-gesture-handler";
 import Animated, {
   useSharedValue,
   useAnimatedStyle,
@@ -37,10 +42,6 @@ export function VideoPlayer({
   videoHeight,
   onClose,
 }: VideoPlayerProps) {
-  const videoRef = useRef<Video>(null);
-  const [isLoading, setIsLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-
   const translateY = useSharedValue(0);
 
   const aspectRatio = videoWidth / videoHeight;
@@ -53,28 +54,30 @@ export function VideoPlayer({
     displayWidth = displayHeight * aspectRatio;
   }
 
-  const handlePlaybackStatusUpdate = (status: AVPlaybackStatus) => {
-    if (status.isLoaded) {
-      setIsLoading(false);
-      setError(null);
-    }
-  };
+  const player = useVideoPlayer(videoUrl, (p) => {
+    p.loop = true;
+  });
 
-  const handleError = (errorMessage: string) => {
-    setIsLoading(false);
-    setError(errorMessage);
-  };
+  const { status } = useEvent(player, "statusChange", {
+    status: player.status,
+  });
+
+  useEffect(() => {
+    if (visible) {
+      player.play();
+    } else {
+      player.pause();
+    }
+  }, [visible, player]);
 
   const handleClose = useCallback(() => {
-    setIsLoading(true);
-    setError(null);
+    player.pause();
     translateY.value = 0;
     onClose();
-  }, [onClose, translateY]);
+  }, [onClose, translateY, player]);
 
   const panGesture = Gesture.Pan()
     .onUpdate((event) => {
-      // Only allow swipe down (positive Y)
       if (event.translationY > 0) {
         translateY.value = event.translationY;
       }
@@ -108,6 +111,9 @@ export function VideoPlayer({
 
   if (!visible) return null;
 
+  const isLoading = status === "loading";
+  const hasError = status === "error";
+
   return (
     <Modal
       visible={visible}
@@ -125,21 +131,16 @@ export function VideoPlayer({
                 <ActivityIndicator size="large" color={colors.primary} />
               </View>
             )}
-            {error ? (
+            {hasError ? (
               <View style={styles.errorContainer}>
                 <Text style={styles.errorText}>Failed to load video</Text>
               </View>
             ) : (
-              <Video
-                ref={videoRef}
-                source={{ uri: videoUrl }}
+              <VideoView
+                player={player}
                 style={{ width: displayWidth, height: displayHeight }}
-                resizeMode={ResizeMode.CONTAIN}
-                shouldPlay={visible}
-                isLooping
-                useNativeControls
-                onPlaybackStatusUpdate={handlePlaybackStatusUpdate}
-                onError={() => handleError("Video playback error")}
+                contentFit="contain"
+                nativeControls
               />
             )}
           </Animated.View>

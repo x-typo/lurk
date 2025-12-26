@@ -49,9 +49,13 @@ function decodeHtmlEntities(str: string): string {
   return str.replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">");
 }
 
-function getImageUrl(
-  post: RedditPost
-): { url: string; width: number; height: number } | null {
+interface ImageData {
+  url: string;
+  width: number;
+  height: number;
+}
+
+function getImageUrl(post: RedditPost): ImageData | null {
   // Check for preview images first
   if (post.preview?.images?.[0]?.source) {
     const source = post.preview.images[0].source;
@@ -62,7 +66,7 @@ function getImageUrl(
     };
   }
 
-  // Check for gallery posts
+  // Check for gallery posts - return first image for thumbnail
   if (post.gallery_data?.items?.[0] && post.media_metadata) {
     const firstItem = post.gallery_data.items[0];
     const mediaInfo = post.media_metadata[firstItem.media_id];
@@ -78,11 +82,43 @@ function getImageUrl(
   return null;
 }
 
+function getGalleryImages(post: RedditPost): ImageData[] {
+  if (!post.gallery_data?.items || !post.media_metadata) {
+    return [];
+  }
+
+  return post.gallery_data.items
+    .map((item) => {
+      const mediaInfo = post.media_metadata?.[item.media_id];
+      if (mediaInfo?.s) {
+        return {
+          url: decodeHtmlEntities(mediaInfo.s.u),
+          width: mediaInfo.s.x,
+          height: mediaInfo.s.y,
+        };
+      }
+      return null;
+    })
+    .filter((img): img is ImageData => img !== null);
+}
+
 export function PostCard({ post, onHide }: PostCardProps) {
   const imageData = useMemo(() => getImageUrl(post), [post]);
+  const galleryImages = useMemo(() => getGalleryImages(post), [post]);
+  const isGallery = galleryImages.length > 1;
   const [imageViewerVisible, setImageViewerVisible] = useState(false);
   const [videoPlayerVisible, setVideoPlayerVisible] = useState(false);
   const translateX = useSharedValue(0);
+
+  const viewerImages = useMemo(() => {
+    if (isGallery) {
+      return galleryImages;
+    }
+    if (imageData) {
+      return [imageData];
+    }
+    return [];
+  }, [isGallery, galleryImages, imageData]);
 
   const videoData = useMemo(() => {
     if (post.is_video && post.media?.reddit_video) {
@@ -161,6 +197,22 @@ export function PostCard({ post, onHide }: PostCardProps) {
                   <Text style={styles.videoText}>▶</Text>
                 </View>
               )}
+              {isGallery && (
+                <View style={styles.galleryIndicator}>
+                  {galleryImages.slice(0, 5).map((_, index) => (
+                    <View
+                      key={index}
+                      style={[
+                        styles.galleryDot,
+                        index === 0 && styles.galleryDotActive,
+                      ]}
+                    />
+                  ))}
+                  {galleryImages.length > 5 && (
+                    <Text style={styles.galleryMoreText}>+{galleryImages.length - 5}</Text>
+                  )}
+                </View>
+              )}
             </TouchableOpacity>
           )}
 
@@ -174,12 +226,10 @@ export function PostCard({ post, onHide }: PostCardProps) {
         </Animated.View>
       </GestureDetector>
 
-      {imageData && (
+      {viewerImages.length > 0 && (
         <ImageViewer
           visible={imageViewerVisible}
-          imageUrl={imageData.url}
-          imageWidth={imageData.width}
-          imageHeight={imageData.height}
+          images={viewerImages}
           onClose={() => setImageViewerVisible(false)}
         />
       )}
@@ -273,6 +323,30 @@ const styles = StyleSheet.create({
   videoText: {
     color: colors.text,
     fontSize: 16,
+  },
+  galleryIndicator: {
+    position: "absolute",
+    bottom: 12,
+    left: 0,
+    right: 0,
+    flexDirection: "row",
+    justifyContent: "center",
+    alignItems: "center",
+    gap: 8,
+  },
+  galleryDot: {
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+    backgroundColor: "rgba(255, 255, 255, 0.5)",
+  },
+  galleryDotActive: {
+    backgroundColor: colors.text,
+  },
+  galleryMoreText: {
+    color: colors.text,
+    fontSize: 12,
+    marginLeft: 4,
   },
   footer: {
     flexDirection: "row",
