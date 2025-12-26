@@ -267,6 +267,9 @@ const styles = StyleSheet.create({
   swipeContainer: {
     position: "relative",
     overflow: "hidden",
+    marginHorizontal: 12,
+    marginTop: 12,
+    borderRadius: 12,
   },
   swipeBackgroundLeft: {
     position: "absolute",
@@ -275,12 +278,13 @@ const styles = StyleSheet.create({
     bottom: 0,
     width: SWIPE_THRESHOLD + 20,
     backgroundColor: "#007AFF",
+    borderTopLeftRadius: 12,
+    borderBottomLeftRadius: 12,
   },
   container: {
     backgroundColor: colors.surface,
     padding: 16,
-    borderBottomWidth: 1,
-    borderBottomColor: colors.border,
+    borderRadius: 12,
   },
   header: {
     flexDirection: "row",
@@ -308,9 +312,10 @@ const styles = StyleSheet.create({
     marginBottom: 12,
   },
   imageContainer: {
-    marginHorizontal: -16,
     marginBottom: 12,
     position: "relative",
+    borderRadius: 8,
+    overflow: "hidden",
   },
   image: {
     width: "100%",
