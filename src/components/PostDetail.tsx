@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState, useMemo } from 'react';
 import {
   View,
   Text,
@@ -13,6 +13,8 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { RedditPost } from '../types/reddit';
 import { colors } from '../constants/colors';
+import { ImageViewer } from './ImageViewer';
+import { VideoPlayer } from './VideoPlayer';
 
 const SCREEN_WIDTH = Dimensions.get('window').width;
 
@@ -48,7 +50,13 @@ function formatScore(score: number): string {
   return score.toString();
 }
 
-function getImageUrl(post: RedditPost): { url: string; width: number; height: number } | null {
+interface ImageData {
+  url: string;
+  width: number;
+  height: number;
+}
+
+function getImageUrl(post: RedditPost): ImageData | null {
   if (post.preview?.images?.[0]?.source) {
     const source = post.preview.images[0].source;
     return {
@@ -57,18 +65,75 @@ function getImageUrl(post: RedditPost): { url: string; width: number; height: nu
       height: source.height,
     };
   }
+
+  // Check for gallery posts - return first image for thumbnail
+  if (post.gallery_data?.items?.[0] && post.media_metadata) {
+    const firstItem = post.gallery_data.items[0];
+    const mediaInfo = post.media_metadata[firstItem.media_id];
+    if (mediaInfo?.s) {
+      return {
+        url: decodeHtmlEntities(mediaInfo.s.u),
+        width: mediaInfo.s.x,
+        height: mediaInfo.s.y,
+      };
+    }
+  }
+
   return null;
+}
+
+function getGalleryImages(post: RedditPost): ImageData[] {
+  if (!post.gallery_data?.items || !post.media_metadata) {
+    return [];
+  }
+
+  return post.gallery_data.items
+    .map((item) => {
+      const mediaInfo = post.media_metadata?.[item.media_id];
+      if (mediaInfo?.s) {
+        return {
+          url: decodeHtmlEntities(mediaInfo.s.u),
+          width: mediaInfo.s.x,
+          height: mediaInfo.s.y,
+        };
+      }
+      return null;
+    })
+    .filter((img): img is ImageData => img !== null);
 }
 
 export function PostDetail({ post, visible, onClose }: PostDetailProps) {
   const insets = useSafeAreaInsets();
+  const [imageViewerVisible, setImageViewerVisible] = useState(false);
+  const [videoPlayerVisible, setVideoPlayerVisible] = useState(false);
 
-  if (!post) return null;
+  const imageData = useMemo(() => (post ? getImageUrl(post) : null), [post]);
+  const galleryImages = useMemo(() => (post ? getGalleryImages(post) : []), [post]);
+  const isGallery = galleryImages.length > 1;
 
-  const imageData = getImageUrl(post);
+  const viewerImages = useMemo(() => {
+    if (isGallery) {
+      return galleryImages;
+    }
+    if (imageData) {
+      return [imageData];
+    }
+    return [];
+  }, [isGallery, galleryImages, imageData]);
+
+  const videoData = useMemo(() => {
+    if (post?.is_video && post.media?.reddit_video) {
+      const { fallback_url, width, height } = post.media.reddit_video;
+      return { url: fallback_url, width, height };
+    }
+    return null;
+  }, [post]);
+
   const imageHeight = imageData
     ? (SCREEN_WIDTH / imageData.width) * imageData.height
     : 0;
+
+  if (!post) return null;
 
   const openInSafari = () => {
     const url = `https://www.reddit.com${post.permalink}`;
@@ -81,6 +146,7 @@ export function PostDetail({ post, visible, onClose }: PostDetailProps) {
       animationType="slide"
       presentationStyle="pageSheet"
       onRequestClose={onClose}
+      onDismiss={onClose}
     >
       <View style={[styles.container, { paddingTop: insets.top }]}>
         <View style={styles.header}>
@@ -104,11 +170,44 @@ export function PostDetail({ post, visible, onClose }: PostDetailProps) {
           <Text style={styles.title}>{post.title}</Text>
 
           {imageData && (
-            <Image
-              source={{ uri: imageData.url }}
-              style={[styles.image, { height: Math.min(imageHeight, 400) }]}
-              resizeMode="contain"
-            />
+            <TouchableOpacity
+              activeOpacity={0.9}
+              onPress={() => {
+                if (videoData) {
+                  setVideoPlayerVisible(true);
+                } else {
+                  setImageViewerVisible(true);
+                }
+              }}
+              style={styles.imageContainer}
+            >
+              <Image
+                source={{ uri: imageData.url }}
+                style={[styles.image, { height: Math.min(imageHeight, 400) }]}
+                resizeMode="contain"
+              />
+              {post.is_video && (
+                <View style={styles.videoIndicator}>
+                  <Text style={styles.videoText}>▶</Text>
+                </View>
+              )}
+              {isGallery && (
+                <View style={styles.galleryIndicator}>
+                  {galleryImages.slice(0, 5).map((_, index) => (
+                    <View
+                      key={index}
+                      style={[
+                        styles.galleryDot,
+                        index === 0 && styles.galleryDotActive,
+                      ]}
+                    />
+                  ))}
+                  {galleryImages.length > 5 && (
+                    <Text style={styles.galleryMoreText}>+{galleryImages.length - 5}</Text>
+                  )}
+                </View>
+              )}
+            </TouchableOpacity>
           )}
 
           {post.selftext && post.selftext.length > 0 && (
@@ -122,6 +221,24 @@ export function PostDetail({ post, visible, onClose }: PostDetailProps) {
           </View>
         </ScrollView>
       </View>
+
+      {viewerImages.length > 0 && (
+        <ImageViewer
+          visible={imageViewerVisible}
+          images={viewerImages}
+          onClose={() => setImageViewerVisible(false)}
+        />
+      )}
+
+      {videoData && (
+        <VideoPlayer
+          visible={videoPlayerVisible}
+          videoUrl={videoData.url}
+          videoWidth={videoData.width}
+          videoHeight={videoData.height}
+          onClose={() => setVideoPlayerVisible(false)}
+        />
+      )}
     </Modal>
   );
 }
@@ -194,11 +311,54 @@ const styles = StyleSheet.create({
     lineHeight: 26,
     marginBottom: 16,
   },
+  imageContainer: {
+    position: 'relative',
+    marginBottom: 16,
+  },
   image: {
     width: '100%',
     backgroundColor: colors.surfaceElevated,
     borderRadius: 8,
-    marginBottom: 16,
+  },
+  videoIndicator: {
+    position: 'absolute',
+    top: '50%',
+    left: '50%',
+    transform: [{ translateX: -25 }, { translateY: -25 }],
+    width: 50,
+    height: 50,
+    borderRadius: 25,
+    backgroundColor: 'rgba(0, 0, 0, 0.7)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  videoText: {
+    color: colors.text,
+    fontSize: 20,
+  },
+  galleryIndicator: {
+    position: 'absolute',
+    bottom: 12,
+    left: 0,
+    right: 0,
+    flexDirection: 'row',
+    justifyContent: 'center',
+    alignItems: 'center',
+    gap: 8,
+  },
+  galleryDot: {
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+    backgroundColor: 'rgba(255, 255, 255, 0.5)',
+  },
+  galleryDotActive: {
+    backgroundColor: colors.text,
+  },
+  galleryMoreText: {
+    color: colors.text,
+    fontSize: 12,
+    marginLeft: 4,
   },
   selftext: {
     color: colors.textSecondary,

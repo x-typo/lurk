@@ -145,7 +145,7 @@ export function PostCard({ post }: PostCardProps) {
   }, []);
 
   const tapGesture = Gesture.Tap().onEnd(() => {
-    runOnJS(openDetail)();
+    // Tap on card (non-media area) does nothing - title has its own handler
   });
 
   const panGesture = Gesture.Pan()
@@ -172,13 +172,15 @@ export function PostCard({ post }: PostCardProps) {
       <View style={styles.swipeBackgroundLeft} />
       <GestureDetector gesture={composedGesture}>
         <Animated.View style={[styles.container, animatedStyle]}>
-          <View style={styles.header}>
-            <Text style={styles.subreddit}>{post.subreddit_name_prefixed}</Text>
-            <Text style={styles.dot}>•</Text>
-            <Text style={styles.time}>{formatTimeAgo(post.created_utc)}</Text>
-          </View>
+          <TouchableOpacity onPress={openDetail} activeOpacity={0.7}>
+            <View style={styles.header}>
+              <Text style={styles.subreddit}>{post.subreddit_name_prefixed}</Text>
+              <Text style={styles.dot}>•</Text>
+              <Text style={styles.time}>{formatTimeAgo(post.created_utc)}</Text>
+            </View>
 
-          <Text style={styles.title}>{post.title}</Text>
+            <Text style={styles.title}>{post.title}</Text>
+          </TouchableOpacity>
 
           {imageData && (
             <TouchableOpacity
@@ -221,14 +223,16 @@ export function PostCard({ post }: PostCardProps) {
             </TouchableOpacity>
           )}
 
-          <View style={styles.footer}>
-            <Text style={styles.score}>{formatScore(post.score)}</Text>
-            <Text style={styles.upvoteIcon}>△</Text>
-            <Text style={styles.dot}>•</Text>
-            <Text style={styles.comments}>
-              {formatScore(post.num_comments)} comments
-            </Text>
-          </View>
+          <TouchableOpacity onPress={openDetail} activeOpacity={0.7}>
+            <View style={styles.footer}>
+              <Text style={styles.score}>{formatScore(post.score)}</Text>
+              <Text style={styles.upvoteIcon}>△</Text>
+              <Text style={styles.dot}>•</Text>
+              <Text style={styles.comments}>
+                {formatScore(post.num_comments)} comments
+              </Text>
+            </View>
+          </TouchableOpacity>
         </Animated.View>
       </GestureDetector>
 
