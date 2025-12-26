@@ -25,7 +25,6 @@ const SWIPE_THRESHOLD = 100;
 
 interface PostCardProps {
   post: RedditPost;
-  onHide?: (postId: string) => void;
 }
 
 function formatTimeAgo(utcSeconds: number): string {
@@ -102,7 +101,7 @@ function getGalleryImages(post: RedditPost): ImageData[] {
     .filter((img): img is ImageData => img !== null);
 }
 
-export function PostCard({ post, onHide }: PostCardProps) {
+export function PostCard({ post }: PostCardProps) {
   const imageData = useMemo(() => getImageUrl(post), [post]);
   const galleryImages = useMemo(() => getGalleryImages(post), [post]);
   const isGallery = galleryImages.length > 1;
@@ -139,20 +138,15 @@ export function PostCard({ post, onHide }: PostCardProps) {
     Linking.openURL(url);
   }, [post.permalink]);
 
-  const hidePost = useCallback(() => {
-    onHide?.(post.id);
-  }, [post.id, onHide]);
-
   const panGesture = Gesture.Pan()
     .activeOffsetX([-20, 20])
     .onUpdate((event) => {
-      translateX.value = event.translationX;
+      // Only allow swipe right (positive translationX)
+      translateX.value = Math.max(0, event.translationX);
     })
     .onEnd((event) => {
       if (event.translationX > SWIPE_THRESHOLD) {
         runOnJS(openInBrowser)();
-      } else if (event.translationX < -SWIPE_THRESHOLD) {
-        runOnJS(hidePost)();
       }
       translateX.value = withSpring(0);
     });
@@ -164,7 +158,6 @@ export function PostCard({ post, onHide }: PostCardProps) {
   return (
     <View style={styles.swipeContainer}>
       <View style={styles.swipeBackgroundLeft} />
-      <View style={styles.swipeBackgroundRight} />
       <GestureDetector gesture={panGesture}>
         <Animated.View style={[styles.container, animatedStyle]}>
           <View style={styles.header}>
@@ -259,14 +252,6 @@ const styles = StyleSheet.create({
     bottom: 0,
     width: SWIPE_THRESHOLD + 20,
     backgroundColor: "#007AFF",
-  },
-  swipeBackgroundRight: {
-    position: "absolute",
-    top: 0,
-    right: 0,
-    bottom: 0,
-    width: SWIPE_THRESHOLD + 20,
-    backgroundColor: "#FF3B30",
   },
   container: {
     backgroundColor: colors.surface,

@@ -12,7 +12,7 @@ import { RedditPost } from '../types/reddit';
 import { PostCard } from '../components/PostCard';
 import { colors } from '../constants/colors';
 
-export function PopularScreen() {
+export function Popular() {
   const [posts, setPosts] = useState<RedditPost[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -57,10 +57,6 @@ export function PopularScreen() {
     loadPosts();
   }, [loadPosts]);
 
-  const handleHidePost = useCallback((postId: string) => {
-    setPosts((prev) => prev.filter((p) => p.id !== postId));
-  }, []);
-
   useEffect(() => {
     loadPosts();
   }, [loadPosts]);
@@ -85,7 +81,7 @@ export function PopularScreen() {
     <FlatList
       data={posts}
       keyExtractor={(item) => item.id}
-      renderItem={({ item }) => <PostCard post={item} onHide={handleHidePost} />}
+      renderItem={({ item }) => <PostCard post={item} />}
       refreshControl={
         <RefreshControl
           refreshing={refreshing}

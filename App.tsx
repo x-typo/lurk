@@ -5,32 +5,37 @@ import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
 import { AuthProvider } from './src/context/AuthContext';
 import { TopTabBar } from './src/components/TopTabBar';
-import { PopularScreen } from './src/screens/PopularScreen';
-import { HomeScreen } from './src/screens/HomeScreen';
+import { Popular } from './src/screens/Popular';
+import { Subreddits } from './src/screens/Subreddits';
 import { colors } from './src/constants/colors';
 
 const TABS = [
   { key: 'popular', label: 'Popular' },
-  { key: 'home', label: 'Home' },
+  { key: 'subreddits', label: 'Subreddits' },
 ];
 
 export default function App() {
   const [activeTab, setActiveTab] = useState('popular');
+  const [subredditsResetKey, setSubredditsResetKey] = useState(0);
 
   const handleTabPress = useCallback((key: string) => {
+    if (key === 'subreddits' && activeTab === 'subreddits') {
+      // Tapping Subreddits while already on it → reset to picker
+      setSubredditsResetKey((prev) => prev + 1);
+    }
     setActiveTab(key);
-  }, []);
+  }, [activeTab]);
 
   const content = useMemo(() => {
     switch (activeTab) {
       case 'popular':
-        return <PopularScreen />;
-      case 'home':
-        return <HomeScreen />;
+        return <Popular />;
+      case 'subreddits':
+        return <Subreddits resetKey={subredditsResetKey} />;
       default:
         return null;
     }
-  }, [activeTab]);
+  }, [activeTab, subredditsResetKey]);
 
   return (
     <GestureHandlerRootView style={styles.root}>
