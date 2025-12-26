@@ -1,5 +1,5 @@
 import React, { useState, useCallback, useEffect } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, Linking } from 'react-native';
 import { SubredditFeed } from '../components/SubredditFeed';
 import { colors } from '../constants/colors';
 
@@ -9,6 +9,8 @@ const SUBREDDITS = [
   { name: 'r/Codex', key: 'codex' },
   { name: 'r/Singularity', key: 'singularity' },
 ];
+
+const HOME_URL = 'https://reddit.com/top/?sort=top&t=day';
 
 interface SubredditsProps {
   resetKey?: number;
@@ -37,8 +39,19 @@ export function Subreddits({ resetKey }: SubredditsProps) {
     );
   }
 
+  const openHome = useCallback(() => {
+    Linking.openURL(HOME_URL);
+  }, []);
+
   return (
     <View style={styles.pickerContainer}>
+      <TouchableOpacity
+        style={styles.button}
+        onPress={openHome}
+        activeOpacity={0.7}
+      >
+        <Text style={styles.buttonText}>Home</Text>
+      </TouchableOpacity>
       {SUBREDDITS.map((sub) => (
         <TouchableOpacity
           key={sub.key}
