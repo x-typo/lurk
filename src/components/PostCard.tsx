@@ -1,16 +1,23 @@
-import React, { useMemo, useCallback } from 'react';
-import { View, Text, Image, StyleSheet, Dimensions, Linking } from 'react-native';
-import { Gesture, GestureDetector } from 'react-native-gesture-handler';
+import React, { useMemo, useCallback } from "react";
+import {
+  View,
+  Text,
+  Image,
+  StyleSheet,
+  Dimensions,
+  Linking,
+} from "react-native";
+import { Gesture, GestureDetector } from "react-native-gesture-handler";
 import Animated, {
   useSharedValue,
   useAnimatedStyle,
   withSpring,
   runOnJS,
-} from 'react-native-reanimated';
-import { RedditPost } from '../types/reddit';
-import { colors } from '../constants/colors';
+} from "react-native-reanimated";
+import { RedditPost } from "../types/reddit";
+import { colors } from "../constants/colors";
 
-const SCREEN_WIDTH = Dimensions.get('window').width;
+const SCREEN_WIDTH = Dimensions.get("window").width;
 const SWIPE_THRESHOLD = 100;
 
 interface PostCardProps {
@@ -21,7 +28,7 @@ function formatTimeAgo(utcSeconds: number): string {
   const now = Date.now() / 1000;
   const diff = now - utcSeconds;
 
-  if (diff < 60) return 'now';
+  if (diff < 60) return "now";
   if (diff < 3600) return `${Math.floor(diff / 60)}m`;
   if (diff < 86400) return `${Math.floor(diff / 3600)}h`;
   if (diff < 604800) return `${Math.floor(diff / 86400)}d`;
@@ -35,10 +42,12 @@ function formatScore(score: number): string {
 }
 
 function decodeHtmlEntities(str: string): string {
-  return str.replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>');
+  return str.replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">");
 }
 
-function getImageUrl(post: RedditPost): { url: string; width: number; height: number } | null {
+function getImageUrl(
+  post: RedditPost
+): { url: string; width: number; height: number } | null {
   // Check for preview images first
   if (post.preview?.images?.[0]?.source) {
     const source = post.preview.images[0].source;
@@ -98,39 +107,39 @@ export function PostCard({ post }: PostCardProps) {
 
   return (
     <View style={styles.swipeContainer}>
-      <View style={styles.swipeBackground}>
-        <Text style={styles.swipeIcon}>Safari</Text>
-      </View>
+      <View style={styles.swipeBackground} />
       <GestureDetector gesture={panGesture}>
         <Animated.View style={[styles.container, animatedStyle]}>
           <View style={styles.header}>
-        <Text style={styles.subreddit}>{post.subreddit_name_prefixed}</Text>
-        <Text style={styles.dot}>•</Text>
-        <Text style={styles.time}>{formatTimeAgo(post.created_utc)}</Text>
-      </View>
+            <Text style={styles.subreddit}>{post.subreddit_name_prefixed}</Text>
+            <Text style={styles.dot}>•</Text>
+            <Text style={styles.time}>{formatTimeAgo(post.created_utc)}</Text>
+          </View>
 
-      <Text style={styles.title}>{post.title}</Text>
+          <Text style={styles.title}>{post.title}</Text>
 
-      {imageData && (
-        <View style={styles.imageContainer}>
-          <Image
-            source={{ uri: imageData.url }}
-            style={[styles.image, { height: imageHeight }]}
-            resizeMode="contain"
-          />
-          {post.is_video && (
-            <View style={styles.videoIndicator}>
-              <Text style={styles.videoText}>▶</Text>
+          {imageData && (
+            <View style={styles.imageContainer}>
+              <Image
+                source={{ uri: imageData.url }}
+                style={[styles.image, { height: imageHeight }]}
+                resizeMode="contain"
+              />
+              {post.is_video && (
+                <View style={styles.videoIndicator}>
+                  <Text style={styles.videoText}>▶</Text>
+                </View>
+              )}
             </View>
           )}
-        </View>
-      )}
 
-      <View style={styles.footer}>
-        <Text style={styles.score}>{formatScore(post.score)}</Text>
-        <Text style={styles.dot}>•</Text>
-        <Text style={styles.comments}>{formatScore(post.num_comments)} comments</Text>
-      </View>
+          <View style={styles.footer}>
+            <Text style={styles.score}>{formatScore(post.score)}</Text>
+            <Text style={styles.dot}>•</Text>
+            <Text style={styles.comments}>
+              {formatScore(post.num_comments)} comments
+            </Text>
+          </View>
         </Animated.View>
       </GestureDetector>
     </View>
@@ -139,23 +148,18 @@ export function PostCard({ post }: PostCardProps) {
 
 const styles = StyleSheet.create({
   swipeContainer: {
-    position: 'relative',
-    overflow: 'hidden',
+    position: "relative",
+    overflow: "hidden",
   },
   swipeBackground: {
-    position: 'absolute',
+    position: "absolute",
     top: 0,
     left: 0,
     bottom: 0,
     width: SWIPE_THRESHOLD + 20,
-    backgroundColor: '#007AFF',
-    justifyContent: 'center',
+    backgroundColor: "#007AFF",
+    justifyContent: "center",
     paddingLeft: 20,
-  },
-  swipeIcon: {
-    color: colors.text,
-    fontSize: 14,
-    fontWeight: '600',
   },
   container: {
     backgroundColor: colors.surface,
@@ -164,14 +168,14 @@ const styles = StyleSheet.create({
     borderBottomColor: colors.border,
   },
   header: {
-    flexDirection: 'row',
-    alignItems: 'center',
+    flexDirection: "row",
+    alignItems: "center",
     marginBottom: 8,
   },
   subreddit: {
     color: colors.primary,
     fontSize: 13,
-    fontWeight: '600',
+    fontWeight: "600",
   },
   dot: {
     color: colors.textMuted,
@@ -191,31 +195,31 @@ const styles = StyleSheet.create({
   imageContainer: {
     marginHorizontal: -16,
     marginBottom: 12,
-    position: 'relative',
+    position: "relative",
   },
   image: {
-    width: '100%',
+    width: "100%",
     backgroundColor: colors.surfaceElevated,
   },
   videoIndicator: {
-    position: 'absolute',
-    top: '50%',
-    left: '50%',
+    position: "absolute",
+    top: "50%",
+    left: "50%",
     transform: [{ translateX: -20 }, { translateY: -20 }],
     width: 40,
     height: 40,
     borderRadius: 20,
-    backgroundColor: 'rgba(0, 0, 0, 0.7)',
-    justifyContent: 'center',
-    alignItems: 'center',
+    backgroundColor: "rgba(0, 0, 0, 0.7)",
+    justifyContent: "center",
+    alignItems: "center",
   },
   videoText: {
     color: colors.text,
     fontSize: 16,
   },
   footer: {
-    flexDirection: 'row',
-    alignItems: 'center',
+    flexDirection: "row",
+    alignItems: "center",
   },
   score: {
     color: colors.textSecondary,
