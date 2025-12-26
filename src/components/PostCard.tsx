@@ -1,9 +1,17 @@
-import React, { useMemo } from 'react';
-import { View, Text, Image, StyleSheet, Dimensions } from 'react-native';
+import React, { useMemo, useCallback } from 'react';
+import { View, Text, Image, StyleSheet, Dimensions, Linking } from 'react-native';
+import { Gesture, GestureDetector } from 'react-native-gesture-handler';
+import Animated, {
+  useSharedValue,
+  useAnimatedStyle,
+  withSpring,
+  runOnJS,
+} from 'react-native-reanimated';
 import { RedditPost } from '../types/reddit';
 import { colors } from '../constants/colors';
 
 const SCREEN_WIDTH = Dimensions.get('window').width;
+const SWIPE_THRESHOLD = 100;
 
 interface PostCardProps {
   post: RedditPost;
@@ -59,18 +67,43 @@ function getImageUrl(post: RedditPost): { url: string; width: number; height: nu
 
 export function PostCard({ post }: PostCardProps) {
   const imageData = useMemo(() => getImageUrl(post), [post]);
+  const translateX = useSharedValue(0);
 
   const imageHeight = useMemo(() => {
     if (!imageData) return 0;
     const aspectRatio = imageData.width / imageData.height;
-    const maxHeight = 400;
-    const calculatedHeight = SCREEN_WIDTH / aspectRatio;
-    return Math.min(calculatedHeight, maxHeight);
+    return SCREEN_WIDTH / aspectRatio;
   }, [imageData]);
 
+  const openInBrowser = useCallback(() => {
+    const url = `https://www.reddit.com${post.permalink}`;
+    Linking.openURL(url);
+  }, [post.permalink]);
+
+  const panGesture = Gesture.Pan()
+    .activeOffsetX([-20, 20])
+    .onUpdate((event) => {
+      translateX.value = event.translationX;
+    })
+    .onEnd((event) => {
+      if (event.translationX > SWIPE_THRESHOLD) {
+        runOnJS(openInBrowser)();
+      }
+      translateX.value = withSpring(0);
+    });
+
+  const animatedStyle = useAnimatedStyle(() => ({
+    transform: [{ translateX: translateX.value }],
+  }));
+
   return (
-    <View style={styles.container}>
-      <View style={styles.header}>
+    <View style={styles.swipeContainer}>
+      <View style={styles.swipeBackground}>
+        <Text style={styles.swipeIcon}>Safari</Text>
+      </View>
+      <GestureDetector gesture={panGesture}>
+        <Animated.View style={[styles.container, animatedStyle]}>
+          <View style={styles.header}>
         <Text style={styles.subreddit}>{post.subreddit_name_prefixed}</Text>
         <Text style={styles.dot}>•</Text>
         <Text style={styles.time}>{formatTimeAgo(post.created_utc)}</Text>
@@ -83,7 +116,7 @@ export function PostCard({ post }: PostCardProps) {
           <Image
             source={{ uri: imageData.url }}
             style={[styles.image, { height: imageHeight }]}
-            resizeMode="cover"
+            resizeMode="contain"
           />
           {post.is_video && (
             <View style={styles.videoIndicator}>
@@ -98,11 +131,32 @@ export function PostCard({ post }: PostCardProps) {
         <Text style={styles.dot}>•</Text>
         <Text style={styles.comments}>{formatScore(post.num_comments)} comments</Text>
       </View>
+        </Animated.View>
+      </GestureDetector>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
+  swipeContainer: {
+    position: 'relative',
+    overflow: 'hidden',
+  },
+  swipeBackground: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    bottom: 0,
+    width: SWIPE_THRESHOLD + 20,
+    backgroundColor: '#007AFF',
+    justifyContent: 'center',
+    paddingLeft: 20,
+  },
+  swipeIcon: {
+    color: colors.text,
+    fontSize: 14,
+    fontWeight: '600',
+  },
   container: {
     backgroundColor: colors.surface,
     padding: 16,
