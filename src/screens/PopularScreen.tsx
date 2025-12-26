@@ -57,6 +57,10 @@ export function PopularScreen() {
     loadPosts();
   }, [loadPosts]);
 
+  const handleHidePost = useCallback((postId: string) => {
+    setPosts((prev) => prev.filter((p) => p.id !== postId));
+  }, []);
+
   useEffect(() => {
     loadPosts();
   }, [loadPosts]);
@@ -81,7 +85,7 @@ export function PopularScreen() {
     <FlatList
       data={posts}
       keyExtractor={(item) => item.id}
-      renderItem={({ item }) => <PostCard post={item} />}
+      renderItem={({ item }) => <PostCard post={item} onHide={handleHidePost} />}
       refreshControl={
         <RefreshControl
           refreshing={refreshing}

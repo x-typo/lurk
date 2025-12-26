@@ -1,4 +1,4 @@
-import React, { useMemo, useCallback } from "react";
+import React, { useMemo, useCallback, useState } from "react";
 import {
   View,
   Text,
@@ -6,7 +6,10 @@ import {
   StyleSheet,
   Dimensions,
   Linking,
+  TouchableOpacity,
 } from "react-native";
+import { ImageViewer } from "./ImageViewer";
+import { VideoPlayer } from "./VideoPlayer";
 import { Gesture, GestureDetector } from "react-native-gesture-handler";
 import Animated, {
   useSharedValue,
@@ -22,6 +25,7 @@ const SWIPE_THRESHOLD = 100;
 
 interface PostCardProps {
   post: RedditPost;
+  onHide?: (postId: string) => void;
 }
 
 function formatTimeAgo(utcSeconds: number): string {
@@ -74,9 +78,19 @@ function getImageUrl(
   return null;
 }
 
-export function PostCard({ post }: PostCardProps) {
+export function PostCard({ post, onHide }: PostCardProps) {
   const imageData = useMemo(() => getImageUrl(post), [post]);
+  const [imageViewerVisible, setImageViewerVisible] = useState(false);
+  const [videoPlayerVisible, setVideoPlayerVisible] = useState(false);
   const translateX = useSharedValue(0);
+
+  const videoData = useMemo(() => {
+    if (post.is_video && post.media?.reddit_video) {
+      const { fallback_url, width, height } = post.media.reddit_video;
+      return { url: fallback_url, width, height };
+    }
+    return null;
+  }, [post]);
 
   const imageHeight = useMemo(() => {
     if (!imageData) return 0;
@@ -89,6 +103,10 @@ export function PostCard({ post }: PostCardProps) {
     Linking.openURL(url);
   }, [post.permalink]);
 
+  const hidePost = useCallback(() => {
+    onHide?.(post.id);
+  }, [post.id, onHide]);
+
   const panGesture = Gesture.Pan()
     .activeOffsetX([-20, 20])
     .onUpdate((event) => {
@@ -97,6 +115,8 @@ export function PostCard({ post }: PostCardProps) {
     .onEnd((event) => {
       if (event.translationX > SWIPE_THRESHOLD) {
         runOnJS(openInBrowser)();
+      } else if (event.translationX < -SWIPE_THRESHOLD) {
+        runOnJS(hidePost)();
       }
       translateX.value = withSpring(0);
     });
@@ -107,7 +127,8 @@ export function PostCard({ post }: PostCardProps) {
 
   return (
     <View style={styles.swipeContainer}>
-      <View style={styles.swipeBackground} />
+      <View style={styles.swipeBackgroundLeft} />
+      <View style={styles.swipeBackgroundRight} />
       <GestureDetector gesture={panGesture}>
         <Animated.View style={[styles.container, animatedStyle]}>
           <View style={styles.header}>
@@ -119,7 +140,17 @@ export function PostCard({ post }: PostCardProps) {
           <Text style={styles.title}>{post.title}</Text>
 
           {imageData && (
-            <View style={styles.imageContainer}>
+            <TouchableOpacity
+              activeOpacity={0.9}
+              onPress={() => {
+                if (videoData) {
+                  setVideoPlayerVisible(true);
+                } else {
+                  setImageViewerVisible(true);
+                }
+              }}
+              style={styles.imageContainer}
+            >
               <Image
                 source={{ uri: imageData.url }}
                 style={[styles.image, { height: imageHeight }]}
@@ -130,7 +161,7 @@ export function PostCard({ post }: PostCardProps) {
                   <Text style={styles.videoText}>▶</Text>
                 </View>
               )}
-            </View>
+            </TouchableOpacity>
           )}
 
           <View style={styles.footer}>
@@ -142,6 +173,26 @@ export function PostCard({ post }: PostCardProps) {
           </View>
         </Animated.View>
       </GestureDetector>
+
+      {imageData && (
+        <ImageViewer
+          visible={imageViewerVisible}
+          imageUrl={imageData.url}
+          imageWidth={imageData.width}
+          imageHeight={imageData.height}
+          onClose={() => setImageViewerVisible(false)}
+        />
+      )}
+
+      {videoData && (
+        <VideoPlayer
+          visible={videoPlayerVisible}
+          videoUrl={videoData.url}
+          videoWidth={videoData.width}
+          videoHeight={videoData.height}
+          onClose={() => setVideoPlayerVisible(false)}
+        />
+      )}
     </View>
   );
 }
@@ -151,15 +202,21 @@ const styles = StyleSheet.create({
     position: "relative",
     overflow: "hidden",
   },
-  swipeBackground: {
+  swipeBackgroundLeft: {
     position: "absolute",
     top: 0,
     left: 0,
     bottom: 0,
     width: SWIPE_THRESHOLD + 20,
     backgroundColor: "#007AFF",
-    justifyContent: "center",
-    paddingLeft: 20,
+  },
+  swipeBackgroundRight: {
+    position: "absolute",
+    top: 0,
+    right: 0,
+    bottom: 0,
+    width: SWIPE_THRESHOLD + 20,
+    backgroundColor: "#FF3B30",
   },
   container: {
     backgroundColor: colors.surface,
