@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect } from "react";
+import React, { useCallback, useEffect, useState } from "react";
 import {
   Modal,
   View,
@@ -7,6 +7,8 @@ import {
   StatusBar,
   ActivityIndicator,
   Text,
+  TouchableOpacity,
+  Pressable,
 } from "react-native";
 import { useVideoPlayer, VideoView } from "expo-video";
 import { useEvent } from "expo";
@@ -22,10 +24,12 @@ import Animated, {
   runOnJS,
   interpolate,
 } from "react-native-reanimated";
+import { Ionicons } from "@expo/vector-icons";
 import { colors } from "../constants/colors";
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get("window");
 const DISMISS_THRESHOLD = 100;
+const SKIP_SECONDS = 10;
 
 interface VideoPlayerProps {
   visible: boolean;
@@ -43,6 +47,8 @@ export function VideoPlayer({
   onClose,
 }: VideoPlayerProps) {
   const translateY = useSharedValue(0);
+  const [isPlaying, setIsPlaying] = useState(true);
+  const [showControls, setShowControls] = useState(true);
 
   const aspectRatio = videoWidth / videoHeight;
 
@@ -62,13 +68,44 @@ export function VideoPlayer({
     status: player.status,
   });
 
+  const { isPlaying: playerIsPlaying } = useEvent(player, "playingChange", {
+    isPlaying: player.playing,
+  });
+
+  useEffect(() => {
+    setIsPlaying(playerIsPlaying);
+  }, [playerIsPlaying]);
+
   useEffect(() => {
     if (visible) {
       player.play();
+      setIsPlaying(true);
+      setShowControls(true);
     } else {
       player.pause();
+      setIsPlaying(false);
     }
   }, [visible, player]);
+
+  const togglePlayPause = useCallback(() => {
+    if (player.playing) {
+      player.pause();
+    } else {
+      player.play();
+    }
+  }, [player]);
+
+  const skipForward = useCallback(() => {
+    player.seekBy(SKIP_SECONDS);
+  }, [player]);
+
+  const skipBackward = useCallback(() => {
+    player.seekBy(-SKIP_SECONDS);
+  }, [player]);
+
+  const toggleControls = useCallback(() => {
+    setShowControls((prev) => !prev);
+  }, []);
 
   const handleClose = useCallback(() => {
     player.pause();
@@ -89,12 +126,6 @@ export function VideoPlayer({
         translateY.value = withSpring(0);
       }
     });
-
-  const tapGesture = Gesture.Tap().onEnd(() => {
-    runOnJS(handleClose)();
-  });
-
-  const composedGesture = Gesture.Race(panGesture, tapGesture);
 
   const animatedContainerStyle = useAnimatedStyle(() => ({
     transform: [{ translateY: translateY.value }],
@@ -124,7 +155,7 @@ export function VideoPlayer({
       <GestureHandlerRootView style={styles.gestureRoot}>
         <StatusBar hidden />
         <Animated.View style={[styles.overlay, animatedOverlayStyle]} />
-        <GestureDetector gesture={composedGesture}>
+        <GestureDetector gesture={panGesture}>
           <Animated.View style={[styles.gestureArea, animatedContainerStyle]}>
             {isLoading && (
               <View style={styles.loadingContainer}>
@@ -136,13 +167,67 @@ export function VideoPlayer({
                 <Text style={styles.errorText}>Failed to load video</Text>
               </View>
             ) : (
-              <VideoView
-                player={player}
-                style={{ width: displayWidth, height: displayHeight }}
-                contentFit="contain"
-                nativeControls
-              />
+              <Pressable onPress={toggleControls} style={styles.videoContainer}>
+                <VideoView
+                  player={player}
+                  style={{ width: displayWidth, height: displayHeight }}
+                  contentFit="contain"
+                  nativeControls={false}
+                />
+                {showControls && (
+                  <View style={styles.controlsOverlay}>
+                    <View style={styles.controlsRow}>
+                      <TouchableOpacity
+                        onPress={skipBackward}
+                        style={styles.controlButton}
+                        activeOpacity={0.7}
+                      >
+                        <Ionicons
+                          name="play-back"
+                          size={32}
+                          color={colors.text}
+                        />
+                        <Text style={styles.skipText}>10</Text>
+                      </TouchableOpacity>
+
+                      <TouchableOpacity
+                        onPress={togglePlayPause}
+                        style={styles.playPauseButton}
+                        activeOpacity={0.7}
+                      >
+                        <Ionicons
+                          name={isPlaying ? "pause" : "play"}
+                          size={48}
+                          color={colors.text}
+                        />
+                      </TouchableOpacity>
+
+                      <TouchableOpacity
+                        onPress={skipForward}
+                        style={styles.controlButton}
+                        activeOpacity={0.7}
+                      >
+                        <Ionicons
+                          name="play-forward"
+                          size={32}
+                          color={colors.text}
+                        />
+                        <Text style={styles.skipText}>10</Text>
+                      </TouchableOpacity>
+                    </View>
+                  </View>
+                )}
+              </Pressable>
             )}
+
+            {/* Close button */}
+            <TouchableOpacity
+              onPress={handleClose}
+              style={styles.closeButton}
+              activeOpacity={0.7}
+            >
+              <Ionicons name="close" size={28} color={colors.text} />
+            </TouchableOpacity>
           </Animated.View>
         </GestureDetector>
       </GestureHandlerRootView>
@@ -163,6 +248,10 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     alignItems: "center",
   },
+  videoContainer: {
+    justifyContent: "center",
+    alignItems: "center",
+  },
   loadingContainer: {
     position: "absolute",
     justifyContent: "center",
@@ -174,5 +263,45 @@ const styles = StyleSheet.create({
   errorText: {
     color: colors.textSecondary,
     fontSize: 16,
+  },
+  controlsOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    justifyContent: "center",
+    alignItems: "center",
+    backgroundColor: "rgba(0, 0, 0, 0.3)",
+  },
+  controlsRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 40,
+  },
+  controlButton: {
+    alignItems: "center",
+    justifyContent: "center",
+    padding: 12,
+  },
+  playPauseButton: {
+    width: 80,
+    height: 80,
+    borderRadius: 40,
+    backgroundColor: "rgba(0, 0, 0, 0.5)",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  skipText: {
+    color: colors.text,
+    fontSize: 12,
+    marginTop: 2,
+  },
+  closeButton: {
+    position: "absolute",
+    top: 50,
+    right: 20,
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: "rgba(0, 0, 0, 0.5)",
+    alignItems: "center",
+    justifyContent: "center",
   },
 });
