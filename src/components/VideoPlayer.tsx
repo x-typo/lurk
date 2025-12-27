@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useEffect, useState, useRef } from "react";
 import {
   Modal,
   View,
@@ -49,6 +49,7 @@ export function VideoPlayer({
   const translateY = useSharedValue(0);
   const [isPlaying, setIsPlaying] = useState(true);
   const [showControls, setShowControls] = useState(true);
+  const hideControlsTimer = useRef<NodeJS.Timeout | null>(null);
 
   const aspectRatio = videoWidth / videoHeight;
 
@@ -76,36 +77,72 @@ export function VideoPlayer({
     setIsPlaying(playerIsPlaying);
   }, [playerIsPlaying]);
 
+  const startHideTimer = useCallback(() => {
+    if (hideControlsTimer.current) {
+      clearTimeout(hideControlsTimer.current);
+    }
+    hideControlsTimer.current = setTimeout(() => {
+      if (player.playing) {
+        setShowControls(false);
+      }
+    }, 1000);
+  }, [player]);
+
+  const clearHideTimer = useCallback(() => {
+    if (hideControlsTimer.current) {
+      clearTimeout(hideControlsTimer.current);
+      hideControlsTimer.current = null;
+    }
+  }, []);
+
   useEffect(() => {
     if (visible) {
       player.play();
       setIsPlaying(true);
       setShowControls(true);
+      startHideTimer();
     } else {
       player.pause();
       setIsPlaying(false);
+      clearHideTimer();
     }
-  }, [visible, player]);
+  }, [visible, player, startHideTimer, clearHideTimer]);
 
   const togglePlayPause = useCallback(() => {
     if (player.playing) {
       player.pause();
+      clearHideTimer();
     } else {
       player.play();
+      startHideTimer();
     }
-  }, [player]);
+  }, [player, startHideTimer, clearHideTimer]);
 
   const skipForward = useCallback(() => {
     player.seekBy(SKIP_SECONDS);
-  }, [player]);
+    if (player.playing) {
+      startHideTimer();
+    }
+  }, [player, startHideTimer]);
 
   const skipBackward = useCallback(() => {
     player.seekBy(-SKIP_SECONDS);
-  }, [player]);
+    if (player.playing) {
+      startHideTimer();
+    }
+  }, [player, startHideTimer]);
 
   const toggleControls = useCallback(() => {
-    setShowControls((prev) => !prev);
-  }, []);
+    setShowControls((prev) => {
+      const newValue = !prev;
+      if (newValue && player.playing) {
+        startHideTimer();
+      } else {
+        clearHideTimer();
+      }
+      return newValue;
+    });
+  }, [player, startHideTimer, clearHideTimer]);
 
   const handleClose = useCallback(() => {
     player.pause();
@@ -221,13 +258,15 @@ export function VideoPlayer({
             )}
 
             {/* Close button */}
-            <TouchableOpacity
-              onPress={handleClose}
-              style={styles.closeButton}
-              activeOpacity={0.7}
-            >
-              <Ionicons name="close" size={28} color={colors.text} />
-            </TouchableOpacity>
+            {showControls && (
+              <TouchableOpacity
+                onPress={handleClose}
+                style={styles.closeButton}
+                activeOpacity={0.7}
+              >
+                <Ionicons name="close" size={28} color={colors.text} />
+              </TouchableOpacity>
+            )}
           </Animated.View>
         </GestureDetector>
       </GestureHandlerRootView>
