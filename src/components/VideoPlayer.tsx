@@ -73,9 +73,24 @@ export function VideoPlayer({
     isPlaying: player.playing,
   });
 
+  const [currentTime, setCurrentTime] = useState(0);
+  const [duration, setDuration] = useState(0);
+  const progressBarWidth = useRef(0);
+
   useEffect(() => {
     setIsPlaying(playerIsPlaying);
   }, [playerIsPlaying]);
+
+  useEffect(() => {
+    if (!visible || !player) return;
+
+    const interval = setInterval(() => {
+      setCurrentTime(player.currentTime);
+      setDuration(player.duration);
+    }, 250);
+
+    return () => clearInterval(interval);
+  }, [visible, player]);
 
   const startHideTimer = useCallback(() => {
     if (hideControlsTimer.current) {
@@ -131,6 +146,27 @@ export function VideoPlayer({
       startHideTimer();
     }
   }, [player, startHideTimer]);
+
+  const handleProgressBarPress = useCallback(
+    (event: { nativeEvent: { locationX: number } }) => {
+      if (duration > 0 && progressBarWidth.current > 0) {
+        const ratio = event.nativeEvent.locationX / progressBarWidth.current;
+        const seekTime = ratio * duration;
+        player.currentTime = seekTime;
+        if (player.playing) {
+          startHideTimer();
+        }
+      }
+    },
+    [duration, player, startHideTimer]
+  );
+
+  const formatTime = useCallback((seconds: number) => {
+    if (!isFinite(seconds) || seconds < 0) return "0:00";
+    const mins = Math.floor(seconds / 60);
+    const secs = Math.floor(seconds % 60);
+    return `${mins}:${secs.toString().padStart(2, "0")}`;
+  }, []);
 
   const toggleControls = useCallback(() => {
     setShowControls((prev) => {
@@ -252,6 +288,30 @@ export function VideoPlayer({
                         <Text style={styles.skipText}>10</Text>
                       </TouchableOpacity>
                     </View>
+
+                    {/* Progress bar */}
+                    <View style={styles.progressContainer}>
+                      <Text style={styles.timeText}>{formatTime(currentTime)}</Text>
+                      <Pressable
+                        style={styles.progressBarContainer}
+                        onPress={handleProgressBarPress}
+                        onLayout={(e) => {
+                          progressBarWidth.current = e.nativeEvent.layout.width;
+                        }}
+                      >
+                        <View style={styles.progressBarBackground}>
+                          <View
+                            style={[
+                              styles.progressBarFill,
+                              {
+                                width: duration > 0 ? `${(currentTime / duration) * 100}%` : "0%",
+                              },
+                            ]}
+                          />
+                        </View>
+                      </Pressable>
+                      <Text style={styles.timeText}>{formatTime(duration)}</Text>
+                    </View>
                   </View>
                 )}
               </Pressable>
@@ -322,8 +382,6 @@ const styles = StyleSheet.create({
   playPauseButton: {
     width: 80,
     height: 80,
-    borderRadius: 40,
-    backgroundColor: "rgba(0, 0, 0, 0.5)",
     alignItems: "center",
     justifyContent: "center",
   },
@@ -342,5 +400,36 @@ const styles = StyleSheet.create({
     backgroundColor: "rgba(0, 0, 0, 0.5)",
     alignItems: "center",
     justifyContent: "center",
+  },
+  progressContainer: {
+    position: "absolute",
+    bottom: 20,
+    left: 20,
+    right: 20,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+  },
+  timeText: {
+    color: colors.text,
+    fontSize: 12,
+    minWidth: 40,
+    textAlign: "center",
+  },
+  progressBarContainer: {
+    flex: 1,
+    height: 30,
+    justifyContent: "center",
+  },
+  progressBarBackground: {
+    height: 4,
+    backgroundColor: "rgba(255, 255, 255, 0.3)",
+    borderRadius: 2,
+    overflow: "hidden",
+  },
+  progressBarFill: {
+    height: "100%",
+    backgroundColor: colors.primary,
+    borderRadius: 2,
   },
 });
