@@ -76,6 +76,9 @@ export function VideoPlayer({
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
   const progressBarWidth = useRef(0);
+  const progressBarX = useRef(0);
+  const [isScrubbing, setIsScrubbing] = useState(false);
+  const [scrubbingTime, setScrubbingTime] = useState(0);
 
   useEffect(() => {
     setIsPlaying(playerIsPlaying);
@@ -147,19 +150,49 @@ export function VideoPlayer({
     }
   }, [player, startHideTimer]);
 
-  const handleProgressBarPress = useCallback(
-    (event: { nativeEvent: { locationX: number } }) => {
+  const seekToPosition = useCallback(
+    (locationX: number) => {
       if (duration > 0 && progressBarWidth.current > 0) {
-        const ratio = event.nativeEvent.locationX / progressBarWidth.current;
+        const ratio = Math.max(0, Math.min(1, locationX / progressBarWidth.current));
         const seekTime = ratio * duration;
-        player.currentTime = seekTime;
-        if (player.playing) {
-          startHideTimer();
-        }
+        return seekTime;
       }
+      return 0;
     },
-    [duration, player, startHideTimer]
+    [duration]
   );
+
+  const startScrubbing = useCallback((time: number) => {
+    setIsScrubbing(true);
+    setScrubbingTime(time);
+    clearHideTimer();
+  }, [clearHideTimer]);
+
+  const updateScrubbing = useCallback((time: number) => {
+    setScrubbingTime(time);
+  }, []);
+
+  const endScrubbing = useCallback((time: number) => {
+    player.currentTime = time;
+    setIsScrubbing(false);
+    if (player.playing) {
+      startHideTimer();
+    }
+  }, [player, startHideTimer]);
+
+  const progressGesture = Gesture.Pan()
+    .onStart((event) => {
+      const seekTime = seekToPosition(event.x);
+      runOnJS(startScrubbing)(seekTime);
+    })
+    .onUpdate((event) => {
+      const seekTime = seekToPosition(event.x);
+      runOnJS(updateScrubbing)(seekTime);
+    })
+    .onEnd((event) => {
+      const seekTime = seekToPosition(event.x);
+      runOnJS(endScrubbing)(seekTime);
+    });
 
   const formatTime = useCallback((seconds: number) => {
     if (!isFinite(seconds) || seconds < 0) return "0:00";
@@ -291,25 +324,31 @@ export function VideoPlayer({
 
                     {/* Progress bar */}
                     <View style={styles.progressContainer}>
-                      <Text style={styles.timeText}>{formatTime(currentTime)}</Text>
-                      <Pressable
-                        style={styles.progressBarContainer}
-                        onPress={handleProgressBarPress}
-                        onLayout={(e) => {
-                          progressBarWidth.current = e.nativeEvent.layout.width;
-                        }}
-                      >
-                        <View style={styles.progressBarBackground}>
-                          <View
-                            style={[
-                              styles.progressBarFill,
-                              {
-                                width: duration > 0 ? `${(currentTime / duration) * 100}%` : "0%",
-                              },
-                            ]}
-                          />
+                      <Text style={styles.timeText}>
+                        {formatTime(isScrubbing ? scrubbingTime : currentTime)}
+                      </Text>
+                      <GestureDetector gesture={progressGesture}>
+                        <View
+                          style={styles.progressBarContainer}
+                          onLayout={(e) => {
+                            progressBarWidth.current = e.nativeEvent.layout.width;
+                            progressBarX.current = e.nativeEvent.layout.x;
+                          }}
+                        >
+                          <View style={styles.progressBarBackground}>
+                            <View
+                              style={[
+                                styles.progressBarFill,
+                                {
+                                  width: duration > 0
+                                    ? `${((isScrubbing ? scrubbingTime : currentTime) / duration) * 100}%`
+                                    : "0%",
+                                },
+                              ]}
+                            />
+                          </View>
                         </View>
-                      </Pressable>
+                      </GestureDetector>
                       <Text style={styles.timeText}>{formatTime(duration)}</Text>
                     </View>
                   </View>
