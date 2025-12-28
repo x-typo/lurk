@@ -181,6 +181,7 @@ export function VideoPlayer({
   }, [player, startHideTimer]);
 
   const progressGesture = Gesture.Pan()
+    .hitSlop({ vertical: 20 })
     .onStart((event) => {
       const seekTime = seekToPosition(event.x);
       runOnJS(startScrubbing)(seekTime);
@@ -193,6 +194,14 @@ export function VideoPlayer({
       const seekTime = seekToPosition(event.x);
       runOnJS(endScrubbing)(seekTime);
     });
+
+  const progressTapGesture = Gesture.Tap()
+    .onEnd((event) => {
+      const seekTime = seekToPosition(event.x);
+      runOnJS(endScrubbing)(seekTime);
+    });
+
+  const combinedProgressGesture = Gesture.Race(progressGesture, progressTapGesture);
 
   const formatTime = useCallback((seconds: number) => {
     if (!isFinite(seconds) || seconds < 0) return "0:00";
@@ -327,8 +336,8 @@ export function VideoPlayer({
                       <Text style={styles.timeText}>
                         {formatTime(isScrubbing ? scrubbingTime : currentTime)}
                       </Text>
-                      <GestureDetector gesture={progressGesture}>
-                        <View
+                      <GestureDetector gesture={combinedProgressGesture}>
+                        <Animated.View
                           style={styles.progressBarContainer}
                           onLayout={(e) => {
                             progressBarWidth.current = e.nativeEvent.layout.width;
@@ -347,7 +356,7 @@ export function VideoPlayer({
                               ]}
                             />
                           </View>
-                        </View>
+                        </Animated.View>
                       </GestureDetector>
                       <Text style={styles.timeText}>{formatTime(duration)}</Text>
                     </View>
