@@ -12,6 +12,7 @@ import {
 } from "react-native";
 import { useVideoPlayer, VideoView } from "expo-video";
 import { useEvent } from "expo";
+import Slider from "@react-native-community/slider";
 import {
   GestureHandlerRootView,
   Gesture,
@@ -75,8 +76,6 @@ export function VideoPlayer({
 
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
-  const progressBarWidth = useRef(0);
-  const progressBarX = useRef(0);
   const [isScrubbing, setIsScrubbing] = useState(false);
   const [scrubbingTime, setScrubbingTime] = useState(0);
 
@@ -88,12 +87,14 @@ export function VideoPlayer({
     if (!visible || !player) return;
 
     const interval = setInterval(() => {
-      setCurrentTime(player.currentTime);
+      if (!isScrubbing) {
+        setCurrentTime(player.currentTime);
+      }
       setDuration(player.duration);
     }, 250);
 
     return () => clearInterval(interval);
-  }, [visible, player]);
+  }, [visible, player, isScrubbing]);
 
   const startHideTimer = useCallback(() => {
     if (hideControlsTimer.current) {
@@ -103,7 +104,7 @@ export function VideoPlayer({
       if (player.playing) {
         setShowControls(false);
       }
-    }, 1000);
+    }, 2000);
   }, [player]);
 
   const clearHideTimer = useCallback(() => {
@@ -150,58 +151,27 @@ export function VideoPlayer({
     }
   }, [player, startHideTimer]);
 
-  const seekToPosition = useCallback(
-    (locationX: number) => {
-      if (duration > 0 && progressBarWidth.current > 0) {
-        const ratio = Math.max(0, Math.min(1, locationX / progressBarWidth.current));
-        const seekTime = ratio * duration;
-        return seekTime;
-      }
-      return 0;
-    },
-    [duration]
-  );
-
-  const startScrubbing = useCallback((time: number) => {
+  const handleSlidingStart = useCallback(() => {
     setIsScrubbing(true);
-    setScrubbingTime(time);
+    setScrubbingTime(currentTime);
     clearHideTimer();
-  }, [clearHideTimer]);
+  }, [currentTime, clearHideTimer]);
 
-  const updateScrubbing = useCallback((time: number) => {
-    setScrubbingTime(time);
+  const handleValueChange = useCallback((value: number) => {
+    setScrubbingTime(value);
   }, []);
 
-  const endScrubbing = useCallback((time: number) => {
-    player.currentTime = time;
-    setIsScrubbing(false);
-    if (player.playing) {
-      startHideTimer();
-    }
-  }, [player, startHideTimer]);
-
-  const progressGesture = Gesture.Pan()
-    .hitSlop({ vertical: 20 })
-    .onStart((event) => {
-      const seekTime = seekToPosition(event.x);
-      runOnJS(startScrubbing)(seekTime);
-    })
-    .onUpdate((event) => {
-      const seekTime = seekToPosition(event.x);
-      runOnJS(updateScrubbing)(seekTime);
-    })
-    .onEnd((event) => {
-      const seekTime = seekToPosition(event.x);
-      runOnJS(endScrubbing)(seekTime);
-    });
-
-  const progressTapGesture = Gesture.Tap()
-    .onEnd((event) => {
-      const seekTime = seekToPosition(event.x);
-      runOnJS(endScrubbing)(seekTime);
-    });
-
-  const combinedProgressGesture = Gesture.Race(progressGesture, progressTapGesture);
+  const handleSlidingComplete = useCallback(
+    (value: number) => {
+      player.currentTime = value;
+      setCurrentTime(value);
+      setIsScrubbing(false);
+      if (player.playing) {
+        startHideTimer();
+      }
+    },
+    [player, startHideTimer]
+  );
 
   const formatTime = useCallback((seconds: number) => {
     if (!isFinite(seconds) || seconds < 0) return "0:00";
@@ -259,6 +229,7 @@ export function VideoPlayer({
 
   const isLoading = status === "loading";
   const hasError = status === "error";
+  const displayTime = isScrubbing ? scrubbingTime : currentTime;
 
   return (
     <Modal
@@ -333,31 +304,38 @@ export function VideoPlayer({
 
                     {/* Progress bar */}
                     <View style={styles.progressContainer}>
-                      <Text style={styles.timeText}>
-                        {formatTime(isScrubbing ? scrubbingTime : currentTime)}
-                      </Text>
-                      <GestureDetector gesture={combinedProgressGesture}>
-                        <Animated.View
-                          style={styles.progressBarContainer}
-                          onLayout={(e) => {
-                            progressBarWidth.current = e.nativeEvent.layout.width;
-                            progressBarX.current = e.nativeEvent.layout.x;
-                          }}
-                        >
-                          <View style={styles.progressBarBackground}>
-                            <View
-                              style={[
-                                styles.progressBarFill,
-                                {
-                                  width: duration > 0
-                                    ? `${((isScrubbing ? scrubbingTime : currentTime) / duration) * 100}%`
-                                    : "0%",
-                                },
-                              ]}
-                            />
+                      <Text style={styles.timeText}>{formatTime(displayTime)}</Text>
+                      <View style={styles.sliderContainer}>
+                        {/* Time preview bubble while scrubbing */}
+                        {isScrubbing && (
+                          <View
+                            style={[
+                              styles.timePreviewBubble,
+                              {
+                                left: duration > 0
+                                  ? `${(scrubbingTime / duration) * 100}%`
+                                  : "0%",
+                              },
+                            ]}
+                          >
+                            <Text style={styles.timePreviewText}>
+                              {formatTime(scrubbingTime)}
+                            </Text>
                           </View>
-                        </Animated.View>
-                      </GestureDetector>
+                        )}
+                        <Slider
+                          style={styles.slider}
+                          minimumValue={0}
+                          maximumValue={duration > 0 ? duration : 1}
+                          value={displayTime}
+                          onSlidingStart={handleSlidingStart}
+                          onValueChange={handleValueChange}
+                          onSlidingComplete={handleSlidingComplete}
+                          minimumTrackTintColor={colors.primary}
+                          maximumTrackTintColor="rgba(255, 255, 255, 0.3)"
+                          thumbTintColor={colors.primary}
+                        />
+                      </View>
                       <Text style={styles.timeText}>{formatTime(duration)}</Text>
                     </View>
                   </View>
@@ -456,7 +434,7 @@ const styles = StyleSheet.create({
     right: 20,
     flexDirection: "row",
     alignItems: "center",
-    gap: 10,
+    gap: 8,
   },
   timeText: {
     color: colors.text,
@@ -464,20 +442,30 @@ const styles = StyleSheet.create({
     minWidth: 40,
     textAlign: "center",
   },
-  progressBarContainer: {
+  sliderContainer: {
     flex: 1,
-    height: 30,
+    height: 40,
     justifyContent: "center",
   },
-  progressBarBackground: {
-    height: 4,
-    backgroundColor: "rgba(255, 255, 255, 0.3)",
-    borderRadius: 2,
-    overflow: "hidden",
+  slider: {
+    width: "100%",
+    height: 40,
   },
-  progressBarFill: {
-    height: "100%",
-    backgroundColor: colors.primary,
-    borderRadius: 2,
+  timePreviewBubble: {
+    position: "absolute",
+    top: -35,
+    transform: [{ translateX: -30 }],
+    backgroundColor: "rgba(0, 0, 0, 0.9)",
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 8,
+    minWidth: 60,
+    alignItems: "center",
+    zIndex: 10,
+  },
+  timePreviewText: {
+    color: colors.text,
+    fontSize: 14,
+    fontWeight: "600",
   },
 });
