@@ -8,13 +8,13 @@ on:
 
 jobs:
   build:
-    runs-on: macos-15
+    runs-on: macos-26
     steps:
       - uses: actions/checkout@v4
       - name: Build
         run: >
           xcodebuild
-          -project Lurk/Lurk.xcodeproj
+          -project Lurk.xcodeproj
           -scheme Lurk
           -destination 'generic/platform=iOS'
           CODE_SIGNING_ALLOWED=NO
