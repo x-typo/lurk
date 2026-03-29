@@ -1,3 +1,4 @@
+import CoreGraphics
 import Foundation
 
 // MARK: - API Response Types

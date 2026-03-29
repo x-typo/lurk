@@ -18,7 +18,7 @@ actor RedditClient {
         time: TimeFilter = .day,
         after: String? = nil
     ) async throws -> RedditListing {
-        var components = URLComponents(string: "\(baseURL)/r/popular/\(sort.rawValue).json")!
+        var components = try buildComponents(path: "/r/popular/\(sort.rawValue).json")
         var items = baseQueryItems(after: after)
         items.insert(URLQueryItem(name: "t", value: time.rawValue), at: 0)
         components.queryItems = items
@@ -30,9 +30,17 @@ actor RedditClient {
         sort: SortType = .hot,
         after: String? = nil
     ) async throws -> RedditListing {
-        var components = URLComponents(string: "\(baseURL)/r/\(subreddit)/\(sort.rawValue).json")!
+        let encoded = subreddit.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? subreddit
+        var components = try buildComponents(path: "/r/\(encoded)/\(sort.rawValue).json")
         components.queryItems = baseQueryItems(after: after)
         return try await fetch(components.url!)
+    }
+
+    private func buildComponents(path: String) throws -> URLComponents {
+        guard let components = URLComponents(string: "\(baseURL)\(path)") else {
+            throw URLError(.badURL)
+        }
+        return components
     }
 
     private func baseQueryItems(after: String? = nil) -> [URLQueryItem] {
