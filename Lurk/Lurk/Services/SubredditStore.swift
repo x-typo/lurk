@@ -15,7 +15,9 @@ final class SubredditStore {
         let normalized = name
             .replacingOccurrences(of: "^r/", with: "", options: .regularExpression)
             .trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !normalized.isEmpty else { return }
+        guard !normalized.isEmpty,
+              normalized.range(of: "^[A-Za-z0-9_]{2,21}$", options: .regularExpression) != nil
+        else { return }
         guard !subreddits.contains(where: { $0.lowercased() == normalized.lowercased() }) else { return }
         subreddits.append(normalized)
         persist()
