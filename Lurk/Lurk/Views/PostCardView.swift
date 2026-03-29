@@ -5,7 +5,7 @@ struct PostCardView: View {
     var onHide: ((String) -> Void)?
 
     @State private var offset: CGFloat = 0
-    @State private var isHorizontalDrag = false
+    @State private var dragAxis: Axis?
     @State private var showDetail = false
     @Environment(\.openURL) private var openURL
 
@@ -118,20 +118,15 @@ struct PostCardView: View {
             .simultaneousGesture(
                 DragGesture(minimumDistance: 20)
                     .onChanged { value in
-                        if !isHorizontalDrag {
-                            let horizontal = abs(value.translation.width)
-                            let vertical = abs(value.translation.height)
-                            if horizontal > vertical {
-                                isHorizontalDrag = true
-                            } else {
-                                return
-                            }
+                        if dragAxis == nil {
+                            dragAxis = abs(value.translation.width) > abs(value.translation.height) ? .horizontal : .vertical
                         }
+                        guard dragAxis == .horizontal else { return }
                         offset = value.translation.width
                     }
                     .onEnded { value in
-                        defer { isHorizontalDrag = false }
-                        guard isHorizontalDrag else { return }
+                        defer { dragAxis = nil }
+                        guard dragAxis == .horizontal else { return }
                         if value.translation.width > swipeThreshold {
                             withAnimation(.spring()) { offset = 0 }
                             openURL(post.redditURL)
