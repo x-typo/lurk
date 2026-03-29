@@ -8,6 +8,8 @@ export const colors = {
   textMuted: '#666666',
 
   primary: '#ff4500',
+  swipeOpen: '#007AFF',
+  swipeHide: '#CC3333',
 
   border: '#333333',
 

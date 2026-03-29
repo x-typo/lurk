@@ -9,61 +9,46 @@ import {
 } from 'react-native';
 import { fetchSubredditPosts } from '../api/reddit';
 import { RedditPost } from '../types/reddit';
-import { PostCard } from './PostCard';
+import { PostCard } from '../components/PostCard';
 import { colors } from '../constants/colors';
 import { usePostFilter } from '../context/PostFilterContext';
+import { useSubreddits } from '../context/SubredditContext';
 
-interface SubredditFeedProps {
-  subreddit: string;
-}
-
-export function SubredditFeed({ subreddit }: SubredditFeedProps) {
+export function Home() {
   const [posts, setPosts] = useState<RedditPost[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  const [after, setAfter] = useState<string | null>(null);
-  const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const { isHidden, hidePost } = usePostFilter();
+  const { subreddits } = useSubreddits();
 
-  const handleHide = useCallback((id: string) => {
-    hidePost(id);
-    setPosts((prev) => prev.filter((p) => p.id !== id));
-  }, [hidePost]);
-
-  // isHidden reads from a ref (always current), not in dep array by design.
+  // isHidden reads from a ref (always current), so it's not in the dep array.
+  // loadPosts re-runs when subreddits change (user adds/removes a sub).
   const loadPosts = useCallback(async () => {
+    if (subreddits.length === 0) {
+      setPosts([]);
+      setLoading(false);
+      setRefreshing(false);
+      return;
+    }
+
     try {
       setError(null);
-      const response = await fetchSubredditPosts(subreddit, 'hot');
-      const allPosts = response.data.children.map((child) => child.data);
-      setPosts(allPosts.filter((p) => !isHidden(p.id)));
-      setAfter(response.data.after);
+      const responses = await Promise.all(
+        subreddits.map((sub) => fetchSubredditPosts(sub, 'hot')),
+      );
+      const allPosts = responses
+        .flatMap((r) => r.data.children.map((c) => c.data))
+        .filter((p) => !isHidden(p.id));
+      allPosts.sort((a, b) => b.created_utc - a.created_utc);
+      setPosts(allPosts);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load posts');
     } finally {
       setLoading(false);
       setRefreshing(false);
     }
-  }, [subreddit]);
-
-  const loadMore = useCallback(async () => {
-    if (loadingMore || !after) return;
-
-    setLoadingMore(true);
-    try {
-      const response = await fetchSubredditPosts(subreddit, 'hot', after);
-      const newPosts = response.data.children
-        .map((child) => child.data)
-        .filter((p) => !isHidden(p.id));
-      setPosts((prev) => [...prev, ...newPosts]);
-      setAfter(response.data.after);
-    } catch (err) {
-      console.error('Failed to load more:', err);
-    } finally {
-      setLoadingMore(false);
-    }
-  }, [after, loadingMore, subreddit]);
+  }, [subreddits]);
 
   const onRefresh = useCallback(() => {
     setRefreshing(true);
@@ -74,10 +59,27 @@ export function SubredditFeed({ subreddit }: SubredditFeedProps) {
     loadPosts();
   }, [loadPosts]);
 
+  const handleHide = useCallback(
+    (id: string) => {
+      hidePost(id);
+      setPosts((prev) => prev.filter((p) => p.id !== id));
+    },
+    [hidePost],
+  );
+
   if (loading) {
     return (
       <View style={styles.centered}>
         <ActivityIndicator size="large" color={colors.primary} />
+      </View>
+    );
+  }
+
+  if (subreddits.length === 0) {
+    return (
+      <View style={styles.centered}>
+        <Text style={styles.emptyText}>No subreddits followed</Text>
+        <Text style={styles.emptySubtext}>Add some in the Subreddits tab</Text>
       </View>
     );
   }
@@ -102,15 +104,6 @@ export function SubredditFeed({ subreddit }: SubredditFeedProps) {
           tintColor={colors.primary}
         />
       }
-      onEndReached={loadMore}
-      onEndReachedThreshold={0.5}
-      ListFooterComponent={
-        loadingMore ? (
-          <View style={styles.footer}>
-            <ActivityIndicator color={colors.primary} />
-          </View>
-        ) : null
-      }
       style={styles.list}
     />
   );
@@ -126,9 +119,17 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     backgroundColor: colors.background,
-  },
-  footer: {
     padding: 20,
+  },
+  emptyText: {
+    color: colors.text,
+    fontSize: 18,
+    fontWeight: '600',
+    marginBottom: 8,
+  },
+  emptySubtext: {
+    color: colors.textSecondary,
+    fontSize: 15,
   },
   errorText: {
     color: colors.textSecondary,

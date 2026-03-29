@@ -6,15 +6,19 @@ import { StatusBar } from 'expo-status-bar';
 import { TopTabBar } from './src/components/TopTabBar';
 import { Popular } from './src/screens/Popular';
 import { Subreddits } from './src/screens/Subreddits';
+import { Home } from './src/screens/Home';
 import { colors } from './src/constants/colors';
+import { PostFilterProvider } from './src/context/PostFilterContext';
+import { SubredditProvider } from './src/context/SubredditContext';
 
 const TABS = [
+  { key: 'home', label: 'Home' },
   { key: 'popular', label: 'Popular' },
   { key: 'subreddits', label: 'Subreddits' },
 ];
 
 export default function App() {
-  const [activeTab, setActiveTab] = useState('popular');
+  const [activeTab, setActiveTab] = useState('home');
   const [subredditsResetKey, setSubredditsResetKey] = useState(0);
 
   const handleTabPress = useCallback((key: string) => {
@@ -27,6 +31,8 @@ export default function App() {
 
   const content = useMemo(() => {
     switch (activeTab) {
+      case 'home':
+        return <Home />;
       case 'popular':
         return <Popular />;
       case 'subreddits':
@@ -38,13 +44,17 @@ export default function App() {
 
   return (
     <GestureHandlerRootView style={styles.root}>
-      <SafeAreaProvider>
-        <StatusBar style="light" />
-        <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
-          <View style={styles.content}>{content}</View>
-          <TopTabBar tabs={TABS} activeTab={activeTab} onTabPress={handleTabPress} />
-        </SafeAreaView>
-      </SafeAreaProvider>
+      <PostFilterProvider>
+        <SubredditProvider>
+          <SafeAreaProvider>
+            <StatusBar style="light" />
+            <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
+              <View style={styles.content}>{content}</View>
+              <TopTabBar tabs={TABS} activeTab={activeTab} onTabPress={handleTabPress} />
+            </SafeAreaView>
+          </SafeAreaProvider>
+        </SubredditProvider>
+      </PostFilterProvider>
     </GestureHandlerRootView>
   );
 }

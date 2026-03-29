@@ -11,6 +11,7 @@ import { fetchPopularPosts } from '../api/reddit';
 import { RedditPost } from '../types/reddit';
 import { PostCard } from '../components/PostCard';
 import { colors } from '../constants/colors';
+import { usePostFilter } from '../context/PostFilterContext';
 
 export function Popular() {
   const [posts, setPosts] = useState<RedditPost[]>([]);
@@ -19,12 +20,20 @@ export function Popular() {
   const [after, setAfter] = useState<string | null>(null);
   const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const { isHidden, hidePost } = usePostFilter();
 
+  const handleHide = useCallback((id: string) => {
+    hidePost(id);
+    setPosts((prev) => prev.filter((p) => p.id !== id));
+  }, [hidePost]);
+
+  // isHidden reads from a ref (always current), not in dep array by design.
   const loadPosts = useCallback(async () => {
     try {
       setError(null);
       const response = await fetchPopularPosts('top', 'day');
-      setPosts(response.data.children.map((child) => child.data));
+      const allPosts = response.data.children.map((child) => child.data);
+      setPosts(allPosts.filter((p) => !isHidden(p.id)));
       setAfter(response.data.after);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load posts');
@@ -40,10 +49,10 @@ export function Popular() {
     setLoadingMore(true);
     try {
       const response = await fetchPopularPosts('top', 'day', after);
-      setPosts((prev) => [
-        ...prev,
-        ...response.data.children.map((child) => child.data),
-      ]);
+      const newPosts = response.data.children
+        .map((child) => child.data)
+        .filter((p) => !isHidden(p.id));
+      setPosts((prev) => [...prev, ...newPosts]);
       setAfter(response.data.after);
     } catch (err) {
       console.error('Failed to load more:', err);
@@ -81,7 +90,7 @@ export function Popular() {
     <FlatList
       data={posts}
       keyExtractor={(item) => item.id}
-      renderItem={({ item }) => <PostCard post={item} />}
+      renderItem={({ item }) => <PostCard post={item} onHide={handleHide} />}
       refreshControl={
         <RefreshControl
           refreshing={refreshing}

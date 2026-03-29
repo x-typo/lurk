@@ -1,16 +1,17 @@
 import React, { useState, useCallback, useEffect } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, Linking } from 'react-native';
+import {
+  View,
+  Text,
+  StyleSheet,
+  TouchableOpacity,
+  TextInput,
+  ScrollView,
+  KeyboardAvoidingView,
+  Platform,
+} from 'react-native';
 import { SubredditFeed } from '../components/SubredditFeed';
+import { useSubreddits } from '../context/SubredditContext';
 import { colors } from '../constants/colors';
-
-const SUBREDDITS = [
-  { name: 'r/ClaudeAI', key: 'ClaudeAI' },
-  { name: 'r/ClaudeCode', key: 'ClaudeCode' },
-  { name: 'r/Codex', key: 'codex' },
-  { name: 'r/Singularity', key: 'singularity' },
-];
-
-const HOME_URL = 'https://reddit.com/top/?sort=top&t=day';
 
 interface SubredditsProps {
   resetKey?: number;
@@ -18,8 +19,9 @@ interface SubredditsProps {
 
 export function Subreddits({ resetKey }: SubredditsProps) {
   const [activeSubreddit, setActiveSubreddit] = useState<string | null>(null);
+  const [newSub, setNewSub] = useState('');
+  const { subreddits, addSubreddit, removeSubreddit } = useSubreddits();
 
-  // Reset to picker when resetKey changes (tab tapped while already active)
   useEffect(() => {
     setActiveSubreddit(null);
   }, [resetKey]);
@@ -28,9 +30,12 @@ export function Subreddits({ resetKey }: SubredditsProps) {
     setActiveSubreddit(null);
   }, []);
 
-  const openHome = useCallback(() => {
-    Linking.openURL(HOME_URL);
-  }, []);
+  const handleAdd = useCallback(() => {
+    const name = newSub.trim();
+    if (!name) return;
+    addSubreddit(name);
+    setNewSub('');
+  }, [newSub, addSubreddit]);
 
   if (activeSubreddit) {
     return (
@@ -44,25 +49,47 @@ export function Subreddits({ resetKey }: SubredditsProps) {
   }
 
   return (
-    <View style={styles.pickerContainer}>
-      <TouchableOpacity
-        style={styles.button}
-        onPress={openHome}
-        activeOpacity={0.7}
-      >
-        <Text style={styles.buttonText}>Home</Text>
-      </TouchableOpacity>
-      {SUBREDDITS.map((sub) => (
-        <TouchableOpacity
-          key={sub.key}
-          style={styles.button}
-          onPress={() => setActiveSubreddit(sub.key)}
-          activeOpacity={0.7}
-        >
-          <Text style={styles.buttonText}>{sub.name}</Text>
-        </TouchableOpacity>
-      ))}
-    </View>
+    <KeyboardAvoidingView
+      style={styles.container}
+      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+    >
+      <ScrollView contentContainerStyle={styles.pickerContent}>
+        <View style={styles.addRow}>
+          <TextInput
+            style={styles.input}
+            value={newSub}
+            onChangeText={setNewSub}
+            placeholder="Add subreddit..."
+            placeholderTextColor={colors.textMuted}
+            onSubmitEditing={handleAdd}
+            autoCapitalize="none"
+            autoCorrect={false}
+            returnKeyType="done"
+          />
+          <TouchableOpacity style={styles.addButton} onPress={handleAdd}>
+            <Text style={styles.addButtonText}>+</Text>
+          </TouchableOpacity>
+        </View>
+
+        {subreddits.map((sub) => (
+          <View key={sub} style={styles.subRow}>
+            <TouchableOpacity
+              style={styles.subButton}
+              onPress={() => setActiveSubreddit(sub)}
+              activeOpacity={0.7}
+            >
+              <Text style={styles.buttonText}>r/{sub}</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.removeButton}
+              onPress={() => removeSubreddit(sub)}
+            >
+              <Text style={styles.removeText}>✕</Text>
+            </TouchableOpacity>
+          </View>
+        ))}
+      </ScrollView>
+    </KeyboardAvoidingView>
   );
 }
 
@@ -71,25 +98,66 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: colors.background,
   },
-  pickerContainer: {
+  pickerContent: {
+    padding: 20,
+    gap: 12,
+  },
+  addRow: {
+    flexDirection: 'row',
+    gap: 10,
+    marginBottom: 8,
+  },
+  input: {
     flex: 1,
-    backgroundColor: colors.background,
+    backgroundColor: colors.surface,
+    color: colors.text,
+    fontSize: 16,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  addButton: {
+    backgroundColor: colors.primary,
+    width: 50,
+    borderRadius: 12,
     justifyContent: 'center',
     alignItems: 'center',
-    padding: 20,
-    gap: 16,
   },
-  button: {
-    backgroundColor: colors.primary,
-    paddingVertical: 18,
-    paddingHorizontal: 32,
-    borderRadius: 12,
-    minWidth: 200,
+  addButtonText: {
+    color: colors.text,
+    fontSize: 24,
+    fontWeight: '700',
+  },
+  subRow: {
+    flexDirection: 'row',
     alignItems: 'center',
+    gap: 10,
+  },
+  subButton: {
+    flex: 1,
+    backgroundColor: colors.surface,
+    paddingVertical: 18,
+    paddingHorizontal: 20,
+    borderRadius: 12,
   },
   buttonText: {
     color: colors.text,
-    fontSize: 22,
+    fontSize: 18,
+    fontWeight: '600',
+  },
+  removeButton: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: colors.surfaceElevated,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  removeText: {
+    color: colors.textSecondary,
+    fontSize: 16,
     fontWeight: '700',
   },
   backButton: {
