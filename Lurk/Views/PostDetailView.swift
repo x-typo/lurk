@@ -93,7 +93,7 @@ struct PostDetailView: View {
                                 displayScore += scoreDelta
                                 Task {
                                     let request = session.authenticatedRequest(
-                                        url: URL(string: "https://www.reddit.com/api/vote")!,
+                                        url: RedditAPI.vote,
                                         formData: ["id": "t3_\(post.id)", "dir": "\(newDir)"]
                                     )
                                     try? await client.execute(request)
@@ -231,7 +231,7 @@ struct PostDetailView: View {
                             postingComment = true
                             Task {
                                 let request = session.authenticatedRequest(
-                                    url: URL(string: "https://www.reddit.com/api/comment")!,
+                                    url: RedditAPI.comment,
                                     formData: [
                                         "thing_id": "t3_\(post.id)",
                                         "text": commentText

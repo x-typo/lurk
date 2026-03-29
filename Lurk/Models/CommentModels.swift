@@ -62,29 +62,17 @@ extension Comment {
             guard let author = d.author, let body = d.body,
                   author != "AutoModerator" else { return nil }
             let depth = d.depth ?? 0
-            if depth < maxRenderDepth {
-                return Comment(
-                    id: d.id ?? UUID().uuidString,
-                    author: author,
-                    body: body,
-                    score: d.score ?? 0,
-                    createdUtc: d.createdUtc ?? 0,
-                    depth: depth,
-                    replies: parseReplies(d.replies),
-                    moreCount: 0
-                )
-            } else {
-                return Comment(
-                    id: d.id ?? UUID().uuidString,
-                    author: author,
-                    body: body,
-                    score: d.score ?? 0,
-                    createdUtc: d.createdUtc ?? 0,
-                    depth: depth,
-                    replies: [],
-                    moreCount: countReplies(d.replies)
-                )
-            }
+            let withinDepth = depth < maxRenderDepth
+            return Comment(
+                id: d.id ?? UUID().uuidString,
+                author: author,
+                body: body,
+                score: d.score ?? 0,
+                createdUtc: d.createdUtc ?? 0,
+                depth: depth,
+                replies: withinDepth ? parseReplies(d.replies) : [],
+                moreCount: withinDepth ? 0 : countReplies(d.replies)
+            )
         }
     }
 

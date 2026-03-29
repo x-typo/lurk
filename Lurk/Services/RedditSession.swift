@@ -30,7 +30,7 @@ final class RedditSession {
 
     func checkLoginStatus() async {
         var request = URLRequest(url: loginCheckURL)
-        request.setValue("ios:com.lurk.app:v1.0", forHTTPHeaderField: "User-Agent")
+        request.setValue(RedditAPI.userAgent, forHTTPHeaderField: "User-Agent")
         applyCookies(to: &request)
 
         do {
@@ -57,7 +57,7 @@ final class RedditSession {
     func authenticatedRequest(url: URL, formData: [String: String]) -> URLRequest {
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
-        request.setValue("ios:com.lurk.app:v1.0", forHTTPHeaderField: "User-Agent")
+        request.setValue(RedditAPI.userAgent, forHTTPHeaderField: "User-Agent")
         request.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
 
         var params = formData

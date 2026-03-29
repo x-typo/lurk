@@ -34,7 +34,7 @@ struct HomeFeedView: View {
                                 filterStore.hidePost(id) { @MainActor in
                                     guard session.isLoggedIn else { return }
                                     let request = session.authenticatedRequest(
-                                        url: URL(string: "https://www.reddit.com/api/hide")!,
+                                        url: RedditAPI.hide,
                                         formData: ["id": "t3_\(id)"]
                                     )
                                     try await client.execute(request)

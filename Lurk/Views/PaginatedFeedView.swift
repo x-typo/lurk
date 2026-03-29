@@ -26,7 +26,7 @@ struct PaginatedFeedView: View {
                                 filterStore.hidePost(id) { @MainActor in
                                     guard session.isLoggedIn else { return }
                                     let request = session.authenticatedRequest(
-                                        url: URL(string: "https://www.reddit.com/api/hide")!,
+                                        url: RedditAPI.hide,
                                         formData: ["id": "t3_\(id)"]
                                     )
                                     try await client.execute(request)
@@ -53,10 +53,14 @@ struct PaginatedFeedView: View {
         .task { await loadPosts() }
     }
 
+    private func filteredPosts(from listing: RedditListing) -> [Post] {
+        listing.data.children.map(\.data).filter { !filterStore.isHidden($0.id) }
+    }
+
     private func loadPosts() async {
         do {
             let listing = try await fetchPage(nil)
-            posts = listing.data.children.map(\.data).filter { !filterStore.isHidden($0.id) }
+            posts = filteredPosts(from: listing)
             after = listing.data.after
             error = nil
         } catch {
@@ -70,8 +74,7 @@ struct PaginatedFeedView: View {
         loadingMore = true
         do {
             let listing = try await fetchPage(after)
-            let newPosts = listing.data.children.map(\.data).filter { !filterStore.isHidden($0.id) }
-            posts.append(contentsOf: newPosts)
+            posts.append(contentsOf: filteredPosts(from: listing))
             self.after = listing.data.after
         } catch {
             // Silent fail on pagination

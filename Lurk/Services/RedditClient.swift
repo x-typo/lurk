@@ -1,5 +1,12 @@
 import Foundation
 
+enum RedditAPI {
+    static let userAgent = "ios:com.lurk.app:v1.0"
+    static let hide = URL(string: "https://www.reddit.com/api/hide")!
+    static let vote = URL(string: "https://www.reddit.com/api/vote")!
+    static let comment = URL(string: "https://www.reddit.com/api/comment")!
+}
+
 actor RedditClient {
     private let baseURL = "https://www.reddit.com"
     private static let pageSize = "25"
@@ -8,7 +15,7 @@ actor RedditClient {
     init() {
         let config = URLSessionConfiguration.default
         config.httpAdditionalHeaders = [
-            "User-Agent": "ios:com.lurk.app:v1.0"
+            "User-Agent": RedditAPI.userAgent
         ]
         self.session = URLSession(configuration: config)
     }
