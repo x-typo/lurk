@@ -1,0 +1,21 @@
+name: Build & Test
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  build:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build
+        run: >
+          xcodebuild
+          -project Lurk/Lurk.xcodeproj
+          -scheme Lurk
+          -destination 'generic/platform=iOS'
+          CODE_SIGNING_ALLOWED=NO
+          build

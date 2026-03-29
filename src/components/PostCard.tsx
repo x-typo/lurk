@@ -16,6 +16,7 @@ import Animated, {
   useSharedValue,
   useAnimatedStyle,
   withSpring,
+  withTiming,
   runOnJS,
 } from "react-native-reanimated";
 import { RedditPost } from "../types/reddit";
@@ -27,6 +28,7 @@ const SWIPE_THRESHOLD = 100;
 
 interface PostCardProps {
   post: RedditPost;
+  onHide?: (id: string) => void;
 }
 
 interface ImageData {
@@ -82,7 +84,7 @@ function getGalleryImages(post: RedditPost): ImageData[] {
     .filter((img): img is ImageData => img !== null);
 }
 
-export function PostCard({ post }: PostCardProps) {
+export function PostCard({ post, onHide }: PostCardProps) {
   const imageData = useMemo(() => getImageUrl(post), [post]);
   const galleryImages = useMemo(() => getGalleryImages(post), [post]);
   const isGallery = galleryImages.length > 1;
@@ -124,16 +126,26 @@ export function PostCard({ post }: PostCardProps) {
     setDetailVisible(true);
   }, []);
 
+  const handleHide = useCallback(() => {
+    if (onHide) onHide(post.id);
+  }, [onHide, post.id]);
+
   const panGesture = Gesture.Pan()
     .activeOffsetX([-20, 20])
     .onUpdate((event) => {
-      translateX.value = Math.max(0, event.translationX);
+      translateX.value = event.translationX;
     })
     .onEnd((event) => {
       if (event.translationX > SWIPE_THRESHOLD) {
         runOnJS(openInBrowser)();
+        translateX.value = withSpring(0);
+      } else if (event.translationX < -SWIPE_THRESHOLD && onHide) {
+        translateX.value = withTiming(-SCREEN_WIDTH, { duration: 200 }, (finished) => {
+          if (finished) runOnJS(handleHide)();
+        });
+      } else {
+        translateX.value = withSpring(0);
       }
-      translateX.value = withSpring(0);
     });
 
   const animatedStyle = useAnimatedStyle(() => ({
@@ -143,6 +155,9 @@ export function PostCard({ post }: PostCardProps) {
   return (
     <View style={styles.swipeContainer}>
       <View style={styles.swipeBackgroundLeft} />
+      <View style={styles.swipeBackgroundRight}>
+        <Text style={styles.hideIcon}>✕</Text>
+      </View>
       <GestureDetector gesture={panGesture}>
         <Animated.View style={[styles.container, animatedStyle]}>
           <TouchableOpacity onPress={openDetail} activeOpacity={0.7}>
@@ -250,9 +265,27 @@ const styles = StyleSheet.create({
     left: 0,
     bottom: 0,
     width: SWIPE_THRESHOLD + 20,
-    backgroundColor: "#007AFF",
+    backgroundColor: colors.swipeOpen,
     borderTopLeftRadius: 12,
     borderBottomLeftRadius: 12,
+  },
+  swipeBackgroundRight: {
+    position: "absolute",
+    top: 0,
+    right: 0,
+    bottom: 0,
+    width: SWIPE_THRESHOLD + 20,
+    backgroundColor: colors.swipeHide,
+    borderTopRightRadius: 12,
+    borderBottomRightRadius: 12,
+    justifyContent: "center",
+    alignItems: "flex-end",
+    paddingRight: 20,
+  },
+  hideIcon: {
+    color: "#ffffff",
+    fontSize: 20,
+    fontWeight: "700",
   },
   container: {
     backgroundColor: colors.surface,
