@@ -1,97 +1,64 @@
 # Lurk
 
-A lightweight Reddit client built with React Native and Expo, designed for distraction-free browsing.
+A minimal, ad-free Reddit client built with SwiftUI. No accounts, no ads, no tracking.
 
 ## About
 
-Lurk was developed as both a personal utility for ad-free Reddit browsing and a learning project to explore modern mobile development practices. The app demonstrates real-world implementation of OAuth authentication, REST API integration, and React Native best practices.
+Lurk uses Reddit's anonymous `.json` endpoint to browse content without authentication. Zero dependencies, dark mode only, native SwiftUI on iOS 18+.
 
 ## Features
 
-- **Home Feed** - View posts from subscribed subreddits
-- **Popular Feed** - Browse trending content from r/popular
-- **Profile** - Secure sign-in with Reddit to access personalized feeds
+- **Home Feed** - Aggregated posts from followed subreddits
+- **Popular Feed** - Trending content from r/popular with time filtering
+- **Subreddit Management** - Follow/unfollow subreddits, browse individual feeds
 - **Swipe Gestures** - Swipe left to hide a post, swipe right to open in Safari
-- **Dark Mode** - Native dark theme enabled by default
-- **Pull-to-Refresh** - Refresh feeds across all screens
+- **Post Hiding** - Hidden posts persist across sessions (UserDefaults, capped at 5,000)
+- **Dark Mode** - Native dark theme, no toggle
+- **Pull-to-Refresh** - Refresh any feed
 
 ## Tech Stack
 
-| Technology            | Purpose                                |
-| --------------------- | -------------------------------------- |
-| **React Native**      | Cross-platform mobile framework        |
-| **Expo (~54.0)**      | Development toolchain and build system |
-| **TypeScript**        | Type-safe development with strict mode |
-| **Reddit OAuth2 API** | Data source for Reddit content         |
-| **expo-auth-session** | OAuth 2.0 authentication               |
-| **expo-secure-store** | Secure token storage                   |
-| **expo-web-browser**  | Open posts in Safari                   |
-| **React Navigation**  | Tab navigation                         |
+| Technology | Purpose |
+| --- | --- |
+| **SwiftUI** | UI framework (iOS 18+, Tab API) |
+| **@Observable** | State management (Bankai pattern) |
+| **Actor** | Thread-safe API client |
+| **UserDefaults** | Local persistence for hidden posts and subreddit list |
+| **Reddit .json API** | Anonymous endpoint, no auth required (100 QPM) |
 
-## Learning Outcomes
-
-This project provided hands-on experience with:
-
-- **OAuth 2.0** - Implementing authorization flow for mobile apps
-- **REST APIs** - Working with Reddit's API and rate limits (100 qpm)
-- **React Native Patterns** - FlatList optimization, custom hooks, context providers
-- **TypeScript** - Strict typing for API responses and component props
-- **Gesture Handling** - Swipe actions for intuitive mobile UX
-- **Mobile UX** - Pull-to-refresh, dark theme, minimal interface design
-
-## Project Structure
+## Architecture
 
 ```
-src/
-  api/           # Reddit API integration
-  components/    # Reusable UI components
-  constants/     # Colors, configuration
-  context/       # Authentication context provider
-  hooks/         # Custom hooks
-  screens/       # Screen components
-  types/         # TypeScript type definitions
+Lurk/
+  Constants/     # Theme (colors)
+  Models/        # Reddit API response types, computed properties
+  Services/      # RedditClient (actor), PostFilterStore, SubredditStore
+  Utilities/     # Formatters (time, score)
+  Views/         # SwiftUI views
+    PaginatedFeedView   # Shared paginated feed component
+    HomeFeedView        # Multi-subreddit aggregated feed
+    PopularFeedView     # r/popular wrapper
+    SubredditFeedView   # Single subreddit wrapper
+    PostCardView        # Card with swipe gestures
+    PostDetailView      # Full post sheet
+    SubredditsView      # Subreddit picker and management
 ```
 
 ## Setup
 
 1. Clone the repository
-2. Install dependencies:
-   ```bash
-   npm install
-   ```
-3. Create a `.env` file with Reddit API credentials:
-   ```
-   EXPO_PUBLIC_REDDIT_CLIENT_ID=your_client_id
-   EXPO_PUBLIC_REDDIT_REDIRECT_URI=your_redirect_uri
-   ```
-4. Start the development server:
-   ```bash
-   npm start
-   ```
+2. Open `Lurk/Lurk.xcodeproj` in Xcode 16+
+3. Build and run on a simulator or device (iOS 18+)
 
-### Reddit OAuth Configuration
-
-To enable authenticated features:
-
-1. Create an app at [Reddit App Preferences](https://www.reddit.com/prefs/apps)
-2. Select "installed app" as the app type
-3. Set the redirect URI based on your environment:
-   - **Expo Go (development)**: `exp://[your-ip]:8081`
-   - **Standalone build**: `lurk://`
-4. Add the Client ID to your `.env` file
-
-## Scripts
+### Deploy to Physical Device
 
 ```bash
-npm start        # Start Expo dev server
-npm run ios      # Run on iOS simulator
-npm run android  # Run on Android emulator
+xcodebuild -project Lurk/Lurk.xcodeproj -scheme Lurk \
+  -destination 'id=DEVICE_UUID' -configuration Release
 ```
+
+No signing configuration, dev server, or environment variables needed.
 
 ## Design Philosophy
 
-The app intentionally limits functionality to basic browsing and two swipe actions. Any interaction beyond viewing or hiding posts opens the native browser, keeping the app lightweight and well within Reddit's API rate limits.
-
-## Acknowledgments
-
-- [Reddit](https://www.reddit.com) for providing the API
+Two interactions beyond reading: hide (swipe left) or open in Safari (swipe right). Everything else stays in the browser. This keeps the app lightweight, within Reddit's rate limits, and free of auth complexity.
