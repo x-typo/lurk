@@ -14,7 +14,7 @@ jobs:
       - name: Build
         run: >
           xcodebuild
-          -project Lurk/Lurk.xcodeproj
+          -project Lurk.xcodeproj
           -scheme Lurk
           -destination 'generic/platform=iOS'
           CODE_SIGNING_ALLOWED=NO
