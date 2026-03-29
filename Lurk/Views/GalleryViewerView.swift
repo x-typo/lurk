@@ -14,11 +14,11 @@ struct GalleryViewerView: View {
     }
 
     var body: some View {
-        let dragProgress = min(abs(dragOffset.height) / dismissThreshold, 1.0)
+        let dragProgress: CGFloat = min(abs(dragOffset.height) / dismissThreshold, 1.0)
 
         ZStack(alignment: .topTrailing) {
             Theme.background.ignoresSafeArea()
-                .opacity(1 - dragProgress * 0.5)
+                .opacity(Double(1 - dragProgress * 0.5))
 
             TabView(selection: $currentPage) {
                 ForEach(Array(urls.enumerated()), id: \.offset) { index, url in
@@ -41,7 +41,7 @@ struct GalleryViewerView: View {
             }
             .tabViewStyle(.page(indexDisplayMode: .automatic))
             .offset(y: dragOffset.height)
-            .scaleEffect(1 - dragProgress * 0.15)
+            .scaleEffect(CGFloat(1 - dragProgress * 0.15))
             .gesture(
                 DragGesture()
                     .onChanged { value in
