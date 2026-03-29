@@ -10,7 +10,7 @@ struct LurkApp: App {
 
     var body: some Scene {
         WindowGroup {
-            TabView(selection: $selectedTab) {
+            TabView(selection: tabSelection) {
                 HomeFeedView(client: client, filterStore: filterStore, subStore: subStore)
                     .tabItem { Label("Home", systemImage: "house") }
                     .tag(0)
@@ -23,12 +23,18 @@ struct LurkApp: App {
             }
             .tint(Theme.primary)
             .preferredColorScheme(.dark)
-            .onChange(of: selectedTab) { oldValue, newValue in
-                // Double-tap Subreddits tab resets to picker
-                if oldValue == 2 && newValue == 2 {
+        }
+    }
+
+    private var tabSelection: Binding<Int> {
+        Binding(
+            get: { selectedTab },
+            set: { newValue in
+                if newValue == selectedTab && newValue == 2 {
                     subredditResetKey += 1
                 }
+                selectedTab = newValue
             }
-        }
+        )
     }
 }

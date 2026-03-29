@@ -22,7 +22,8 @@ actor RedditClient {
         var items = baseQueryItems(after: after)
         items.insert(URLQueryItem(name: "t", value: time.rawValue), at: 0)
         components.queryItems = items
-        return try await fetch(components.url!)
+        guard let url = components.url else { throw URLError(.badURL) }
+        return try await fetch(url)
     }
 
     func fetchSubredditPosts(
@@ -33,7 +34,8 @@ actor RedditClient {
         let encoded = subreddit.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? subreddit
         var components = try buildComponents(path: "/r/\(encoded)/\(sort.rawValue).json")
         components.queryItems = baseQueryItems(after: after)
-        return try await fetch(components.url!)
+        guard let url = components.url else { throw URLError(.badURL) }
+        return try await fetch(url)
     }
 
     private func buildComponents(path: String) throws -> URLComponents {
