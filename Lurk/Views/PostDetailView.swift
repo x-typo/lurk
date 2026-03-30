@@ -79,9 +79,7 @@ struct PostDetailView: View {
                     }
 
                     if !post.selftext.isEmpty {
-                        Text(post.selftext)
-                            .font(.body)
-                            .foregroundStyle(Theme.text)
+                        CommentBodyView(content: post.selftext)
                     }
 
                     HStack(spacing: 16) {
