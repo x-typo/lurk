@@ -19,7 +19,7 @@ struct PostCardView: View {
     var body: some View {
         ZStack {
             // Swipe background — full color based on direction
-            (offset > 0 ? Theme.swipeOpen : Theme.swipeHide)
+            (offset > 0 ? Theme.swipeOpen : offset < 0 ? Theme.swipeHide : Color.clear)
 
             // Card content
             VStack(alignment: .leading, spacing: 8) {
