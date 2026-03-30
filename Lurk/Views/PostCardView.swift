@@ -10,6 +10,7 @@ struct PostCardView: View {
     @State private var dragAxis: Axis?
     @State private var showDetail = false
     @State private var showGallery = false
+    @State private var collapsing = false
     @Environment(\.openURL) private var openURL
 
     private let swipeThreshold: CGFloat = 100
@@ -17,20 +18,8 @@ struct PostCardView: View {
 
     var body: some View {
         ZStack {
-            // Swipe backgrounds
-            HStack(spacing: 0) {
-                Theme.swipeOpen
-                    .frame(width: swipeThreshold + 20)
-                Spacer()
-                ZStack(alignment: .trailing) {
-                    Theme.swipeHide
-                    Text("\u{2715}")
-                        .font(.title3.bold())
-                        .foregroundStyle(.white)
-                        .padding(.trailing, 20)
-                }
-                .frame(width: swipeThreshold + 20)
-            }
+            // Swipe background — full color based on direction
+            (offset > 0 ? Theme.swipeOpen : offset < 0 ? Theme.swipeHide : Color.clear)
 
             // Card content
             VStack(alignment: .leading, spacing: 8) {
@@ -146,6 +135,10 @@ struct PostCardView: View {
                             }
                             Task {
                                 try? await Task.sleep(for: .seconds(0.2))
+                                withAnimation(.easeOut(duration: 0.25)) {
+                                    collapsing = true
+                                }
+                                try? await Task.sleep(for: .seconds(0.25))
                                 onHide?(post.id)
                             }
                         } else {
@@ -155,6 +148,9 @@ struct PostCardView: View {
             )
         }
         .clipShape(RoundedRectangle(cornerRadius: 12))
+        .frame(height: collapsing ? 0 : nil)
+        .clipped()
+        .opacity(collapsing ? 0 : 1)
         .contentShape(Rectangle())
         .onTapGesture { showDetail = true }
         .sheet(isPresented: $showDetail) {

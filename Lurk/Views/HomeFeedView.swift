@@ -39,7 +39,7 @@ struct HomeFeedView: View {
                                     )
                                     try await client.execute(request)
                                 }
-                                withAnimation { posts.removeAll { $0.id == id } }
+                                posts.removeAll { $0.id == id }
                             }
                         }
                     }

@@ -31,7 +31,7 @@ struct PaginatedFeedView: View {
                                     )
                                     try await client.execute(request)
                                 }
-                                withAnimation { posts.removeAll { $0.id == id } }
+                                posts.removeAll { $0.id == id }
                             }
                             .onAppear {
                                 if post.id == posts.last?.id {
