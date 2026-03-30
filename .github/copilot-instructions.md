@@ -16,22 +16,22 @@ Flag violations of these conventions during review.
 - **Stores + Views**: `@Observable` stores manage state, views render it.
 - `RedditClient` is an actor for thread-safe API calls. Flag if changed to a class.
 - `RedditSession` manages cookie/auth state. `PostFilterStore` manages hidden posts. `SubredditStore` manages subreddit list.
-- Views receive stores as parameters or via `@Environment`. Not `@EnvironmentObject`.
+- Views receive stores as explicit parameters. `@Environment` is used only for system keys (`.dismiss`, `.openURL`). Not `@EnvironmentObject`.
 - Computed properties on models for display logic (`Post` extensions). No formatting in views.
 
 ## Concurrency
 
 - Actor isolation on `RedditClient`. All API methods are async.
-- `@MainActor` on observable stores that drive UI.
+- Default actor isolation is `MainActor` (via `SWIFT_DEFAULT_ACTOR_ISOLATION` build setting). Use explicit `nonisolated` or custom actors for work that should run off-main.
 - `@Observable` for all stores. Not `ObservableObject`.
 - Async errors on non-critical paths (pagination, post hiding) use `try?` for silent failure.
 - Critical paths (initial feed load, auth) use `try` with user-facing error display.
 
 ## Theming
 
-- All colors from `Theme` enum in `Constants/Theme.swift`. No hardcoded color literals or hex values.
+- All colors from `Theme` enum in `Constants/Theme.swift`. `Color(red:green:blue:)` definitions belong inside Theme only - flag any outside it.
 - Dark theme only. No light mode. Flag `colorScheme` conditionals or light-mode colors.
-- Status colors and UI accents defined centrally. Flag any `Color(red:green:blue:)` outside Theme.
+- System colors (`.white`, `.clear`) acceptable for overlays. App-specific colors must come from Theme.
 
 ## Formatting
 
@@ -42,8 +42,8 @@ Flag violations of these conventions during review.
 
 - Swipe gestures use `DragGesture` with axis locking to prevent conflict with `ScrollView` scrolling.
 - Axis lock pattern: determine axis on first movement (`abs(dx) > abs(dy)`), then lock. Flag gestures without axis detection.
-- Swipe left: hide post. Swipe right: open in Safari.
-- Two gestures only. Do not add new gesture actions without updating this document.
+- `PostCardView` swipe actions: left = hide post, right = open in Safari. Do not add new swipe actions without updating this document.
+- Other gestures (tap-to-open, gallery drag-to-dismiss) are unrelated to this constraint.
 
 ## UserDefaults & Persistence
 
@@ -54,7 +54,7 @@ Flag violations of these conventions during review.
 
 ## Reddit API
 
-- Anonymous `.json` endpoint for unauthenticated browsing. Rate limit: 100 requests/minute.
+- Anonymous `.json` endpoint for unauthenticated browsing. Reddit's external rate limit is ~100 requests/minute (not enforced in-app).
 - `after` parameter for pagination. Flag any offset-based pagination.
 - Video playback uses `RedditVideo.fallbackUrl` (video-only stream). Flag assumptions that `Post.url` is directly playable for video posts.
 - Comment trees are recursive. `maxRenderDepth` limits rendering depth. Flag unbounded recursion.
@@ -68,7 +68,7 @@ Flag violations of these conventions during review.
 
 ## SwiftUI Patterns
 
-- `TabView` (iOS 18 Tab API) for top-level navigation. Per-tab content.
+- `TabView` with `.tabItem` for top-level navigation. Per-tab content.
 - `LazyVStack` for feed lists. Not `VStack` with `ForEach`.
 - `PaginatedFeedView` is the reusable pagination component. New feeds should use it, not reimplement pagination.
 - Pull-to-refresh on all feed views.
