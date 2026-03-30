@@ -25,7 +25,7 @@ Flag violations of these conventions during review.
 - Default actor isolation is `MainActor` (via `SWIFT_DEFAULT_ACTOR_ISOLATION` build setting). Use explicit `nonisolated` or custom actors for work that should run off-main.
 - `@Observable` for all stores. Not `ObservableObject`.
 - Async errors on non-critical paths (pagination, post hiding) use `try?` for silent failure.
-- Critical paths (initial feed load, auth) use `try` with user-facing error display.
+- Critical paths (initial feed load) use `try` with user-facing error display. Auth failures are silent (session clears, UI stays logged-out).
 
 ## Theming
 
@@ -63,7 +63,7 @@ Flag violations of these conventions during review.
 
 - Graceful fallback to `localizedDescription` for unexpected errors in UI.
 - Pagination errors do not block the feed. Flag any error that clears existing loaded content.
-- `URLError` checks for `.badURL` and `.badServerResponse`. Flag generic catch-all without specific handling.
+- `URLError` checks (`.badURL`, `.badServerResponse`) belong in `RedditClient`. UI catch blocks may use generic `localizedDescription` fallback.
 - No force unwraps in normal control flow. Force unwraps are acceptable for static, guaranteed-valid constants (e.g., `URL(string: "https://...")!`) and compile-time patterns (`try! NSRegularExpression`). Use `guard let`/`if let` for runtime values.
 
 ## SwiftUI Patterns
@@ -79,7 +79,7 @@ Flag violations of these conventions during review.
 - No test suite currently. When adding tests:
   - Swift Testing framework for new tests.
   - Priority targets: `Formatters`, `RedditModels` computed properties, `PostFilterStore` logic.
-  - Actor-isolated `RedditClient` testable via dependency injection.
+  - `RedditClient` currently creates its own `URLSession` internally. Test via `URLProtocol` subclass registered on the shared session config.
   - Mock `URLSession` via `URLProtocol` subclass, not by making the client a protocol.
 
 ## Naming
