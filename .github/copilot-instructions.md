@@ -5,7 +5,7 @@ Flag violations of these conventions during review.
 
 ## Zero Dependencies
 
-- Only Foundation, SwiftUI, and AVKit imports allowed. No third-party packages.
+- No third-party packages. Apple frameworks only (Foundation, SwiftUI, AVKit, WebKit, Photos, UIKit, ImageIO, CoreGraphics as needed).
 - No SPM dependencies, no CocoaPods, no Carthage. Flag any `Package.swift` or `Podfile` additions.
 - `URLSession` for networking. No Alamofire, no custom HTTP libraries.
 - `AsyncImage` for remote images. No image caching frameworks.
@@ -36,7 +36,7 @@ Flag violations of these conventions during review.
 ## Formatting
 
 - All display formatting through `Formatters` enum (`timeAgo()`, score formatting).
-- No inline date or number formatting in views. Flag `DateFormatter` or string interpolation for display values in view code.
+- No inline date or number formatting in views. Flag `DateFormatter` or `NumberFormatter` usage in view code. Simple string interpolation of preformatted values from `Formatters` is fine.
 
 ## Gesture Handling
 
@@ -56,7 +56,7 @@ Flag violations of these conventions during review.
 
 - Anonymous `.json` endpoint for unauthenticated browsing. Rate limit: 100 requests/minute.
 - `after` parameter for pagination. Flag any offset-based pagination.
-- Video URLs require combining `dash_url` or `fallback_url` from `RedditVideo`. Flag assumptions about video URL format.
+- Video playback uses `RedditVideo.fallbackUrl` (video-only stream). Flag assumptions that `Post.url` is directly playable for video posts.
 - Comment trees are recursive. `maxRenderDepth` limits rendering depth. Flag unbounded recursion.
 
 ## Error Handling
@@ -64,7 +64,7 @@ Flag violations of these conventions during review.
 - Graceful fallback to `localizedDescription` for unexpected errors in UI.
 - Pagination errors do not block the feed. Flag any error that clears existing loaded content.
 - `URLError` checks for `.badURL` and `.badServerResponse`. Flag generic catch-all without specific handling.
-- No force unwraps except after `guard let` validation.
+- No force unwraps in normal control flow. Force unwraps are acceptable for static, guaranteed-valid constants (e.g., `URL(string: "https://...")!`) and compile-time patterns (`try! NSRegularExpression`). Use `guard let`/`if let` for runtime values.
 
 ## SwiftUI Patterns
 
@@ -87,4 +87,4 @@ Flag violations of these conventions during review.
 - Types: PascalCase. Views end with `View`, stores with `Store` or `Client` or `Session`.
 - Functions/properties: camelCase.
 - File names match the primary type.
-- No comments unless explaining a non-obvious constraint (e.g., depth cap, rate limit, axis lock).
+- Avoid redundant comments that restate code. `// MARK:` section labels and constraint/rationale comments are fine.
