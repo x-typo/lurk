@@ -79,7 +79,7 @@ struct PostDetailView: View {
                     }
 
                     if !post.selftext.isEmpty {
-                        CommentBodyView(content: post.selftext)
+                        CommentBodyView(content: post.selftext, textFont: .body)
                     }
 
                     HStack(spacing: 16) {
@@ -320,6 +320,7 @@ struct CommentRowView: View {
 
 struct CommentBodyView: View {
     let content: String
+    var textFont: Font = .subheadline
     @Environment(\.openURL) private var openURL
 
     // Matches in priority order: giphy embeds, markdown links, image URLs, plain URLs
@@ -343,7 +344,7 @@ struct CommentBodyView: View {
                 case .text(let text):
                     if !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                         Text(text)
-                            .font(.subheadline)
+                            .font(textFont)
                             .foregroundStyle(Theme.text)
                     }
                 case .image(let url):
@@ -370,7 +371,7 @@ struct CommentBodyView: View {
                         .clipShape(RoundedRectangle(cornerRadius: 8))
                 case .link(let title, let url):
                     Text(title)
-                        .font(.subheadline)
+                        .font(textFont)
                         .foregroundStyle(Theme.primary)
                         .underline()
                         .onTapGesture { openURL(url) }
