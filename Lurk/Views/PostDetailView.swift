@@ -1,5 +1,6 @@
 import AVKit
 import SwiftUI
+import UIKit
 
 struct PostDetailView: View {
     let post: Post
@@ -145,6 +146,7 @@ struct PostDetailView: View {
                                 .foregroundStyle(mediaSaved ? Theme.primary : Theme.textSecondary)
                             }
                             .disabled(savingMedia)
+                            .padding(.trailing, 8)
                         }
 
                         ShareLink(item: post.redditURL) {
@@ -291,6 +293,7 @@ struct PostDetailView: View {
 struct CommentRowView: View {
     let comment: Comment
     @State private var collapsed = false
+    @State private var selecting = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
@@ -312,7 +315,11 @@ struct CommentRowView: View {
                     .foregroundStyle(Theme.textSecondary)
             }
             if !collapsed {
-                CommentBodyView(content: comment.body)
+                if selecting {
+                    SelectableTextView(text: comment.body)
+                } else {
+                    CommentBodyView(content: comment.body)
+                }
 
                 if !comment.replies.isEmpty {
                     ForEach(comment.replies) { reply in
@@ -334,7 +341,15 @@ struct CommentRowView: View {
         .padding(.leading, CGFloat(comment.depth * 12))
         .contentShape(Rectangle())
         .onTapGesture {
-            withAnimation(.easeInOut(duration: 0.2)) { collapsed.toggle() }
+            if selecting {
+                withAnimation(.easeInOut(duration: 0.2)) { selecting = false }
+            } else {
+                withAnimation(.easeInOut(duration: 0.2)) { collapsed.toggle() }
+            }
+        }
+        .onLongPressGesture {
+            guard !collapsed else { return }
+            withAnimation(.easeInOut(duration: 0.2)) { selecting = true }
         }
         .overlay(alignment: .leading) {
             if comment.depth > 0 {
@@ -517,5 +532,26 @@ struct CommentBodyView: View {
         guard !trimmed.isEmpty else { return nil }
         return (try? AttributedString(markdown: trimmed, options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace)))
             ?? AttributedString(trimmed)
+    }
+}
+
+struct SelectableTextView: UIViewRepresentable {
+    let text: String
+
+    func makeUIView(context: Context) -> UITextView {
+        let textView = UITextView()
+        textView.isEditable = false
+        textView.isScrollEnabled = false
+        textView.backgroundColor = .clear
+        textView.font = .preferredFont(forTextStyle: .subheadline)
+        textView.textColor = UIColor(Theme.text)
+        textView.textContainerInset = .zero
+        textView.textContainer.lineFragmentPadding = 0
+        textView.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        return textView
+    }
+
+    func updateUIView(_ textView: UITextView, context: Context) {
+        textView.text = text
     }
 }
