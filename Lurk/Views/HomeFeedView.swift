@@ -9,6 +9,9 @@ struct HomeFeedView: View {
     @State private var posts: [Post] = []
     @State private var loading = true
     @State private var error: String?
+    @State private var selectedPost: Post?
+    @State private var subredditPost: Post?
+    @State private var galleryPost: Post?
 
     var body: some View {
         Group {
@@ -30,17 +33,23 @@ struct HomeFeedView: View {
                 ScrollView {
                     LazyVStack(spacing: 12) {
                         ForEach(posts) { post in
-                            PostCardView(post: post, session: session, client: client) { id in
-                                filterStore.hidePost(id) { @MainActor in
-                                    guard session.isLoggedIn else { return }
-                                    let request = session.authenticatedRequest(
-                                        url: RedditAPI.hide,
-                                        formData: ["id": "t3_\(id)"]
-                                    )
-                                    try await client.execute(request)
-                                }
-                                posts.removeAll { $0.id == id }
-                            }
+                            PostCardView(
+                                post: post, session: session, client: client, filterStore: filterStore,
+                                onHide: { id in
+                                    filterStore.hidePost(id) { @MainActor in
+                                        guard session.isLoggedIn else { return }
+                                        let request = session.authenticatedRequest(
+                                            url: RedditAPI.hide,
+                                            formData: ["id": "t3_\(id)"]
+                                        )
+                                        try await client.execute(request)
+                                    }
+                                    posts.removeAll { $0.id == id }
+                                },
+                                onShowDetail: { selectedPost = post },
+                                onShowSubreddit: { subredditPost = post },
+                                onShowGallery: { galleryPost = post }
+                            )
                         }
                     }
                     .padding(.horizontal, 12)
@@ -51,6 +60,37 @@ struct HomeFeedView: View {
         }
         .background(Theme.background)
         .task { await loadPosts() }
+        .sheet(item: $selectedPost) { post in
+            PostDetailView(post: post, session: session, client: client, filterStore: filterStore)
+        }
+        .fullScreenCover(item: $subredditPost) { post in
+            VStack(spacing: 0) {
+                HStack {
+                    Button { subredditPost = nil } label: {
+                        Text("Close")
+                            .foregroundStyle(Theme.primary)
+                    }
+                    Spacer()
+                    Text(post.subredditNamePrefixed)
+                        .font(.body.weight(.semibold))
+                        .foregroundStyle(Theme.text)
+                    Spacer()
+                    Text("Close").hidden()
+                }
+                .padding(.horizontal, 16)
+                .padding(.vertical, 12)
+                .background(Theme.background)
+                .overlay(alignment: .bottom) {
+                    Theme.border.frame(height: 1)
+                }
+                SubredditFeedView(subreddit: post.subreddit, client: client, filterStore: filterStore, session: session)
+            }
+            .background(Theme.background)
+            .preferredColorScheme(.dark)
+        }
+        .fullScreenCover(item: $galleryPost) { post in
+            GalleryViewerView(urls: post.galleryURLs)
+        }
     }
 
     private func loadPosts() async {

@@ -4,12 +4,14 @@ struct PostCardView: View {
     let post: Post
     let session: RedditSession
     let client: RedditClient
+    let filterStore: PostFilterStore
     var onHide: ((String) -> Void)?
+    var onShowDetail: (() -> Void)?
+    var onShowSubreddit: (() -> Void)?
+    var onShowGallery: (() -> Void)?
 
     @State private var offset: CGFloat = 0
     @State private var dragAxis: Axis?
-    @State private var showDetail = false
-    @State private var showGallery = false
     @State private var collapsing = false
     @Environment(\.openURL) private var openURL
 
@@ -18,16 +20,14 @@ struct PostCardView: View {
 
     var body: some View {
         ZStack {
-            // Swipe background — full color based on direction
             (offset > 0 ? Theme.swipeOpen : offset < 0 ? Theme.swipeHide : Color.clear)
 
-            // Card content
             VStack(alignment: .leading, spacing: 8) {
-                // Header
                 HStack(spacing: 6) {
                     Text(post.subredditNamePrefixed)
                         .font(.subheadline.weight(.semibold))
                         .foregroundStyle(Theme.primary)
+                        .onTapGesture { onShowSubreddit?() }
                     Text("\u{2022}")
                         .font(.caption)
                         .foregroundStyle(Theme.textMuted)
@@ -36,13 +36,11 @@ struct PostCardView: View {
                         .foregroundStyle(Theme.textMuted)
                 }
 
-                // Title
                 Text(post.title)
                     .font(.body)
                     .foregroundStyle(Theme.text)
                     .lineLimit(4)
 
-                // Image
                 if let imageURL = post.imageURL {
                     AsyncImage(url: imageURL) { phase in
                         switch phase {
@@ -86,14 +84,13 @@ struct PostCardView: View {
                     }
                     .onTapGesture {
                         if post.isGallery {
-                            showGallery = true
+                            onShowGallery?()
                         } else {
-                            showDetail = true
+                            onShowDetail?()
                         }
                     }
                 }
 
-                // Footer
                 HStack(spacing: 6) {
                     Text(Formatters.score(post.score))
                         .font(.subheadline)
@@ -152,12 +149,6 @@ struct PostCardView: View {
         .clipped()
         .opacity(collapsing ? 0 : 1)
         .contentShape(Rectangle())
-        .onTapGesture { showDetail = true }
-        .sheet(isPresented: $showDetail) {
-            PostDetailView(post: post, session: session, client: client)
-        }
-        .fullScreenCover(isPresented: $showGallery) {
-            GalleryViewerView(urls: post.galleryURLs)
-        }
+        .onTapGesture { onShowDetail?() }
     }
 }
