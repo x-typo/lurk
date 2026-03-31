@@ -347,6 +347,7 @@ struct CommentRowView: View {
             }
         }
         .onLongPressGesture {
+            guard !collapsed else { return }
             withAnimation(.easeInOut(duration: 0.2)) { selecting = true }
         }
         .overlay(alignment: .leading) {
