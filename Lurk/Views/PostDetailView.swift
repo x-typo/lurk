@@ -5,21 +5,24 @@ struct PostDetailView: View {
     let post: Post
     let session: RedditSession
     let client: RedditClient
+    let filterStore: PostFilterStore
     @Environment(\.dismiss) private var dismiss
     @State private var player: AVPlayer?
     @State private var voted: Int = 0
     @State private var displayScore: Int
     @State private var comments: [Comment] = []
     @State private var showCommentSheet = false
+    @State private var showSubreddit = false
     @State private var commentText = ""
     @State private var postingComment = false
     @State private var mediaSaved = false
     @State private var savingMedia = false
 
-    init(post: Post, session: RedditSession, client: RedditClient) {
+    init(post: Post, session: RedditSession, client: RedditClient, filterStore: PostFilterStore) {
         self.post = post
         self.session = session
         self.client = client
+        self.filterStore = filterStore
         _displayScore = State(initialValue: post.score)
     }
 
@@ -31,6 +34,7 @@ struct PostDetailView: View {
                         Text(post.subredditNamePrefixed)
                             .font(.subheadline.weight(.semibold))
                             .foregroundStyle(Theme.primary)
+                            .onTapGesture { showSubreddit = true }
                         Text("\u{2022}")
                             .font(.caption)
                             .foregroundStyle(Theme.textMuted)
@@ -199,6 +203,31 @@ struct PostDetailView: View {
             }
         }
         .preferredColorScheme(.dark)
+        .fullScreenCover(isPresented: $showSubreddit) {
+            VStack(spacing: 0) {
+                HStack {
+                    Button { showSubreddit = false } label: {
+                        Text("Close")
+                            .foregroundStyle(Theme.primary)
+                    }
+                    Spacer()
+                    Text(post.subredditNamePrefixed)
+                        .font(.body.weight(.semibold))
+                        .foregroundStyle(Theme.text)
+                    Spacer()
+                    Text("Close").hidden()
+                }
+                .padding(.horizontal, 16)
+                .padding(.vertical, 12)
+                .background(Theme.background)
+                .overlay(alignment: .bottom) {
+                    Theme.border.frame(height: 1)
+                }
+                SubredditFeedView(subreddit: post.subreddit, client: client, filterStore: filterStore, session: session)
+            }
+            .background(Theme.background)
+            .preferredColorScheme(.dark)
+        }
         .sheet(isPresented: $showCommentSheet) {
             NavigationStack {
                 VStack(spacing: 0) {
@@ -343,9 +372,21 @@ struct CommentBodyView: View {
                 switch part {
                 case .text(let text):
                     if !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                        Text(text)
-                            .font(textFont)
-                            .foregroundStyle(Theme.text)
+                        VStack(alignment: .leading, spacing: 2) {
+                            let lines = text.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
+                            ForEach(Array(lines.enumerated()), id: \.offset) { _, line in
+                                let trimmed = line.trimmingCharacters(in: .whitespaces)
+                                if trimmed.isEmpty {
+                                    Spacer().frame(height: 8)
+                                } else if Self.isHorizontalRule(trimmed) {
+                                    Divider().background(Theme.border).padding(.vertical, 4)
+                                } else if let attr = Self.markdownString(Self.cleanLine(trimmed)) {
+                                    Text(attr)
+                                        .font(textFont)
+                                        .foregroundStyle(Theme.text)
+                                }
+                            }
+                        }
                     }
                 case .image(let url):
                     AsyncImage(url: url) { phase in
@@ -448,5 +489,33 @@ struct CommentBodyView: View {
     private static func isImageURL(_ urlStr: String) -> Bool {
         let lower = urlStr.lowercased()
         return imageExtensions.contains { lower.contains(".\($0)") }
+    }
+
+    private static func isHorizontalRule(_ line: String) -> Bool {
+        let stripped = line.replacingOccurrences(of: " ", with: "")
+        guard stripped.count >= 3 else { return false }
+        return stripped.allSatisfy({ $0 == "-" })
+            || stripped.allSatisfy({ $0 == "*" })
+            || stripped.allSatisfy({ $0 == "_" })
+    }
+
+    private static func cleanLine(_ line: String) -> String {
+        var result = line
+        if result.hasPrefix("#") {
+            let stripped = result.drop(while: { $0 == "#" })
+            if stripped.first == " " {
+                result = String(stripped.dropFirst())
+            }
+        }
+        result = result.replacingOccurrences(of: ">!", with: "")
+        result = result.replacingOccurrences(of: "!<", with: "")
+        return result
+    }
+
+    private static func markdownString(_ text: String) -> AttributedString? {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+        return (try? AttributedString(markdown: trimmed, options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace)))
+            ?? AttributedString(trimmed)
     }
 }
