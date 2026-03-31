@@ -501,8 +501,11 @@ struct CommentBodyView: View {
 
     private static func cleanLine(_ line: String) -> String {
         var result = line
-        if let range = result.range(of: "^#{1,6}\\s+", options: .regularExpression) {
-            result = String(result[range.upperBound...])
+        if result.hasPrefix("#") {
+            let stripped = result.drop(while: { $0 == "#" })
+            if stripped.first == " " {
+                result = String(stripped.dropFirst())
+            }
         }
         result = result.replacingOccurrences(of: ">!", with: "")
         result = result.replacingOccurrences(of: "!<", with: "")

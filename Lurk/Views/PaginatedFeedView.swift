@@ -5,6 +5,7 @@ struct PaginatedFeedView: View {
     let session: RedditSession
     let client: RedditClient
     let fetchPage: (_ after: String?) async throws -> RedditListing
+    var showSubredditNav: Bool = true
 
     @State private var posts: [Post] = []
     @State private var after: String?
@@ -39,7 +40,7 @@ struct PaginatedFeedView: View {
                                     posts.removeAll { $0.id == id }
                                 },
                                 onShowDetail: { selectedPost = post },
-                                onShowSubreddit: { subredditPost = post },
+                                onShowSubreddit: showSubredditNav ? { subredditPost = post } : nil,
                                 onShowGallery: { galleryPost = post }
                             )
                             .onAppear {
