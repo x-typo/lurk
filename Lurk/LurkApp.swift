@@ -12,11 +12,11 @@ struct LurkApp: App {
     var body: some Scene {
         WindowGroup {
             TabView(selection: tabSelection) {
-                HomeFeedView(client: client, filterStore: filterStore, subStore: subStore, session: session)
-                    .tabItem { Label("Home", systemImage: "house") }
-                    .tag(0)
                 PopularFeedView(client: client, filterStore: filterStore, session: session)
                     .tabItem { Label("Popular", systemImage: "flame") }
+                    .tag(0)
+                HomeFeedView(client: client, filterStore: filterStore, subStore: subStore, session: session)
+                    .tabItem { Label("Home", systemImage: "house") }
                     .tag(1)
                 SubredditsView(client: client, filterStore: filterStore, subStore: subStore, session: session, resetKey: subredditResetKey)
                     .tabItem { Label("Subreddits", systemImage: "list.bullet") }

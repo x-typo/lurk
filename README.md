@@ -54,10 +54,10 @@ Lurk/
 
 ```bash
 xcodebuild -project Lurk/Lurk.xcodeproj -scheme Lurk \
-  -destination 'id=DEVICE_UUID' -configuration Release
+  -destination 'id=DEVICE_UUID' build
 ```
 
-No signing configuration, dev server, or environment variables needed.
+No signing configuration or environment variables needed.
 
 ## Design Philosophy
 
