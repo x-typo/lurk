@@ -34,7 +34,7 @@ struct HomeFeedView: View {
                     LazyVStack(spacing: 12) {
                         ForEach(posts) { post in
                             PostCardView(
-                                post: post, session: session, client: client, filterStore: filterStore,
+                                post: post,
                                 onHide: { id in
                                     filterStore.hidePost(id) { @MainActor in
                                         guard session.isLoggedIn else { return }

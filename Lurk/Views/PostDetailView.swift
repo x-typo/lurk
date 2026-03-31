@@ -376,7 +376,9 @@ struct CommentBodyView: View {
                             let lines = text.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
                             ForEach(Array(lines.enumerated()), id: \.offset) { _, line in
                                 let trimmed = line.trimmingCharacters(in: .whitespaces)
-                                if Self.isHorizontalRule(trimmed) {
+                                if trimmed.isEmpty {
+                                    Spacer().frame(height: 8)
+                                } else if Self.isHorizontalRule(trimmed) {
                                     Divider().background(Theme.border).padding(.vertical, 4)
                                 } else if let attr = Self.markdownString(Self.cleanLine(trimmed)) {
                                     Text(attr)

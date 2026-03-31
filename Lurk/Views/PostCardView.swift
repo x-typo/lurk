@@ -2,9 +2,6 @@ import SwiftUI
 
 struct PostCardView: View {
     let post: Post
-    let session: RedditSession
-    let client: RedditClient
-    let filterStore: PostFilterStore
     var onHide: ((String) -> Void)?
     var onShowDetail: (() -> Void)?
     var onShowSubreddit: (() -> Void)?
