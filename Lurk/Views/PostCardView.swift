@@ -89,11 +89,11 @@ struct PostCardView: View {
                 }
 
                 HStack(spacing: 6) {
+                    Image(systemName: "arrow.up")
+                        .font(.caption)
+                        .foregroundStyle(Theme.textSecondary)
                     Text(Formatters.score(post.score))
                         .font(.subheadline)
-                        .foregroundStyle(Theme.textSecondary)
-                    Text("\u{25B3}")
-                        .font(.caption2)
                         .foregroundStyle(Theme.textSecondary)
                     Text("\u{2022}")
                         .font(.caption)

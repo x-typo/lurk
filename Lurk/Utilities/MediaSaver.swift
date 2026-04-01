@@ -18,6 +18,22 @@ enum MediaSaver {
         }
     }
 
+    static func saveImageData(from url: URL) async -> SaveResult {
+        do {
+            let (data, _) = try await URLSession.shared.data(from: url)
+            let ext = url.pathExtension.isEmpty ? "gif" : url.pathExtension
+            let fileURL = FileManager.default.temporaryDirectory.appendingPathComponent("\(UUID().uuidString).\(ext)")
+            try data.write(to: fileURL)
+            let result = await saveToLibrary {
+                PHAssetChangeRequest.creationRequestForAssetFromImage(atFileURL: fileURL)
+            }
+            try? FileManager.default.removeItem(at: fileURL)
+            return result
+        } catch {
+            return .failed
+        }
+    }
+
     static func saveVideo(from url: URL) async -> SaveResult {
         do {
             let (tempURL, _) = try await URLSession.shared.download(from: url)

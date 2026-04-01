@@ -60,7 +60,8 @@ extension Comment {
             guard wrapper.kind == "t1" else { return nil }
             let d = wrapper.data
             guard let author = d.author, let body = d.body,
-                  author != "AutoModerator" else { return nil }
+                  author != "AutoModerator",
+                  author != "AnimeMod" else { return nil }
             let depth = d.depth ?? 0
             let withinDepth = depth < maxRenderDepth
             return Comment(

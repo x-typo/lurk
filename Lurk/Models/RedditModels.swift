@@ -78,17 +78,29 @@ struct GalleryItem: Decodable {
 }
 
 struct MediaMetadataItem: Decodable {
+    let e: String?
     let s: MediaMetadataSource?
+
+    var isAnimated: Bool {
+        e == "AnimatedImage"
+    }
 }
 
 struct MediaMetadataSource: Decodable {
     let u: String?
+    let gif: String?
     let x: Int?
     let y: Int?
 
     var decodedUrl: String? {
-        u?.replacingOccurrences(of: "&amp;", with: "&")
+        (u ?? gif)?.replacingOccurrences(of: "&amp;", with: "&")
     }
+}
+
+struct GalleryMedia: Identifiable {
+    let id: Int
+    let url: URL
+    let isAnimated: Bool
 }
 
 // MARK: - Enums
@@ -136,20 +148,23 @@ extension Post {
     }
 
     var isGallery: Bool {
-        (galleryData?.items?.count ?? 0) > 1
+        galleryCount > 1
     }
 
     var galleryCount: Int {
         galleryData?.items?.count ?? 0
     }
 
-    var galleryURLs: [URL] {
+    var galleryItems: [GalleryMedia] {
         guard let items = galleryData?.items else { return [] }
-        return items.compactMap { item in
+        var result: [GalleryMedia] = []
+        for item in items {
             guard let meta = mediaMetadata?[item.mediaId],
-                  let urlStr = meta.s?.decodedUrl else { return nil }
-            return URL(string: urlStr)
+                  let urlStr = meta.s?.decodedUrl,
+                  let url = URL(string: urlStr) else { continue }
+            result.append(GalleryMedia(id: result.count, url: url, isAnimated: meta.isAnimated))
         }
+        return result
     }
 
     var redditURL: URL {
