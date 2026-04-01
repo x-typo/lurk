@@ -162,7 +162,7 @@ extension Post {
             guard let meta = mediaMetadata?[item.mediaId],
                   let urlStr = meta.s?.decodedUrl,
                   let url = URL(string: urlStr) else { continue }
-            result.append(GalleryMedia(id: index, url: url, isAnimated: meta.isAnimated))
+            result.append(GalleryMedia(id: result.count, url: url, isAnimated: meta.isAnimated))
         }
         return result
     }

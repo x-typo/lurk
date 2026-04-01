@@ -89,7 +89,10 @@ struct GalleryViewerView: View {
                     Button {
                         saveState = .saving
                         Task {
-                            let result = await MediaSaver.saveImage(from: items[currentPage].url)
+                            let item = items[currentPage]
+                            let result = item.isAnimated
+                                ? await MediaSaver.saveImageData(from: item.url)
+                                : await MediaSaver.saveImage(from: item.url)
                             saveState = result == .saved ? .saved : .failed
                             try? await Task.sleep(for: .seconds(1.5))
                             saveState = .idle
@@ -115,14 +118,25 @@ struct GalleryViewerView: View {
 
                     Button {
                         Task {
-                            guard let (data, _) = try? await URLSession.shared.data(from: items[currentPage].url),
-                                  let image = UIImage(data: data) else { return }
-                            let ac = UIActivityViewController(activityItems: [image], applicationActivities: nil)
+                            let item = items[currentPage]
+                            guard let (data, _) = try? await URLSession.shared.data(from: item.url) else { return }
+                            let shareItem: Any
+                            if item.isAnimated {
+                                let tempURL = FileManager.default.temporaryDirectory.appendingPathComponent("\(UUID().uuidString).gif")
+                                try? data.write(to: tempURL)
+                                shareItem = tempURL
+                            } else {
+                                guard let image = UIImage(data: data) else { return }
+                                shareItem = image
+                            }
+                            let ac = UIActivityViewController(activityItems: [shareItem], applicationActivities: nil)
                             if let scene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
                                var presenter = scene.keyWindow?.rootViewController {
                                 while let next = presenter.presentedViewController {
                                     presenter = next
                                 }
+                                ac.popoverPresentationController?.sourceView = presenter.view
+                                ac.popoverPresentationController?.sourceRect = CGRect(x: presenter.view.bounds.midX, y: presenter.view.bounds.midY, width: 0, height: 0)
                                 presenter.present(ac, animated: true)
                             }
                         }

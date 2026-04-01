@@ -94,8 +94,7 @@ struct VideoViewerView: View {
                     Button {
                         Task {
                             guard let (tempDownload, _) = try? await URLSession.shared.download(from: url) else { return }
-                            let tempURL = FileManager.default.temporaryDirectory.appendingPathComponent("share.mp4")
-                            try? FileManager.default.removeItem(at: tempURL)
+                            let tempURL = FileManager.default.temporaryDirectory.appendingPathComponent("\(UUID().uuidString).mp4")
                             try? FileManager.default.moveItem(at: tempDownload, to: tempURL)
                             let ac = UIActivityViewController(activityItems: [tempURL], applicationActivities: nil)
                             if let scene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
@@ -103,6 +102,8 @@ struct VideoViewerView: View {
                                 while let next = presenter.presentedViewController {
                                     presenter = next
                                 }
+                                ac.popoverPresentationController?.sourceView = presenter.view
+                                ac.popoverPresentationController?.sourceRect = CGRect(x: presenter.view.bounds.midX, y: presenter.view.bounds.midY, width: 0, height: 0)
                                 presenter.present(ac, animated: true)
                             }
                         }
