@@ -158,7 +158,7 @@ extension Post {
     var galleryItems: [GalleryMedia] {
         guard let items = galleryData?.items else { return [] }
         var result: [GalleryMedia] = []
-        for (index, item) in items.enumerated() {
+        for item in items {
             guard let meta = mediaMetadata?[item.mediaId],
                   let urlStr = meta.s?.decodedUrl,
                   let url = URL(string: urlStr) else { continue }

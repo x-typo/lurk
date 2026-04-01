@@ -15,6 +15,11 @@ struct GalleryViewerView: View {
         case idle, saving, saved, failed
     }
 
+    private var currentItem: GalleryMedia? {
+        guard currentPage >= 0, currentPage < items.count else { return nil }
+        return items[currentPage]
+    }
+
     var body: some View {
         let dragProgress: CGFloat = min(abs(dragOffset.height) / dismissThreshold, 1.0)
 
@@ -89,7 +94,12 @@ struct GalleryViewerView: View {
                     Button {
                         saveState = .saving
                         Task {
-                            let item = items[currentPage]
+                            guard let item = currentItem else {
+                                saveState = .failed
+                                try? await Task.sleep(for: .seconds(1.5))
+                                saveState = .idle
+                                return
+                            }
                             let result = item.isAnimated
                                 ? await MediaSaver.saveImageData(from: item.url)
                                 : await MediaSaver.saveImage(from: item.url)
@@ -118,12 +128,12 @@ struct GalleryViewerView: View {
 
                     Button {
                         Task {
-                            let item = items[currentPage]
-                            guard let (data, _) = try? await URLSession.shared.data(from: item.url) else { return }
+                            guard let item = currentItem,
+                                  let (data, _) = try? await URLSession.shared.data(from: item.url) else { return }
                             let shareItem: Any
                             if item.isAnimated {
                                 let tempURL = FileManager.default.temporaryDirectory.appendingPathComponent("\(UUID().uuidString).gif")
-                                try? data.write(to: tempURL)
+                                guard (try? data.write(to: tempURL)) != nil else { return }
                                 shareItem = tempURL
                             } else {
                                 guard let image = UIImage(data: data) else { return }

@@ -95,7 +95,7 @@ struct VideoViewerView: View {
                         Task {
                             guard let (tempDownload, _) = try? await URLSession.shared.download(from: url) else { return }
                             let tempURL = FileManager.default.temporaryDirectory.appendingPathComponent("\(UUID().uuidString).mp4")
-                            try? FileManager.default.moveItem(at: tempDownload, to: tempURL)
+                            guard (try? FileManager.default.moveItem(at: tempDownload, to: tempURL)) != nil else { return }
                             let ac = UIActivityViewController(activityItems: [tempURL], applicationActivities: nil)
                             if let scene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
                                var presenter = scene.keyWindow?.rootViewController {
