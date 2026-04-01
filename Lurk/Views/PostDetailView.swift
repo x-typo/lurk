@@ -9,23 +9,12 @@ struct PostDetailView: View {
     let filterStore: PostFilterStore
     @Environment(\.dismiss) private var dismiss
     @State private var player: AVPlayer?
-    @State private var voted: Int = 0
-    @State private var displayScore: Int
     @State private var comments: [Comment] = []
     @State private var showCommentSheet = false
     @State private var showSubreddit = false
-    @State private var commentText = ""
-    @State private var postingComment = false
     @State private var mediaSaved = false
     @State private var savingMedia = false
-
-    init(post: Post, session: RedditSession, client: RedditClient, filterStore: PostFilterStore) {
-        self.post = post
-        self.session = session
-        self.client = client
-        self.filterStore = filterStore
-        _displayScore = State(initialValue: post.score)
-    }
+    @State private var showMediaViewer = false
 
     var body: some View {
         NavigationStack {
@@ -56,6 +45,17 @@ struct PostDetailView: View {
                         VideoPlayer(player: player)
                             .aspectRatio(post.videoAspectRatio ?? 16/9, contentMode: .fit)
                             .clipShape(RoundedRectangle(cornerRadius: 8))
+                            .overlay(alignment: .topTrailing) {
+                                Button { showMediaViewer = true } label: {
+                                    Image(systemName: "arrow.up.left.and.arrow.down.right")
+                                        .font(.caption.weight(.semibold))
+                                        .foregroundStyle(.white)
+                                        .padding(8)
+                                        .background(.black.opacity(0.5))
+                                        .clipShape(Circle())
+                                }
+                                .padding(8)
+                            }
                             .onAppear {
                                 player = AVPlayer(url: videoURL)
                                 player?.play()
@@ -81,6 +81,7 @@ struct PostDetailView: View {
                                     .overlay { ProgressView().tint(Theme.textMuted) }
                             }
                         }
+                        .onTapGesture { showMediaViewer = true }
                     }
 
                     if !post.selftext.isEmpty {
@@ -88,27 +89,8 @@ struct PostDetailView: View {
                     }
 
                     HStack(spacing: 16) {
-                        if session.isLoggedIn {
-                            Button {
-                                let newDir = voted == 1 ? 0 : 1
-                                let scoreDelta = newDir - voted
-                                voted = newDir
-                                displayScore += scoreDelta
-                                Task {
-                                    let request = session.authenticatedRequest(
-                                        url: RedditAPI.vote,
-                                        formData: ["id": "t3_\(post.id)", "dir": "\(newDir)"]
-                                    )
-                                    try? await client.execute(request)
-                                }
-                            } label: {
-                                Label(Formatters.score(displayScore), systemImage: voted == 1 ? "arrow.up.circle.fill" : "arrow.up")
-                                    .foregroundStyle(voted == 1 ? Theme.primary : Theme.textSecondary)
-                            }
-                        } else {
-                            Label(Formatters.score(displayScore), systemImage: "arrow.up")
-                                .foregroundStyle(Theme.textSecondary)
-                        }
+                        VoteControlsView(thingID: "t3_\(post.id)", initialScore: post.score, session: session, client: client)
+
                         Label(Formatters.score(post.numComments), systemImage: "bubble.right")
                             .foregroundStyle(Theme.textSecondary)
 
@@ -181,7 +163,7 @@ struct PostDetailView: View {
 
                             LazyVStack(alignment: .leading, spacing: 0) {
                                 ForEach(comments) { comment in
-                                    CommentRowView(comment: comment)
+                                    CommentRowView(comment: comment, session: session, client: client)
                                 }
                             }
                         }
@@ -199,101 +181,42 @@ struct PostDetailView: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("Close") { dismiss() }
+                    Button("Close") {
+                        comments = []
+                        player?.pause()
+                        player = nil
+                        dismiss()
+                    }
                         .foregroundStyle(Theme.primary)
                 }
             }
         }
         .preferredColorScheme(.dark)
         .fullScreenCover(isPresented: $showSubreddit) {
-            VStack(spacing: 0) {
-                HStack {
-                    Button { showSubreddit = false } label: {
-                        Text("Close")
-                            .foregroundStyle(Theme.primary)
-                    }
-                    Spacer()
-                    Text(post.subredditNamePrefixed)
-                        .font(.body.weight(.semibold))
-                        .foregroundStyle(Theme.text)
-                    Spacer()
-                    Text("Close").hidden()
-                }
-                .padding(.horizontal, 16)
-                .padding(.vertical, 12)
-                .background(Theme.background)
-                .overlay(alignment: .bottom) {
-                    Theme.border.frame(height: 1)
-                }
-                SubredditFeedView(subreddit: post.subreddit, client: client, filterStore: filterStore, session: session)
+            SubredditCoverView(subreddit: post.subreddit, title: post.subredditNamePrefixed, client: client, filterStore: filterStore, session: session) {
+                showSubreddit = false
             }
-            .background(Theme.background)
-            .preferredColorScheme(.dark)
         }
         .sheet(isPresented: $showCommentSheet) {
-            NavigationStack {
-                VStack(spacing: 0) {
-                    TextEditor(text: $commentText)
-                        .scrollContentBackground(.hidden)
-                        .background(Theme.surface)
-                        .foregroundStyle(Theme.text)
-                        .font(.body)
-                        .padding(12)
-                        .clipShape(RoundedRectangle(cornerRadius: 12))
-                        .padding(16)
-
-                    Spacer()
-                }
-                .background(Theme.background)
-                .navigationTitle("Reply")
-                .navigationBarTitleDisplayMode(.inline)
-                .toolbar {
-                    ToolbarItem(placement: .cancellationAction) {
-                        Button("Cancel") {
-                            showCommentSheet = false
-                        }
-                        .foregroundStyle(Theme.primary)
-                    }
-                    ToolbarItem(placement: .confirmationAction) {
-                        Button {
-                            guard !commentText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
-                            postingComment = true
-                            Task {
-                                let request = session.authenticatedRequest(
-                                    url: RedditAPI.comment,
-                                    formData: [
-                                        "thing_id": "t3_\(post.id)",
-                                        "text": commentText
-                                    ]
-                                )
-                                try? await client.execute(request)
-                                postingComment = false
-                                commentText = ""
-                                showCommentSheet = false
-                            }
-                        } label: {
-                            if postingComment {
-                                ProgressView().tint(Theme.primary)
-                            } else {
-                                Text("Post")
-                                    .fontWeight(.semibold)
-                            }
-                        }
-                        .foregroundStyle(Theme.primary)
-                        .disabled(commentText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || postingComment)
-                    }
-                }
+            ComposeReplySheet(thingID: "t3_\(post.id)", session: session, client: client, isPresented: $showCommentSheet)
+        }
+        .fullScreenCover(isPresented: $showMediaViewer) {
+            if let videoURL = post.videoURL {
+                VideoViewerView(url: videoURL, aspectRatio: post.videoAspectRatio)
+            } else if let imageURL = post.imageURL {
+                GalleryViewerView(items: [GalleryMedia(id: 0, url: imageURL, isAnimated: false)])
             }
-            .presentationDetents([.medium])
-            .preferredColorScheme(.dark)
         }
     }
 }
 
 struct CommentRowView: View {
     let comment: Comment
+    let session: RedditSession
+    let client: RedditClient
     @State private var collapsed = false
     @State private var selecting = false
+    @State private var showReplySheet = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
@@ -305,14 +228,6 @@ struct CommentRowView: View {
                     .font(.caption)
                     .foregroundStyle(Theme.textMuted)
                 Spacer()
-                if collapsed {
-                    Text("+")
-                        .font(.caption.weight(.bold))
-                        .foregroundStyle(Theme.textMuted)
-                }
-                Text(Formatters.score(comment.score))
-                    .font(.caption)
-                    .foregroundStyle(Theme.textSecondary)
             }
             if !collapsed {
                 if selecting {
@@ -321,9 +236,29 @@ struct CommentRowView: View {
                     CommentBodyView(content: comment.body)
                 }
 
+                HStack(spacing: 12) {
+                    VoteControlsView(thingID: "t1_\(comment.id)", initialScore: comment.score, session: session, client: client, inactiveColor: Theme.textMuted)
+
+                    if session.isLoggedIn {
+                        Button {
+                            showReplySheet = true
+                        } label: {
+                            Label("Reply", systemImage: "bubble.left")
+                                .foregroundStyle(Theme.textMuted)
+                        }
+                    } else {
+                        Label("Reply", systemImage: "bubble.left")
+                            .foregroundStyle(Theme.textMuted)
+                    }
+
+                    Spacer()
+                }
+                .font(.caption)
+                .padding(.top, 4)
+
                 if !comment.replies.isEmpty {
                     ForEach(comment.replies) { reply in
-                        CommentRowView(comment: reply)
+                        CommentRowView(comment: reply, session: session, client: client)
                             .padding(.leading, 16)
                     }
                 }
@@ -358,6 +293,9 @@ struct CommentRowView: View {
                     .frame(width: 2)
                     .padding(.leading, CGFloat((comment.depth - 1) * 12))
             }
+        }
+        .sheet(isPresented: $showReplySheet) {
+            ComposeReplySheet(thingID: "t1_\(comment.id)", session: session, client: client, isPresented: $showReplySheet)
         }
     }
 }
@@ -553,5 +491,145 @@ struct SelectableTextView: UIViewRepresentable {
 
     func updateUIView(_ textView: UITextView, context: Context) {
         textView.text = text
+    }
+}
+
+struct VoteControlsView: View {
+    let thingID: String
+    let session: RedditSession
+    let client: RedditClient
+    var inactiveColor: Color = Theme.textSecondary
+
+    @State private var voted: Int = 0
+    @State private var displayScore: Int
+
+    init(thingID: String, initialScore: Int, session: RedditSession, client: RedditClient, inactiveColor: Color = Theme.textSecondary) {
+        self.thingID = thingID
+        self.session = session
+        self.client = client
+        self.inactiveColor = inactiveColor
+        _displayScore = State(initialValue: initialScore)
+    }
+
+    var body: some View {
+        HStack(spacing: session.isLoggedIn ? 8 : 6) {
+            if session.isLoggedIn {
+                Button {
+                    let newDir = voted == 1 ? 0 : 1
+                    let scoreDelta = newDir - voted
+                    voted = newDir
+                    displayScore += scoreDelta
+                    Task {
+                        let request = session.authenticatedRequest(
+                            url: RedditAPI.vote,
+                            formData: ["id": thingID, "dir": "\(newDir)"]
+                        )
+                        try? await client.execute(request)
+                    }
+                } label: {
+                    Image(systemName: "arrow.up")
+                        .foregroundStyle(voted == 1 ? Theme.primary : inactiveColor)
+                }
+            } else {
+                Image(systemName: "arrow.up")
+                    .foregroundStyle(inactiveColor)
+            }
+
+            Text(Formatters.score(displayScore))
+                .foregroundStyle(voted == 1 ? Theme.primary : voted == -1 ? Theme.downvote : Theme.textSecondary)
+
+            if session.isLoggedIn {
+                Button {
+                    let newDir = voted == -1 ? 0 : -1
+                    let scoreDelta = newDir - voted
+                    voted = newDir
+                    displayScore += scoreDelta
+                    Task {
+                        let request = session.authenticatedRequest(
+                            url: RedditAPI.vote,
+                            formData: ["id": thingID, "dir": "\(newDir)"]
+                        )
+                        try? await client.execute(request)
+                    }
+                } label: {
+                    Image(systemName: "arrow.down")
+                        .foregroundStyle(voted == -1 ? Theme.downvote : inactiveColor)
+                }
+            } else {
+                Image(systemName: "arrow.down")
+                    .foregroundStyle(inactiveColor)
+            }
+        }
+    }
+}
+
+struct ComposeReplySheet: View {
+    let thingID: String
+    let session: RedditSession
+    let client: RedditClient
+    @Binding var isPresented: Bool
+    @State private var text = ""
+    @State private var posting = false
+
+    private var isEmpty: Bool {
+        text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    var body: some View {
+        NavigationStack {
+            VStack(spacing: 0) {
+                TextEditor(text: $text)
+                    .scrollContentBackground(.hidden)
+                    .background(Theme.surface)
+                    .foregroundStyle(Theme.text)
+                    .font(.body)
+                    .padding(12)
+                    .clipShape(RoundedRectangle(cornerRadius: 12))
+                    .padding(16)
+
+                Spacer()
+            }
+            .background(Theme.background)
+            .navigationTitle("Reply")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") {
+                        isPresented = false
+                    }
+                    .foregroundStyle(Theme.primary)
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button {
+                        guard !isEmpty else { return }
+                        posting = true
+                        Task {
+                            let request = session.authenticatedRequest(
+                                url: RedditAPI.comment,
+                                formData: [
+                                    "thing_id": thingID,
+                                    "text": text
+                                ]
+                            )
+                            try? await client.execute(request)
+                            posting = false
+                            text = ""
+                            isPresented = false
+                        }
+                    } label: {
+                        if posting {
+                            ProgressView().tint(Theme.primary)
+                        } else {
+                            Text("Post")
+                                .fontWeight(.semibold)
+                        }
+                    }
+                    .foregroundStyle(Theme.primary)
+                    .disabled(isEmpty || posting)
+                }
+            }
+        }
+        .presentationDetents([.medium])
+        .preferredColorScheme(.dark)
     }
 }

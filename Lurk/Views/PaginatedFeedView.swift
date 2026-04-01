@@ -65,32 +65,12 @@ struct PaginatedFeedView: View {
             PostDetailView(post: post, session: session, client: client, filterStore: filterStore)
         }
         .fullScreenCover(item: $subredditPost) { post in
-            VStack(spacing: 0) {
-                HStack {
-                    Button { subredditPost = nil } label: {
-                        Text("Close")
-                            .foregroundStyle(Theme.primary)
-                    }
-                    Spacer()
-                    Text(post.subredditNamePrefixed)
-                        .font(.body.weight(.semibold))
-                        .foregroundStyle(Theme.text)
-                    Spacer()
-                    Text("Close").hidden()
-                }
-                .padding(.horizontal, 16)
-                .padding(.vertical, 12)
-                .background(Theme.background)
-                .overlay(alignment: .bottom) {
-                    Theme.border.frame(height: 1)
-                }
-                SubredditFeedView(subreddit: post.subreddit, client: client, filterStore: filterStore, session: session)
+            SubredditCoverView(subreddit: post.subreddit, title: post.subredditNamePrefixed, client: client, filterStore: filterStore, session: session) {
+                subredditPost = nil
             }
-            .background(Theme.background)
-            .preferredColorScheme(.dark)
         }
         .fullScreenCover(item: $galleryPost) { post in
-            GalleryViewerView(urls: post.galleryURLs)
+            GalleryViewerView(items: post.galleryItems)
         }
     }
 

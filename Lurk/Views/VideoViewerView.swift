@@ -1,0 +1,122 @@
+import AVKit
+import SwiftUI
+import UIKit
+
+struct VideoViewerView: View {
+    let url: URL
+    let aspectRatio: CGFloat?
+    @State private var player: AVPlayer?
+    @State private var dragOffset: CGSize = .zero
+    @State private var dragAxis: Axis?
+    @State private var saveState: SaveState = .idle
+    @Environment(\.dismiss) private var dismiss
+
+    private let dismissThreshold: CGFloat = 150
+
+    enum SaveState {
+        case idle, saving, saved, failed
+    }
+
+    var body: some View {
+        let dragProgress: CGFloat = min(abs(dragOffset.height) / dismissThreshold, 1.0)
+
+        ZStack {
+            Theme.background.ignoresSafeArea()
+                .opacity(Double(1 - dragProgress * 0.5))
+
+            VideoPlayer(player: player)
+                .aspectRatio(aspectRatio ?? 16/9, contentMode: .fit)
+                .offset(y: dragOffset.height)
+                .scaleEffect(CGFloat(1 - dragProgress * 0.15))
+                .simultaneousGesture(
+                    DragGesture()
+                        .onChanged { value in
+                            if dragAxis == nil {
+                                dragAxis = abs(value.translation.height) > abs(value.translation.width) ? .vertical : .horizontal
+                            }
+                            guard dragAxis == .vertical else { return }
+                            dragOffset = value.translation
+                        }
+                        .onEnded { value in
+                            defer { dragAxis = nil }
+                            guard dragAxis == .vertical else { return }
+                            if abs(value.translation.height) > dismissThreshold {
+                                player?.pause()
+                                player = nil
+                                dismiss()
+                            } else {
+                                withAnimation(.spring()) { dragOffset = .zero }
+                            }
+                        }
+                )
+                .onAppear {
+                    player = AVPlayer(url: url)
+                    player?.play()
+                }
+                .onDisappear {
+                    player?.pause()
+                    player = nil
+                }
+
+            VStack {
+                Spacer()
+
+                HStack(spacing: 20) {
+                    Spacer()
+
+                    Button {
+                        saveState = .saving
+                        Task {
+                            let result = await MediaSaver.saveVideo(from: url)
+                            saveState = result == .saved ? .saved : .failed
+                            try? await Task.sleep(for: .seconds(1.5))
+                            saveState = .idle
+                        }
+                    } label: {
+                        Group {
+                            switch saveState {
+                            case .idle:
+                                Image(systemName: "square.and.arrow.down")
+                            case .saving:
+                                ProgressView().tint(.white)
+                            case .saved:
+                                Image(systemName: "checkmark")
+                            case .failed:
+                                Image(systemName: "xmark")
+                            }
+                        }
+                        .font(.title3)
+                        .foregroundStyle(.white.opacity(0.8))
+                        .frame(width: 44, height: 44)
+                    }
+                    .disabled(saveState != .idle)
+
+                    Button {
+                        Task {
+                            guard let (tempDownload, _) = try? await URLSession.shared.download(from: url) else { return }
+                            let tempURL = FileManager.default.temporaryDirectory.appendingPathComponent("share.mp4")
+                            try? FileManager.default.removeItem(at: tempURL)
+                            try? FileManager.default.moveItem(at: tempDownload, to: tempURL)
+                            let ac = UIActivityViewController(activityItems: [tempURL], applicationActivities: nil)
+                            if let scene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
+                               var presenter = scene.keyWindow?.rootViewController {
+                                while let next = presenter.presentedViewController {
+                                    presenter = next
+                                }
+                                presenter.present(ac, animated: true)
+                            }
+                        }
+                    } label: {
+                        Image(systemName: "square.and.arrow.up")
+                            .font(.title3)
+                            .foregroundStyle(.white.opacity(0.8))
+                            .frame(width: 44, height: 44)
+                    }
+                }
+                .padding(.horizontal, 20)
+                .padding(.bottom, 30)
+            }
+        }
+        .preferredColorScheme(.dark)
+    }
+}
