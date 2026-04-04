@@ -62,7 +62,7 @@ extension Comment {
             guard let author = d.author, let body = d.body,
                   author != "AutoModerator",
                   author != "AnimeMod",
-                  author != "TrendingTattler" else { return nil }
+                  author != "trendingtattler" else { return nil }
             let depth = d.depth ?? 0
             let withinDepth = depth < maxRenderDepth
             return Comment(
