@@ -15,7 +15,7 @@ struct LurkApp: App {
                 PopularFeedView(client: client, filterStore: filterStore, session: session)
                     .tabItem { Label("Popular", systemImage: "flame") }
                     .tag(0)
-                HomeFeedView(client: client, filterStore: filterStore, subStore: subStore, session: session)
+                HomeFeedView(client: client, filterStore: filterStore, session: session)
                     .tabItem { Label("Home", systemImage: "house") }
                     .tag(1)
                 SubredditsView(client: client, filterStore: filterStore, subStore: subStore, session: session, resetKey: subredditResetKey)

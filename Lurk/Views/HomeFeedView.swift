@@ -3,7 +3,6 @@ import SwiftUI
 struct HomeFeedView: View {
     let client: RedditClient
     let filterStore: PostFilterStore
-    let subStore: SubredditStore
     let session: RedditSession
 
     var body: some View {

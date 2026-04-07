@@ -41,9 +41,9 @@ actor RedditClient {
         after: String? = nil
     ) async throws -> RedditListing {
         var components = try buildComponents(path: "/r/popular/\(sort.rawValue).json")
-        var items = baseQueryItems(after: after)
-        items.insert(URLQueryItem(name: "t", value: time.rawValue), at: 0)
-        components.queryItems = items
+        components.queryItems = [
+            URLQueryItem(name: "t", value: time.rawValue),
+        ] + baseQueryItems(after: after)
         guard let url = components.url else { throw URLError(.badURL) }
         return try await fetch(url)
     }
