@@ -11,6 +11,11 @@ actor RedditClient {
     private let baseURL = "https://www.reddit.com"
     private static let pageSize = "25"
     private let session: URLSession
+    private let decoder: JSONDecoder = {
+        let d = JSONDecoder()
+        d.keyDecodingStrategy = .convertFromSnakeCase
+        return d
+    }()
 
     init() {
         let config = URLSessionConfiguration.default
@@ -18,6 +23,16 @@ actor RedditClient {
             "User-Agent": RedditAPI.userAgent
         ]
         self.session = URLSession(configuration: config)
+    }
+
+    func fetchHomePosts(after: String? = nil) async throws -> RedditListing {
+        var components = try buildComponents(path: "/top/.json")
+        components.queryItems = [
+            URLQueryItem(name: "sort", value: "top"),
+            URLQueryItem(name: "t", value: "day"),
+        ] + baseQueryItems(after: after)
+        guard let url = components.url else { throw URLError(.badURL) }
+        return try await fetch(url)
     }
 
     func fetchPopularPosts(
@@ -56,8 +71,6 @@ actor RedditClient {
             throw URLError(.badServerResponse)
         }
 
-        let decoder = JSONDecoder()
-        decoder.keyDecodingStrategy = .convertFromSnakeCase
         let listings = try decoder.decode([CommentListing].self, from: data)
 
         guard listings.count >= 2 else { return [] }
@@ -94,8 +107,6 @@ actor RedditClient {
         guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
             throw URLError(.badServerResponse)
         }
-        let decoder = JSONDecoder()
-        decoder.keyDecodingStrategy = .convertFromSnakeCase
         return try decoder.decode(RedditListing.self, from: data)
     }
 }
