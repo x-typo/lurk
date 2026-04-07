@@ -11,6 +11,11 @@ actor RedditClient {
     private let baseURL = "https://www.reddit.com"
     private static let pageSize = "25"
     private let session: URLSession
+    private let decoder: JSONDecoder = {
+        let d = JSONDecoder()
+        d.keyDecodingStrategy = .convertFromSnakeCase
+        return d
+    }()
 
     init() {
         let config = URLSessionConfiguration.default
@@ -20,15 +25,25 @@ actor RedditClient {
         self.session = URLSession(configuration: config)
     }
 
+    func fetchHomePosts(after: String? = nil) async throws -> RedditListing {
+        var components = try buildComponents(path: "/top/.json")
+        components.queryItems = [
+            URLQueryItem(name: "sort", value: "top"),
+            URLQueryItem(name: "t", value: "day"),
+        ] + baseQueryItems(after: after)
+        guard let url = components.url else { throw URLError(.badURL) }
+        return try await fetch(url)
+    }
+
     func fetchPopularPosts(
         sort: SortType = .top,
         time: TimeFilter = .day,
         after: String? = nil
     ) async throws -> RedditListing {
         var components = try buildComponents(path: "/r/popular/\(sort.rawValue).json")
-        var items = baseQueryItems(after: after)
-        items.insert(URLQueryItem(name: "t", value: time.rawValue), at: 0)
-        components.queryItems = items
+        components.queryItems = [
+            URLQueryItem(name: "t", value: time.rawValue),
+        ] + baseQueryItems(after: after)
         guard let url = components.url else { throw URLError(.badURL) }
         return try await fetch(url)
     }
@@ -56,8 +71,6 @@ actor RedditClient {
             throw URLError(.badServerResponse)
         }
 
-        let decoder = JSONDecoder()
-        decoder.keyDecodingStrategy = .convertFromSnakeCase
         let listings = try decoder.decode([CommentListing].self, from: data)
 
         guard listings.count >= 2 else { return [] }
@@ -94,8 +107,6 @@ actor RedditClient {
         guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
             throw URLError(.badServerResponse)
         }
-        let decoder = JSONDecoder()
-        decoder.keyDecodingStrategy = .convertFromSnakeCase
         return try decoder.decode(RedditListing.self, from: data)
     }
 }
