@@ -2,6 +2,7 @@ import SwiftUI
 
 struct PaginatedFeedView: View {
     let filterStore: PostFilterStore
+    let subStore: SubredditStore
     let session: RedditSession
     let client: RedditClient
     let fetchPage: (_ after: String?) async throws -> RedditListing
@@ -62,10 +63,10 @@ struct PaginatedFeedView: View {
         .background(Theme.background)
         .task { await loadPosts() }
         .sheet(item: $selectedPost) { post in
-            PostDetailView(post: post, session: session, client: client, filterStore: filterStore)
+            PostDetailView(post: post, session: session, client: client, filterStore: filterStore, subStore: subStore)
         }
         .fullScreenCover(item: $subredditPost) { post in
-            SubredditCoverView(subreddit: post.subreddit, title: post.subredditNamePrefixed, client: client, filterStore: filterStore, session: session) {
+            SubredditCoverView(subreddit: post.subreddit, title: post.subredditNamePrefixed, client: client, filterStore: filterStore, session: session, subStore: subStore) {
                 subredditPost = nil
             }
         }

@@ -30,7 +30,7 @@ struct SubredditsView: View {
                             Theme.border.frame(height: 1)
                         }
                     }
-                    SubredditFeedView(subreddit: sub, client: client, filterStore: filterStore, session: session)
+                    SubredditFeedView(subreddit: sub, client: client, filterStore: filterStore, subStore: subStore, session: session)
                 }
             } else {
                 ScrollView {
@@ -78,6 +78,7 @@ struct SubredditsView: View {
 
                                 Button {
                                     subStore.removeSubreddit(sub)
+                                    syncSubscribe(sub, action: "unsub")
                                 } label: {
                                     Text("\u{2715}")
                                         .font(.callout.bold())
@@ -100,9 +101,20 @@ struct SubredditsView: View {
     }
 
     private func addSub() {
-        let name = newSubName.trimmingCharacters(in: .whitespaces)
-        guard !name.isEmpty else { return }
-        subStore.addSubreddit(name)
+        let raw = newSubName.trimmingCharacters(in: .whitespaces)
+        guard !raw.isEmpty else { return }
+        if let stored = subStore.addSubreddit(raw) {
+            syncSubscribe(stored, action: "sub")
+        }
         newSubName = ""
+    }
+
+    private func syncSubscribe(_ name: String, action: String) {
+        guard session.isLoggedIn else { return }
+        let request = session.authenticatedRequest(
+            url: RedditAPI.subscribe,
+            formData: ["action": action, "sr_name": name, "api_type": "json"]
+        )
+        Task { try? await client.execute(request) }
     }
 }

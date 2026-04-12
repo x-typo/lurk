@@ -11,5 +11,6 @@ enum Theme {
     static let swipeOpen = Color(red: 0, green: 0.478, blue: 1) // #007AFF
     static let swipeHide = Color(red: 0.8, green: 0.2, blue: 0.2) // #CC3333
     static let downvote = Color(red: 0.384, green: 0.498, blue: 1) // Reddit periwinkle #6180FF
+    static let opBadge = Color(red: 0, green: 0.478, blue: 1) // #007AFF
     static let border = Color(red: 0.2, green: 0.2, blue: 0.2)
 }

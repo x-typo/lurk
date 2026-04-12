@@ -23,6 +23,7 @@ struct CommentData: Decodable {
     let replies: CommentReplies?
     let id: String?
     let depth: Int?
+    let isSubmitter: Bool?
 }
 
 enum CommentReplies: Decodable {
@@ -50,6 +51,7 @@ struct Comment: Identifiable {
     let depth: Int
     let replies: [Comment]
     let moreCount: Int
+    let isSubmitter: Bool
 
     static let maxRenderDepth = 3
 }
@@ -73,7 +75,8 @@ extension Comment {
                 createdUtc: d.createdUtc ?? 0,
                 depth: depth,
                 replies: withinDepth ? parseReplies(d.replies) : [],
-                moreCount: withinDepth ? 0 : countReplies(d.replies)
+                moreCount: withinDepth ? 0 : countReplies(d.replies),
+                isSubmitter: d.isSubmitter ?? false
             )
         }
     }

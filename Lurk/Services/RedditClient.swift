@@ -5,6 +5,7 @@ enum RedditAPI {
     static let hide = URL(string: "https://www.reddit.com/api/hide")!
     static let vote = URL(string: "https://www.reddit.com/api/vote")!
     static let comment = URL(string: "https://www.reddit.com/api/comment")!
+    static let subscribe = URL(string: "https://www.reddit.com/api/subscribe")!
 }
 
 actor RedditClient {
@@ -82,6 +83,37 @@ actor RedditClient {
         guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
             throw URLError(.badServerResponse)
         }
+    }
+
+    func fetchSubscribedSubreddits() async throws -> [String] {
+        var names: [String] = []
+        var after: String?
+        var pageCount = 0
+        repeat {
+            var components = try buildComponents(path: "/subreddits/mine/subscriber.json")
+            var items: [URLQueryItem] = [
+                URLQueryItem(name: "limit", value: "100"),
+                URLQueryItem(name: "raw_json", value: "1"),
+            ]
+            if let after { items.append(URLQueryItem(name: "after", value: after)) }
+            components.queryItems = items
+            guard let url = components.url else { throw URLError(.badURL) }
+            let (data, response) = try await session.data(from: url)
+            guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
+                throw URLError(.badServerResponse)
+            }
+            let json = try JSONSerialization.jsonObject(with: data) as? [String: Any]
+            let dataDict = json?["data"] as? [String: Any]
+            let children = dataDict?["children"] as? [[String: Any]] ?? []
+            names += children.compactMap { child in
+                guard let d = child["data"] as? [String: Any] else { return nil }
+                return d["display_name"] as? String
+            }
+            let nextAfter = dataDict?["after"] as? String
+            after = (nextAfter?.isEmpty == false) ? nextAfter : nil
+            pageCount += 1
+        } while after != nil && pageCount < 50
+        return names
     }
 
     private func buildComponents(path: String) throws -> URLComponents {

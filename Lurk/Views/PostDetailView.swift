@@ -7,6 +7,7 @@ struct PostDetailView: View {
     let session: RedditSession
     let client: RedditClient
     let filterStore: PostFilterStore
+    let subStore: SubredditStore
     @Environment(\.dismiss) private var dismiss
     @State private var player: AVPlayer?
     @State private var comments: [Comment] = []
@@ -15,6 +16,7 @@ struct PostDetailView: View {
     @State private var mediaSaved = false
     @State private var savingMedia = false
     @State private var showMediaViewer = false
+    @State private var showShareSheet = false
 
     var body: some View {
         NavigationStack {
@@ -131,7 +133,9 @@ struct PostDetailView: View {
                             .padding(.trailing, 8)
                         }
 
-                        ShareLink(item: post.redditURL) {
+                        Button {
+                            showShareSheet = true
+                        } label: {
                             Image(systemName: "square.and.arrow.up")
                                 .foregroundStyle(Theme.textSecondary)
                         }
@@ -193,7 +197,7 @@ struct PostDetailView: View {
         }
         .preferredColorScheme(.dark)
         .fullScreenCover(isPresented: $showSubreddit) {
-            SubredditCoverView(subreddit: post.subreddit, title: post.subredditNamePrefixed, client: client, filterStore: filterStore, session: session) {
+            SubredditCoverView(subreddit: post.subreddit, title: post.subredditNamePrefixed, client: client, filterStore: filterStore, session: session, subStore: subStore) {
                 showSubreddit = false
             }
         }
@@ -206,6 +210,9 @@ struct PostDetailView: View {
             } else if let imageURL = post.imageURL {
                 GalleryViewerView(items: [GalleryMedia(id: 0, url: imageURL, isAnimated: false)])
             }
+        }
+        .sheet(isPresented: $showShareSheet) {
+            PostShareSheet(url: post.redditURL, title: post.title, imageURL: post.imageURL)
         }
     }
 }
@@ -224,6 +231,11 @@ struct CommentRowView: View {
                 Text("u/\(comment.author)")
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(Theme.primary)
+                if comment.isSubmitter {
+                    Text("OP")
+                        .font(.caption2.weight(.bold))
+                        .foregroundStyle(Theme.opBadge)
+                }
                 Text(Formatters.timeAgo(comment.createdUtc))
                     .font(.caption)
                     .foregroundStyle(Theme.textMuted)
