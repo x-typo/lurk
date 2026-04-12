@@ -101,10 +101,11 @@ struct SubredditsView: View {
     }
 
     private func addSub() {
-        let name = newSubName.trimmingCharacters(in: .whitespaces)
-        guard !name.isEmpty else { return }
-        subStore.addSubreddit(name)
-        syncSubscribe(name, action: "sub")
+        let raw = newSubName.trimmingCharacters(in: .whitespaces)
+        guard !raw.isEmpty else { return }
+        if let stored = subStore.addSubreddit(raw) {
+            syncSubscribe(stored, action: "sub")
+        }
         newSubName = ""
     }
 

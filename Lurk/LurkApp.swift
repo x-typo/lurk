@@ -30,7 +30,7 @@ struct LurkApp: App {
             .onChange(of: session.isLoggedIn) { _, loggedIn in
                 guard loggedIn else { return }
                 Task {
-                    if let subs = try? await client.fetchSubscribedSubreddits(), !subs.isEmpty {
+                    if let subs = try? await client.fetchSubscribedSubreddits() {
                         subStore.replaceAll(subs)
                     }
                 }

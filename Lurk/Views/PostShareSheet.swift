@@ -9,7 +9,9 @@ struct PostShareSheet: UIViewControllerRepresentable {
 
     func makeUIViewController(context: Context) -> UIActivityViewController {
         let source = PostShareItemSource(url: url, title: title, imageURL: imageURL)
-        return UIActivityViewController(activityItems: [source], applicationActivities: nil)
+        let controller = UIActivityViewController(activityItems: [source], applicationActivities: nil)
+        controller.popoverPresentationController?.sourceView = controller.view
+        return controller
     }
 
     func updateUIViewController(_ controller: UIActivityViewController, context: Context) {}
@@ -43,7 +45,7 @@ private final class PostShareItemSource: NSObject, UIActivityItemSource {
         metadata.originalURL = url
         metadata.url = url
         metadata.title = title
-        if let imageURL {
+        if let imageURL, imageURL.isFileURL {
             metadata.imageProvider = NSItemProvider(contentsOf: imageURL)
         }
         return metadata

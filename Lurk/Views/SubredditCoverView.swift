@@ -9,6 +9,8 @@ struct SubredditCoverView: View {
     let subStore: SubredditStore
     let onClose: () -> Void
 
+    @State private var isPending = false
+
     private var isJoined: Bool {
         subStore.subreddits.contains { $0.lowercased() == subreddit.lowercased() }
     }
@@ -26,23 +28,29 @@ struct SubredditCoverView: View {
                     .foregroundStyle(Theme.text)
                 Spacer()
                 Button {
-                    let action = isJoined ? "unsub" : "sub"
-                    if isJoined {
+                    guard !isPending else { return }
+                    let currentlyJoined = isJoined
+                    let action = currentlyJoined ? "unsub" : "sub"
+                    if currentlyJoined {
                         subStore.removeSubreddit(matching: subreddit)
                     } else {
-                        subStore.addSubreddit(subreddit)
+                        guard subStore.addSubreddit(subreddit) != nil else { return }
                     }
-                    if session.isLoggedIn {
-                        let request = session.authenticatedRequest(
-                            url: RedditAPI.subscribe,
-                            formData: ["action": action, "sr_name": subreddit, "api_type": "json"]
-                        )
-                        Task { try? await client.execute(request) }
+                    guard session.isLoggedIn else { return }
+                    let request = session.authenticatedRequest(
+                        url: RedditAPI.subscribe,
+                        formData: ["action": action, "sr_name": subreddit, "api_type": "json"]
+                    )
+                    isPending = true
+                    Task {
+                        try? await client.execute(request)
+                        isPending = false
                     }
                 } label: {
                     Text(isJoined ? "Leave" : "Join")
                         .foregroundStyle(Theme.primary)
                 }
+                .disabled(isPending)
             }
             .padding(.horizontal, 16)
             .padding(.vertical, 12)

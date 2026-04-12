@@ -234,7 +234,7 @@ struct CommentRowView: View {
                 if comment.isSubmitter {
                     Text("OP")
                         .font(.caption2.weight(.bold))
-                        .foregroundStyle(Theme.swipeOpen)
+                        .foregroundStyle(Theme.opBadge)
                 }
                 Text(Formatters.timeAgo(comment.createdUtc))
                     .font(.caption)
