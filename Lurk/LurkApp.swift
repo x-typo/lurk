@@ -29,7 +29,7 @@ struct LurkApp: App {
             .preferredColorScheme(.dark)
             .onChange(of: session.isLoggedIn) { _, loggedIn in
                 guard loggedIn else { return }
-                Task {
+                Task { @MainActor in
                     if let subs = try? await client.fetchSubscribedSubreddits() {
                         subStore.replaceAll(subs)
                     }

@@ -17,40 +17,41 @@ struct SubredditCoverView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            HStack {
-                Button { onClose() } label: {
-                    Text("Close")
-                        .foregroundStyle(Theme.primary)
-                }
-                Spacer()
+            ZStack {
                 Text(title)
                     .font(.body.weight(.semibold))
                     .foregroundStyle(Theme.text)
-                Spacer()
-                Button {
-                    guard !isPending else { return }
-                    let currentlyJoined = isJoined
-                    let action = currentlyJoined ? "unsub" : "sub"
-                    if currentlyJoined {
-                        subStore.removeSubreddit(matching: subreddit)
-                    } else {
-                        guard subStore.addSubreddit(subreddit) != nil else { return }
+                HStack {
+                    Button { onClose() } label: {
+                        Text("Close")
+                            .foregroundStyle(Theme.primary)
                     }
-                    guard session.isLoggedIn else { return }
-                    let request = session.authenticatedRequest(
-                        url: RedditAPI.subscribe,
-                        formData: ["action": action, "sr_name": subreddit, "api_type": "json"]
-                    )
-                    isPending = true
-                    Task {
-                        try? await client.execute(request)
-                        isPending = false
+                    Spacer()
+                    Button {
+                        guard !isPending else { return }
+                        let currentlyJoined = isJoined
+                        let action = currentlyJoined ? "unsub" : "sub"
+                        if currentlyJoined {
+                            subStore.removeSubreddit(matching: subreddit)
+                        } else {
+                            guard subStore.addSubreddit(subreddit) != nil else { return }
+                        }
+                        guard session.isLoggedIn else { return }
+                        let request = session.authenticatedRequest(
+                            url: RedditAPI.subscribe,
+                            formData: ["action": action, "sr_name": subreddit, "api_type": "json"]
+                        )
+                        isPending = true
+                        Task {
+                            try? await client.execute(request)
+                            isPending = false
+                        }
+                    } label: {
+                        Text(isJoined ? "Leave" : "Join")
+                            .foregroundStyle(Theme.primary)
                     }
-                } label: {
-                    Text(isJoined ? "Leave" : "Join")
-                        .foregroundStyle(Theme.primary)
+                    .disabled(isPending)
                 }
-                .disabled(isPending)
             }
             .padding(.horizontal, 16)
             .padding(.vertical, 12)
