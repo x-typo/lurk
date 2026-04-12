@@ -28,6 +28,16 @@ final class SubredditStore {
         persist()
     }
 
+    func removeSubreddit(matching name: String) {
+        subreddits.removeAll { $0.lowercased() == name.lowercased() }
+        persist()
+    }
+
+    func replaceAll(_ names: [String]) {
+        subreddits = names.sorted { $0.lowercased() < $1.lowercased() }
+        persist()
+    }
+
     private func load() {
         if let stored = UserDefaults.standard.array(forKey: Self.storageKey) as? [String] {
             subreddits = stored

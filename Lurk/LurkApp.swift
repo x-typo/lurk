@@ -12,10 +12,10 @@ struct LurkApp: App {
     var body: some Scene {
         WindowGroup {
             TabView(selection: tabSelection) {
-                PopularFeedView(client: client, filterStore: filterStore, session: session)
+                PopularFeedView(client: client, filterStore: filterStore, subStore: subStore, session: session)
                     .tabItem { Label("Popular", systemImage: "flame") }
                     .tag(0)
-                HomeFeedView(client: client, filterStore: filterStore, session: session)
+                HomeFeedView(client: client, filterStore: filterStore, subStore: subStore, session: session)
                     .tabItem { Label("Home", systemImage: "house") }
                     .tag(1)
                 SubredditsView(client: client, filterStore: filterStore, subStore: subStore, session: session, resetKey: subredditResetKey)
@@ -27,6 +27,14 @@ struct LurkApp: App {
             }
             .tint(Theme.primary)
             .preferredColorScheme(.dark)
+            .onChange(of: session.isLoggedIn) { _, loggedIn in
+                guard loggedIn else { return }
+                Task {
+                    if let subs = try? await client.fetchSubscribedSubreddits(), !subs.isEmpty {
+                        subStore.replaceAll(subs)
+                    }
+                }
+            }
         }
     }
 
