@@ -54,6 +54,14 @@ struct Comment: Identifiable {
     let isSubmitter: Bool
 
     static let maxRenderDepth = 3
+
+    static let filteredBots: Set<String> = [
+        "AutoModerator",
+        "AnimeMod",
+        "trendingtattler",
+        "post-explainer",
+        "ClaudeAI-mod-bot"
+    ]
 }
 
 extension Comment {
@@ -62,9 +70,7 @@ extension Comment {
             guard wrapper.kind == "t1" else { return nil }
             let d = wrapper.data
             guard let author = d.author, let body = d.body,
-                  author != "AutoModerator",
-                  author != "AnimeMod",
-                  author != "trendingtattler" else { return nil }
+                  !filteredBots.contains(author) else { return nil }
             let depth = d.depth ?? 0
             let withinDepth = depth < maxRenderDepth
             return Comment(

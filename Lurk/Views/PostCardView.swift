@@ -64,19 +64,7 @@ struct PostCardView: View {
                     }
                     .overlay(alignment: .bottom) {
                         if post.isGallery {
-                            HStack(spacing: 6) {
-                                ForEach(0..<min(post.galleryCount, 5), id: \.self) { i in
-                                    Circle()
-                                        .fill(i == 0 ? Color.white : Color.white.opacity(0.5))
-                                        .frame(width: 8, height: 8)
-                                }
-                                if post.galleryCount > 5 {
-                                    Text("+\(post.galleryCount - 5)")
-                                        .font(.caption2)
-                                        .foregroundStyle(.white)
-                                }
-                            }
-                            .padding(.bottom, 10)
+                            GalleryDotIndicator(count: post.galleryCount)
                         }
                     }
                     .onTapGesture {

@@ -83,6 +83,11 @@ struct PostDetailView: View {
                                     .overlay { ProgressView().tint(Theme.textMuted) }
                             }
                         }
+                        .overlay(alignment: .bottom) {
+                            if post.isGallery {
+                                GalleryDotIndicator(count: post.galleryCount)
+                            }
+                        }
                         .onTapGesture { showMediaViewer = true }
                     }
 
@@ -207,6 +212,8 @@ struct PostDetailView: View {
         .fullScreenCover(isPresented: $showMediaViewer) {
             if let videoURL = post.videoURL {
                 VideoViewerView(url: videoURL, aspectRatio: post.videoAspectRatio)
+            } else if post.isGallery {
+                GalleryViewerView(items: post.galleryItems)
             } else if let imageURL = post.imageURL {
                 GalleryViewerView(items: [GalleryMedia(id: 0, url: imageURL, isAnimated: false)])
             }
