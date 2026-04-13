@@ -438,7 +438,8 @@ struct CommentBodyView: View {
         for line in lines {
             let trimmed = line.trimmingCharacters(in: .whitespaces)
             if trimmed.hasPrefix(">") && !trimmed.hasPrefix(">!") {
-                var body = String(trimmed.dropFirst())
+                var body = trimmed
+                while body.hasPrefix(">") { body.removeFirst() }
                 if body.hasPrefix(" ") { body.removeFirst() }
                 quoteBuffer.append(body)
             } else {
