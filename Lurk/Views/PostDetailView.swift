@@ -346,16 +346,23 @@ struct CommentBodyView: View {
                     if !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                         VStack(alignment: .leading, spacing: 2) {
                             let lines = text.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
-                            ForEach(Array(lines.enumerated()), id: \.offset) { _, line in
-                                let trimmed = line.trimmingCharacters(in: .whitespaces)
-                                if trimmed.isEmpty {
-                                    Spacer().frame(height: 8)
-                                } else if Self.isHorizontalRule(trimmed) {
-                                    Divider().background(Theme.border).padding(.vertical, 4)
-                                } else if let attr = Self.markdownString(Self.cleanLine(trimmed)) {
-                                    Text(attr)
-                                        .font(textFont)
-                                        .foregroundStyle(Theme.text)
+                            let groups = Self.groupLines(lines)
+                            ForEach(Array(groups.enumerated()), id: \.offset) { _, group in
+                                switch group {
+                                case .line(let line):
+                                    renderLine(line)
+                                case .quote(let qlines):
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        ForEach(Array(qlines.enumerated()), id: \.offset) { _, ql in
+                                            renderLine(ql)
+                                        }
+                                    }
+                                    .padding(.leading, 10)
+                                    .overlay(alignment: .leading) {
+                                        Rectangle()
+                                            .fill(Theme.primary)
+                                            .frame(width: 3)
+                                    }
                                 }
                             }
                         }
@@ -393,11 +400,54 @@ struct CommentBodyView: View {
         }
     }
 
+    @ViewBuilder
+    private func renderLine(_ line: String) -> some View {
+        let trimmed = line.trimmingCharacters(in: .whitespaces)
+        if trimmed.isEmpty {
+            Spacer().frame(height: 8)
+        } else if Self.isHorizontalRule(trimmed) {
+            Divider().background(Theme.border).padding(.vertical, 4)
+        } else if let attr = Self.markdownString(Self.cleanLine(trimmed)) {
+            Text(attr)
+                .font(textFont)
+                .foregroundStyle(Theme.text)
+        }
+    }
+
     enum BodyPart {
         case text(String)
         case image(URL)
         case gif(URL)
         case link(String, URL)
+    }
+
+    private enum LineGroup {
+        case line(String)
+        case quote([String])
+    }
+
+    private static func groupLines(_ lines: [String]) -> [LineGroup] {
+        var groups: [LineGroup] = []
+        var quoteBuffer: [String] = []
+        func flush() {
+            if !quoteBuffer.isEmpty {
+                groups.append(.quote(quoteBuffer))
+                quoteBuffer.removeAll()
+            }
+        }
+        for line in lines {
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            if trimmed.hasPrefix(">") && !trimmed.hasPrefix(">!") {
+                var body = String(trimmed.dropFirst())
+                if body.hasPrefix(" ") { body.removeFirst() }
+                quoteBuffer.append(body)
+            } else {
+                flush()
+                groups.append(.line(line))
+            }
+        }
+        flush()
+        return groups
     }
 
     static func parse(_ text: String) -> [BodyPart] {
