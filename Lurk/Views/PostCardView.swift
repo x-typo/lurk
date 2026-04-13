@@ -63,8 +63,8 @@ struct PostCardView: View {
                         }
                     }
                     .overlay(alignment: .bottom) {
-                        if post.isGallery {
-                            GalleryDotIndicator(count: post.galleryCount)
+                        if post.galleryItems.count > 1 {
+                            GalleryDotIndicator(count: post.galleryItems.count)
                         }
                     }
                     .onTapGesture {

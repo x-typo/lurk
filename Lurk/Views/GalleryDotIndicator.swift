@@ -19,5 +19,6 @@ struct GalleryDotIndicator: View {
             }
         }
         .padding(.bottom, 10)
+        .accessibilityHidden(true)
     }
 }
