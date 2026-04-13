@@ -68,7 +68,7 @@ struct PostCardView: View {
                         }
                     }
                     .onTapGesture {
-                        if post.isGallery {
+                        if post.galleryItems.count > 1 {
                             onShowGallery?()
                         } else {
                             onShowDetail?()
