@@ -37,6 +37,10 @@ struct Post: Identifiable, Decodable {
     let preview: Preview?
     let galleryData: GalleryData?
     let mediaMetadata: [String: MediaMetadataItem]?
+
+    static let filteredKeywords: Set<String> = [
+        "Artemis"
+    ]
 }
 
 // MARK: - Media Types
@@ -169,5 +173,10 @@ extension Post {
 
     var redditURL: URL {
         URL(string: "https://www.reddit.com\(permalink)")!
+    }
+
+    var matchesFilteredKeyword: Bool {
+        let lowerTitle = title.lowercased()
+        return Post.filteredKeywords.contains { lowerTitle.contains($0.lowercased()) }
     }
 }
