@@ -176,7 +176,6 @@ extension Post {
     }
 
     var matchesFilteredKeyword: Bool {
-        let lowerTitle = title.lowercased()
-        return Post.filteredKeywords.contains { lowerTitle.contains($0.lowercased()) }
+        Post.filteredKeywords.contains { title.range(of: $0, options: .caseInsensitive) != nil }
     }
 }
