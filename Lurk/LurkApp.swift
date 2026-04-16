@@ -21,7 +21,7 @@ struct LurkApp: App {
                 SubredditsView(client: client, filterStore: filterStore, subStore: subStore, session: session, resetKey: subredditResetKey)
                     .tabItem { Label("Subreddits", systemImage: "list.bullet") }
                     .tag(2)
-                SettingsView(session: session)
+                SettingsView(session: session, client: client, filterStore: filterStore, subStore: subStore)
                     .tabItem { Label("Settings", systemImage: "gearshape") }
                     .tag(3)
             }

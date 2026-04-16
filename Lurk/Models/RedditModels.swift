@@ -10,6 +10,32 @@ struct RedditListing: Decodable {
 struct ListingData: Decodable {
     let after: String?
     let children: [PostWrapper]
+
+    private struct LossyPostWrapper: Decodable {
+        let wrapped: PostWrapper?
+        init(from decoder: Decoder) throws {
+            wrapped = try? PostWrapper(from: decoder)
+        }
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case after, children
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        after = try container.decodeIfPresent(String.self, forKey: .after)
+        let lossy = try container.decode([LossyPostWrapper].self, forKey: .children)
+        let decoded = lossy.compactMap(\.wrapped)
+        if !lossy.isEmpty && decoded.isEmpty {
+            throw DecodingError.dataCorruptedError(
+                forKey: .children,
+                in: container,
+                debugDescription: "All \(lossy.count) children failed to decode"
+            )
+        }
+        children = decoded
+    }
 }
 
 struct PostWrapper: Decodable {

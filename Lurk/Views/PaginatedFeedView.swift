@@ -1,12 +1,20 @@
 import SwiftUI
 
+struct PostRemoveAction {
+    let label: String
+    let apiURL: URL
+    var onComplete: ((String) -> Void)? = nil
+}
+
 struct PaginatedFeedView: View {
     let filterStore: PostFilterStore
     let subStore: SubredditStore
     let session: RedditSession
     let client: RedditClient
-    let fetchPage: (_ after: String?) async throws -> RedditListing
     var showSubredditNav: Bool = true
+    var applyFilters: Bool = true
+    var removeAction: PostRemoveAction? = nil
+    let fetchPage: (_ after: String?) async throws -> RedditListing
 
     @State private var posts: [Post] = []
     @State private var after: String?
@@ -63,7 +71,19 @@ struct PaginatedFeedView: View {
         .background(Theme.background)
         .task { await loadPosts() }
         .sheet(item: $selectedPost) { post in
-            PostDetailView(post: post, session: session, client: client, filterStore: filterStore, subStore: subStore)
+            PostDetailView(
+                post: post,
+                session: session,
+                client: client,
+                filterStore: filterStore,
+                subStore: subStore,
+                removeAction: removeAction.map { action in
+                    PostRemoveAction(label: action.label, apiURL: action.apiURL) { id in
+                        action.onComplete?(id)
+                        posts.removeAll { $0.id == id }
+                    }
+                }
+            )
         }
         .fullScreenCover(item: $subredditPost) { post in
             SubredditCoverView(subreddit: post.subreddit, title: post.subredditNamePrefixed, client: client, filterStore: filterStore, session: session, subStore: subStore) {
@@ -76,7 +96,9 @@ struct PaginatedFeedView: View {
     }
 
     private func filteredPosts(from listing: RedditListing) -> [Post] {
-        listing.data.children.map(\.data).filter { !filterStore.isHidden($0.id) && !$0.matchesFilteredKeyword }
+        let pagePosts = listing.data.children.map(\.data)
+        guard applyFilters else { return pagePosts }
+        return pagePosts.filter { !filterStore.isHidden($0.id) && !$0.matchesFilteredKeyword }
     }
 
     private func loadPosts() async {

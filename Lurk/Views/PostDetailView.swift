@@ -8,6 +8,7 @@ struct PostDetailView: View {
     let client: RedditClient
     let filterStore: PostFilterStore
     let subStore: SubredditStore
+    var removeAction: PostRemoveAction? = nil
     @Environment(\.dismiss) private var dismiss
     @State private var player: AVPlayer?
     @State private var comments: [Comment] = []
@@ -196,7 +197,29 @@ struct PostDetailView: View {
                         player = nil
                         dismiss()
                     }
+                    .foregroundStyle(Theme.primary)
+                }
+                if let action = removeAction {
+                    ToolbarItem(placement: .confirmationAction) {
+                        Button(action.label) {
+                            let postId = post.id
+                            if session.isLoggedIn {
+                                Task {
+                                    let request = session.authenticatedRequest(
+                                        url: action.apiURL,
+                                        formData: ["id": "t3_\(postId)"]
+                                    )
+                                    try? await client.execute(request)
+                                }
+                            }
+                            action.onComplete?(postId)
+                            comments = []
+                            player?.pause()
+                            player = nil
+                            dismiss()
+                        }
                         .foregroundStyle(Theme.primary)
+                    }
                 }
             }
         }
