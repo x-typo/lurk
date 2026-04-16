@@ -79,6 +79,7 @@ struct PaginatedFeedView: View {
                 subStore: subStore,
                 removeAction: removeAction.map { action in
                     PostRemoveAction(label: action.label, apiURL: action.apiURL) { id in
+                        action.onComplete?(id)
                         posts.removeAll { $0.id == id }
                     }
                 }

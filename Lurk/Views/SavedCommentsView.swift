@@ -72,15 +72,14 @@ struct SavedCommentsView: View {
     }
 
     private func loadMore() async {
-        guard !loadingMore, let after else { return }
+        guard !loadingMore, let after, let username = session.username else { return }
         loadingMore = true
+        defer { loadingMore = false }
         do {
-            guard let username = session.username else { return }
             let listing = try await client.fetchSavedComments(username: username, after: after)
             comments.append(contentsOf: listing.data.children.map(\.data))
             self.after = listing.data.after
         } catch {}
-        loadingMore = false
     }
 }
 

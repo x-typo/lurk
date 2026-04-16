@@ -118,7 +118,13 @@ struct SettingsView: View {
 
                     if savedExpanded {
                         VStack(spacing: 8) {
-                            Button { showSavedPosts = true } label: {
+                            Button {
+                                if session.isLoggedIn {
+                                    showSavedPosts = true
+                                } else {
+                                    showLogin = true
+                                }
+                            } label: {
                                 HStack(spacing: 12) {
                                     Image(systemName: "doc.text")
                                         .font(.subheadline)
@@ -136,7 +142,13 @@ struct SettingsView: View {
                                 .clipShape(RoundedRectangle(cornerRadius: 10))
                             }
 
-                            Button { showSavedComments = true } label: {
+                            Button {
+                                if session.isLoggedIn {
+                                    showSavedComments = true
+                                } else {
+                                    showLogin = true
+                                }
+                            } label: {
                                 HStack(spacing: 12) {
                                     Image(systemName: "bubble.left.fill")
                                         .font(.subheadline)
