@@ -13,6 +13,7 @@ enum RedditAPI {
 actor RedditClient {
     private let baseURL = "https://www.reddit.com"
     private static let pageSize = "25"
+    private static let profilePageSize = "20"
     private let session: URLSession
     private let decoder: JSONDecoder = {
         let d = JSONDecoder()
@@ -92,7 +93,7 @@ actor RedditClient {
         var components = try buildComponents(path: "/user/\(encoded)/saved/.json")
         var items: [URLQueryItem] = [
             URLQueryItem(name: "type", value: "links"),
-            URLQueryItem(name: "limit", value: "20"),
+            URLQueryItem(name: "limit", value: Self.profilePageSize),
             URLQueryItem(name: "raw_json", value: "1"),
         ]
         if let after {
@@ -108,7 +109,7 @@ actor RedditClient {
         var components = try buildComponents(path: "/user/\(encoded)/saved/.json")
         var items: [URLQueryItem] = [
             URLQueryItem(name: "type", value: "comments"),
-            URLQueryItem(name: "limit", value: "20"),
+            URLQueryItem(name: "limit", value: Self.profilePageSize),
             URLQueryItem(name: "raw_json", value: "1"),
         ]
         if let after {
@@ -127,7 +128,7 @@ actor RedditClient {
         let encoded = username.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? username
         var components = try buildComponents(path: "/user/\(encoded)/hidden/.json")
         var items: [URLQueryItem] = [
-            URLQueryItem(name: "limit", value: "20"),
+            URLQueryItem(name: "limit", value: Self.profilePageSize),
             URLQueryItem(name: "raw_json", value: "1"),
         ]
         if let after {

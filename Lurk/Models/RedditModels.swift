@@ -26,7 +26,15 @@ struct ListingData: Decodable {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         after = try container.decodeIfPresent(String.self, forKey: .after)
         let lossy = try container.decode([LossyPostWrapper].self, forKey: .children)
-        children = lossy.compactMap(\.wrapped)
+        let decoded = lossy.compactMap(\.wrapped)
+        if !lossy.isEmpty && decoded.isEmpty {
+            throw DecodingError.dataCorruptedError(
+                forKey: .children,
+                in: container,
+                debugDescription: "All \(lossy.count) children failed to decode"
+            )
+        }
+        children = decoded
     }
 }
 

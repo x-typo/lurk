@@ -96,9 +96,9 @@ struct PaginatedFeedView: View {
     }
 
     private func filteredPosts(from listing: RedditListing) -> [Post] {
-        let posts = listing.data.children.map(\.data)
-        guard applyFilters else { return posts }
-        return posts.filter { !filterStore.isHidden($0.id) && !$0.matchesFilteredKeyword }
+        let pagePosts = listing.data.children.map(\.data)
+        guard applyFilters else { return pagePosts }
+        return pagePosts.filter { !filterStore.isHidden($0.id) && !$0.matchesFilteredKeyword }
     }
 
     private func loadPosts() async {
