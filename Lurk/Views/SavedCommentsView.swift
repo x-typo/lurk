@@ -1,8 +1,8 @@
 import SwiftUI
 
 struct SavedCommentsView: View {
-    let session: RedditSession
-    let client: RedditClient
+    @Environment(RedditSession.self) private var session
+    @Environment(\.redditClient) private var client
     @Environment(\.dismiss) private var dismiss
 
     @State private var comments: [SavedComment] = []
@@ -24,7 +24,7 @@ struct SavedCommentsView: View {
                     ScrollView {
                         LazyVStack(spacing: 12) {
                             ForEach(comments) { comment in
-                                SavedCommentCard(comment: comment, session: session, client: client) { id in
+                                SavedCommentCard(comment: comment) { id in
                                     withAnimation { comments.removeAll { $0.id == id } }
                                 }
                                 .onAppear {
@@ -85,9 +85,10 @@ struct SavedCommentsView: View {
 
 private struct SavedCommentCard: View {
     let comment: SavedComment
-    let session: RedditSession
-    let client: RedditClient
     let onUnsave: (String) -> Void
+
+    @Environment(RedditSession.self) private var session
+    @Environment(\.redditClient) private var client
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {

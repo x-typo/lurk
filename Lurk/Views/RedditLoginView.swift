@@ -2,7 +2,7 @@ import SwiftUI
 import WebKit
 
 struct RedditLoginView: View {
-    let session: RedditSession
+    @Environment(RedditSession.self) private var session
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {

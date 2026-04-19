@@ -4,12 +4,10 @@ import UIKit
 
 struct PostDetailView: View {
     let post: Post
-    let session: RedditSession
-    let client: RedditClient
-    let filterStore: PostFilterStore
-    let subStore: SubredditStore
-    let blockStore: BlockedSubredditStore
     var removeAction: PostRemoveAction? = nil
+
+    @Environment(RedditSession.self) private var session
+    @Environment(\.redditClient) private var client
     @Environment(\.dismiss) private var dismiss
     @State private var player: AVPlayer?
     @State private var playerPostID: String = ""
@@ -123,7 +121,7 @@ struct PostDetailView: View {
                     }
 
                     HStack(spacing: 16) {
-                        VoteControlsView(thingID: "t3_\(post.id)", initialScore: post.score, session: session, client: client)
+                        VoteControlsView(thingID: "t3_\(post.id)", initialScore: post.score)
 
                         Label(Formatters.score(post.numComments), systemImage: "bubble.right")
                             .foregroundStyle(Theme.textSecondary)
@@ -199,7 +197,7 @@ struct PostDetailView: View {
 
                             LazyVStack(alignment: .leading, spacing: 0) {
                                 ForEach(comments) { comment in
-                                    CommentRowView(comment: comment, session: session, client: client)
+                                    CommentRowView(comment: comment)
                                 }
                             }
                         }
@@ -249,12 +247,12 @@ struct PostDetailView: View {
         }
         .preferredColorScheme(.dark)
         .fullScreenCover(isPresented: $showSubreddit) {
-            SubredditCoverView(subreddit: post.subreddit, title: post.subredditNamePrefixed, client: client, filterStore: filterStore, session: session, subStore: subStore, blockStore: blockStore) {
+            SubredditCoverView(subreddit: post.subreddit, title: post.subredditNamePrefixed) {
                 showSubreddit = false
             }
         }
         .sheet(isPresented: $showCommentSheet) {
-            ComposeReplySheet(thingID: "t3_\(post.id)", session: session, client: client, isPresented: $showCommentSheet)
+            ComposeReplySheet(thingID: "t3_\(post.id)", isPresented: $showCommentSheet)
         }
         .fullScreenCover(isPresented: $showMediaViewer) {
             if let videoURL = post.videoURL {
@@ -336,8 +334,7 @@ final class PlayerObservers {
 
 struct CommentRowView: View {
     let comment: Comment
-    let session: RedditSession
-    let client: RedditClient
+    @Environment(RedditSession.self) private var session
     @State private var collapsed = false
     @State private var selecting = false
     @State private var showReplySheet = false
@@ -366,7 +363,7 @@ struct CommentRowView: View {
                 }
 
                 HStack(spacing: 12) {
-                    VoteControlsView(thingID: "t1_\(comment.id)", initialScore: comment.score, session: session, client: client, inactiveColor: Theme.textMuted)
+                    VoteControlsView(thingID: "t1_\(comment.id)", initialScore: comment.score, inactiveColor: Theme.textMuted)
 
                     if session.isLoggedIn {
                         Button {
@@ -387,7 +384,7 @@ struct CommentRowView: View {
 
                 if !comment.replies.isEmpty {
                     ForEach(comment.replies) { reply in
-                        CommentRowView(comment: reply, session: session, client: client)
+                        CommentRowView(comment: reply)
                             .padding(.leading, 16)
                     }
                 }
@@ -424,7 +421,7 @@ struct CommentRowView: View {
             }
         }
         .sheet(isPresented: $showReplySheet) {
-            ComposeReplySheet(thingID: "t1_\(comment.id)", session: session, client: client, isPresented: $showReplySheet)
+            ComposeReplySheet(thingID: "t1_\(comment.id)", isPresented: $showReplySheet)
         }
     }
 }
@@ -677,17 +674,16 @@ struct SelectableTextView: UIViewRepresentable {
 
 struct VoteControlsView: View {
     let thingID: String
-    let session: RedditSession
-    let client: RedditClient
     var inactiveColor: Color = Theme.textSecondary
+
+    @Environment(RedditSession.self) private var session
+    @Environment(\.redditClient) private var client
 
     @State private var voted: Int = 0
     @State private var displayScore: Int
 
-    init(thingID: String, initialScore: Int, session: RedditSession, client: RedditClient, inactiveColor: Color = Theme.textSecondary) {
+    init(thingID: String, initialScore: Int, inactiveColor: Color = Theme.textSecondary) {
         self.thingID = thingID
-        self.session = session
-        self.client = client
         self.inactiveColor = inactiveColor
         _displayScore = State(initialValue: initialScore)
     }
@@ -746,9 +742,9 @@ struct VoteControlsView: View {
 
 struct ComposeReplySheet: View {
     let thingID: String
-    let session: RedditSession
-    let client: RedditClient
     @Binding var isPresented: Bool
+    @Environment(RedditSession.self) private var session
+    @Environment(\.redditClient) private var client
     @State private var text = ""
     @State private var posting = false
 
