@@ -31,7 +31,7 @@ final class BlockedSubredditStore {
 
     func clearAll() {
         blockedNames.removeAll()
-        UserDefaults.standard.removeObject(forKey: Self.storageKey)
+        persist()
     }
 
     private static func canonicalize(_ name: String) -> String {

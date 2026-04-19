@@ -8,7 +8,7 @@ Flag violations of these conventions during review.
 - No third-party packages. Apple frameworks only (Foundation, SwiftUI, AVKit, WebKit, Photos, UIKit, ImageIO, CoreGraphics as needed).
 - No SPM dependencies, no CocoaPods, no Carthage. Flag any `Package.swift` or `Podfile` additions.
 - `URLSession` for networking. No Alamofire, no custom HTTP libraries.
-- `AsyncImage` for remote images. No image caching frameworks.
+- `AsyncImage` for remote images in normal feed/card contexts. No image caching frameworks. Exception: the gallery zoom viewer uses `UIScrollView` + `UIImageView` via `ZoomableImageView` because SwiftUI's `AsyncImage` cannot participate in a zoomable scroll view.
 - This is a hard constraint, not a preference.
 
 ## Architecture
@@ -56,7 +56,7 @@ Flag violations of these conventions during review.
 
 - Anonymous `.json` endpoint for unauthenticated browsing. Reddit's external rate limit is ~100 requests/minute (not enforced in-app).
 - `after` parameter for pagination. Flag any offset-based pagination.
-- Video playback uses `RedditVideo.fallbackUrl` (video-only stream). Flag assumptions that `Post.url` is directly playable for video posts.
+- Video playback prefers `RedditVideo.hlsUrl` (HLS playlist, includes audio) and falls back to `RedditVideo.fallbackUrl` (CMAF MP4, video-only) when HLS is unavailable. Flag assumptions that `Post.url` is directly playable for video posts.
 - Comment trees are recursive. `maxRenderDepth` limits rendering depth. Flag unbounded recursion.
 
 ## Error Handling

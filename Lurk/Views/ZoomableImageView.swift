@@ -96,6 +96,9 @@ private struct ZoomableImageRepresentable: UIViewRepresentable {
         weak var scrollView: UIScrollView?
         var currentURL: URL?
         var onStateChange: ((ZoomableImageView.LoadState) -> Void)?
+        private var loadTask: Task<Void, Never>?
+
+        deinit { loadTask?.cancel() }
 
         func viewForZooming(in scrollView: UIScrollView) -> UIView? {
             imageView
@@ -106,16 +109,18 @@ private struct ZoomableImageRepresentable: UIViewRepresentable {
         }
 
         func load(url: URL, isAnimated: Bool) {
+            loadTask?.cancel()
             currentURL = url
             onStateChange?(.loading)
-            Task { [weak self] in
+            loadTask = Task { [weak self] in
                 do {
                     let (data, _) = try await URLSession.shared.data(from: url)
+                    try Task.checkCancellation()
                     let image = isAnimated
                         ? Self.animatedImage(from: data) ?? UIImage(data: data)
                         : UIImage(data: data)
                     await MainActor.run {
-                        guard let self else { return }
+                        guard let self, self.currentURL == url else { return }
                         if let image {
                             self.imageView?.image = image
                             self.onStateChange?(.loaded)
@@ -123,8 +128,12 @@ private struct ZoomableImageRepresentable: UIViewRepresentable {
                             self.onStateChange?(.failed)
                         }
                     }
+                } catch is CancellationError {
                 } catch {
-                    await MainActor.run { self?.onStateChange?(.failed) }
+                    await MainActor.run {
+                        guard let self, self.currentURL == url else { return }
+                        self.onStateChange?(.failed)
+                    }
                 }
             }
         }

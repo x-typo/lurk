@@ -14,6 +14,7 @@ struct PaginatedFeedView: View {
     let client: RedditClient
     var showSubredditNav: Bool = true
     var applyFilters: Bool = true
+    var applyBlockFilter: Bool = true
     var removeAction: PostRemoveAction? = nil
     let fetchPage: (_ after: String?) async throws -> RedditListing
 
@@ -100,7 +101,11 @@ struct PaginatedFeedView: View {
     private func filteredPosts(from listing: RedditListing) -> [Post] {
         let pagePosts = listing.data.children.map(\.data)
         guard applyFilters else { return pagePosts }
-        return pagePosts.filter { !filterStore.isHidden($0.id) && !$0.matchesFilteredKeyword && !blockStore.isBlocked($0.subreddit) }
+        return pagePosts.filter {
+            !filterStore.isHidden($0.id)
+                && !$0.matchesFilteredKeyword
+                && (!applyBlockFilter || !blockStore.isBlocked($0.subreddit))
+        }
     }
 
     private func loadPosts() async {
