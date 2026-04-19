@@ -123,6 +123,7 @@ struct PaginatedFeedView: View {
             posts.append(contentsOf: filteredPosts(from: listing))
             self.after = listing.data.after
         } catch {
+            // Silent fail on pagination
         }
         loadingMore = false
     }
