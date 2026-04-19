@@ -14,7 +14,7 @@ struct VideoViewerView: View {
     private let dismissThreshold: CGFloat = 150
 
     enum SaveState {
-        case idle, saving, saved, failed
+        case idle, saving, saved, denied, failed
     }
 
     init(url: URL, aspectRatio: CGFloat?) {
@@ -67,7 +67,11 @@ struct VideoViewerView: View {
                         saveState = .saving
                         Task {
                             let result = await MediaSaver.saveVideo(from: url)
-                            saveState = result == .saved ? .saved : .failed
+                            switch result {
+                            case .saved: saveState = .saved
+                            case .denied: saveState = .denied
+                            case .failed: saveState = .failed
+                            }
                             try? await Task.sleep(for: .seconds(1.5))
                             saveState = .idle
                         }
@@ -80,6 +84,8 @@ struct VideoViewerView: View {
                                 ProgressView().tint(.white)
                             case .saved:
                                 Image(systemName: "checkmark")
+                            case .denied:
+                                Image(systemName: "lock.slash")
                             case .failed:
                                 Image(systemName: "xmark")
                             }

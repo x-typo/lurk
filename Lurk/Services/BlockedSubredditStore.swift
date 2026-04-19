@@ -12,29 +12,42 @@ final class BlockedSubredditStore {
     }
 
     var sortedNames: [String] {
-        blockedNames.sorted { $0.lowercased() < $1.lowercased() }
+        blockedNames.sorted()
     }
 
     func block(_ name: String) {
-        blockedNames.insert(name.lowercased())
+        blockedNames.insert(Self.canonicalize(name))
         persist()
     }
 
     func unblock(_ name: String) {
-        blockedNames.remove(name.lowercased())
+        blockedNames.remove(Self.canonicalize(name))
         persist()
     }
 
     func isBlocked(_ name: String) -> Bool {
-        blockedNames.contains(name.lowercased())
+        blockedNames.contains(Self.canonicalize(name))
+    }
+
+    func clearAll() {
+        blockedNames.removeAll()
+        UserDefaults.standard.removeObject(forKey: Self.storageKey)
+    }
+
+    private static func canonicalize(_ name: String) -> String {
+        SubredditName.canonicalKey(name) ?? name.lowercased()
     }
 
     private func load() {
-        if let stored = UserDefaults.standard.array(forKey: Self.storageKey) as? [String] {
-            blockedNames = Set(stored)
-        } else {
+        let raw = UserDefaults.standard.object(forKey: Self.storageKey)
+        if raw == nil {
             blockedNames = Set(Self.seedDefaults)
             persist()
+        } else if let stored = raw as? [String] {
+            blockedNames = Set(stored.map { $0.lowercased() })
+        } else {
+            assertionFailure("BlockedSubredditStore: unexpected type \(type(of: raw)) at key \(Self.storageKey)")
+            blockedNames = []
         }
     }
 

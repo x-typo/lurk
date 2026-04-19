@@ -2,9 +2,41 @@ import ImageIO
 import SwiftUI
 import UIKit
 
-struct ZoomableImageView: UIViewRepresentable {
+struct ZoomableImageView: View {
     let url: URL
     let isAnimated: Bool
+    @State private var loadState: LoadState = .loading
+
+    enum LoadState: Equatable { case loading, loaded, failed }
+
+    var body: some View {
+        ZStack {
+            ZoomableImageRepresentable(url: url, isAnimated: isAnimated, loadState: $loadState)
+                .opacity(loadState == .loaded ? 1 : 0)
+
+            switch loadState {
+            case .loading:
+                ProgressView().tint(Theme.primary)
+            case .failed:
+                VStack(spacing: 8) {
+                    Image(systemName: "photo")
+                        .font(.largeTitle)
+                        .foregroundStyle(Theme.textMuted)
+                    Text("Couldn't load image")
+                        .font(.caption)
+                        .foregroundStyle(Theme.textMuted)
+                }
+            case .loaded:
+                EmptyView()
+            }
+        }
+    }
+}
+
+private struct ZoomableImageRepresentable: UIViewRepresentable {
+    let url: URL
+    let isAnimated: Bool
+    @Binding var loadState: ZoomableImageView.LoadState
 
     func makeCoordinator() -> Coordinator { Coordinator() }
 
@@ -18,6 +50,8 @@ struct ZoomableImageView: UIViewRepresentable {
         scrollView.showsVerticalScrollIndicator = false
         scrollView.contentInsetAdjustmentBehavior = .never
         scrollView.backgroundColor = .clear
+        // Disabled until the user zooms in, so TabView paging owns horizontal swipes.
+        scrollView.isScrollEnabled = false
 
         let imageView = UIImageView()
         imageView.contentMode = .scaleAspectFit
@@ -40,12 +74,18 @@ struct ZoomableImageView: UIViewRepresentable {
 
         context.coordinator.imageView = imageView
         context.coordinator.scrollView = scrollView
+        context.coordinator.onStateChange = { state in
+            Task { @MainActor in loadState = state }
+        }
         context.coordinator.load(url: url, isAnimated: isAnimated)
 
         return scrollView
     }
 
     func updateUIView(_ uiView: UIScrollView, context: Context) {
+        context.coordinator.onStateChange = { state in
+            Task { @MainActor in loadState = state }
+        }
         if context.coordinator.currentURL != url {
             context.coordinator.load(url: url, isAnimated: isAnimated)
         }
@@ -55,22 +95,37 @@ struct ZoomableImageView: UIViewRepresentable {
         weak var imageView: UIImageView?
         weak var scrollView: UIScrollView?
         var currentURL: URL?
+        var onStateChange: ((ZoomableImageView.LoadState) -> Void)?
 
         func viewForZooming(in scrollView: UIScrollView) -> UIView? {
             imageView
         }
 
         func scrollViewDidZoom(_ scrollView: UIScrollView) {
-            // Re-enable horizontal paging (TabView) swipes when fully zoomed out.
             scrollView.isScrollEnabled = scrollView.zoomScale > scrollView.minimumZoomScale
         }
 
         func load(url: URL, isAnimated: Bool) {
             currentURL = url
+            onStateChange?(.loading)
             Task { [weak self] in
-                guard let (data, _) = try? await URLSession.shared.data(from: url) else { return }
-                let image = isAnimated ? Self.animatedImage(from: data) ?? UIImage(data: data) : UIImage(data: data)
-                await MainActor.run { self?.imageView?.image = image }
+                do {
+                    let (data, _) = try await URLSession.shared.data(from: url)
+                    let image = isAnimated
+                        ? Self.animatedImage(from: data) ?? UIImage(data: data)
+                        : UIImage(data: data)
+                    await MainActor.run {
+                        guard let self else { return }
+                        if let image {
+                            self.imageView?.image = image
+                            self.onStateChange?(.loaded)
+                        } else {
+                            self.onStateChange?(.failed)
+                        }
+                    }
+                } catch {
+                    await MainActor.run { self?.onStateChange?(.failed) }
+                }
             }
         }
 
