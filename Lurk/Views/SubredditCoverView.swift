@@ -7,6 +7,7 @@ struct SubredditCoverView: View {
     let filterStore: PostFilterStore
     let session: RedditSession
     let subStore: SubredditStore
+    let blockStore: BlockedSubredditStore
     let onClose: () -> Void
 
     @State private var isPending = false
@@ -21,7 +22,7 @@ struct SubredditCoverView: View {
                 Text(title)
                     .font(.body.weight(.semibold))
                     .foregroundStyle(Theme.text)
-                HStack {
+                HStack(spacing: 16) {
                     Button { onClose() } label: {
                         Text("Close")
                             .foregroundStyle(Theme.primary)
@@ -51,6 +52,20 @@ struct SubredditCoverView: View {
                             .foregroundStyle(Theme.primary)
                     }
                     .disabled(isPending)
+                    Menu {
+                        Button(role: .destructive) {
+                            blockStore.block(subreddit)
+                            onClose()
+                        } label: {
+                            Label("Block r/\(subreddit)", systemImage: "nosign")
+                        }
+                    } label: {
+                        Image(systemName: "ellipsis")
+                            .font(.body.weight(.semibold))
+                            .foregroundStyle(Theme.primary)
+                            .frame(width: 32, height: 32)
+                            .contentShape(Rectangle())
+                    }
                 }
             }
             .padding(.horizontal, 16)
@@ -59,7 +74,7 @@ struct SubredditCoverView: View {
             .overlay(alignment: .bottom) {
                 Theme.border.frame(height: 1)
             }
-            SubredditFeedView(subreddit: subreddit, client: client, filterStore: filterStore, subStore: subStore, session: session)
+            SubredditFeedView(subreddit: subreddit, client: client, filterStore: filterStore, subStore: subStore, blockStore: blockStore, session: session)
         }
         .background(Theme.background)
         .preferredColorScheme(.dark)

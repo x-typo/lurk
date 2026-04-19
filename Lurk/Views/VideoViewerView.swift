@@ -5,7 +5,7 @@ import UIKit
 struct VideoViewerView: View {
     let url: URL
     let aspectRatio: CGFloat?
-    @State private var player: AVPlayer?
+    @State private var player: AVPlayer
     @State private var dragOffset: CGSize = .zero
     @State private var dragAxis: Axis?
     @State private var saveState: SaveState = .idle
@@ -14,7 +14,13 @@ struct VideoViewerView: View {
     private let dismissThreshold: CGFloat = 150
 
     enum SaveState {
-        case idle, saving, saved, failed
+        case idle, saving, saved, denied, failed
+    }
+
+    init(url: URL, aspectRatio: CGFloat?) {
+        self.url = url
+        self.aspectRatio = aspectRatio
+        _player = State(initialValue: AVPlayer(url: url))
     }
 
     var body: some View {
@@ -24,7 +30,7 @@ struct VideoViewerView: View {
             Theme.background.ignoresSafeArea()
                 .opacity(Double(1 - dragProgress * 0.5))
 
-            VideoPlayer(player: player)
+            AVKitPlayerView(player: player)
                 .aspectRatio(aspectRatio ?? 16/9, contentMode: .fit)
                 .offset(y: dragOffset.height)
                 .scaleEffect(CGFloat(1 - dragProgress * 0.15))
@@ -41,22 +47,15 @@ struct VideoViewerView: View {
                             defer { dragAxis = nil }
                             guard dragAxis == .vertical else { return }
                             if abs(value.translation.height) > dismissThreshold {
-                                player?.pause()
-                                player = nil
+                                player.pause()
                                 dismiss()
                             } else {
                                 withAnimation(.spring()) { dragOffset = .zero }
                             }
                         }
                 )
-                .onAppear {
-                    player = AVPlayer(url: url)
-                    player?.play()
-                }
-                .onDisappear {
-                    player?.pause()
-                    player = nil
-                }
+                .onAppear { player.play() }
+                .onDisappear { player.pause() }
 
             VStack {
                 Spacer()
@@ -68,7 +67,11 @@ struct VideoViewerView: View {
                         saveState = .saving
                         Task {
                             let result = await MediaSaver.saveVideo(from: url)
-                            saveState = result == .saved ? .saved : .failed
+                            switch result {
+                            case .saved: saveState = .saved
+                            case .denied: saveState = .denied
+                            case .failed: saveState = .failed
+                            }
                             try? await Task.sleep(for: .seconds(1.5))
                             saveState = .idle
                         }
@@ -81,6 +84,8 @@ struct VideoViewerView: View {
                                 ProgressView().tint(.white)
                             case .saved:
                                 Image(systemName: "checkmark")
+                            case .denied:
+                                Image(systemName: "lock.slash")
                             case .failed:
                                 Image(systemName: "xmark")
                             }

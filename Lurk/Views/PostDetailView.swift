@@ -8,9 +8,12 @@ struct PostDetailView: View {
     let client: RedditClient
     let filterStore: PostFilterStore
     let subStore: SubredditStore
+    let blockStore: BlockedSubredditStore
     var removeAction: PostRemoveAction? = nil
     @Environment(\.dismiss) private var dismiss
     @State private var player: AVPlayer?
+    @State private var playerPostID: String = ""
+    @State private var playerObservers = PlayerObservers()
     @State private var comments: [Comment] = []
     @State private var showCommentSheet = false
     @State private var showSubreddit = false
@@ -45,7 +48,7 @@ struct PostDetailView: View {
                         .foregroundStyle(Theme.text)
 
                     if let videoURL = post.videoURL {
-                        VideoPlayer(player: player)
+                        AVKitPlayerView(player: player)
                             .aspectRatio(post.videoAspectRatio ?? 16/9, contentMode: .fit)
                             .clipShape(RoundedRectangle(cornerRadius: 8))
                             .overlay(alignment: .topTrailing) {
@@ -59,13 +62,36 @@ struct PostDetailView: View {
                                 }
                                 .padding(8)
                             }
-                            .onAppear {
-                                player = AVPlayer(url: videoURL)
-                                player?.play()
+                            .overlay {
+                                if playerObservers.failed {
+                                    VStack(spacing: 6) {
+                                        Image(systemName: "exclamationmark.triangle")
+                                            .font(.title2)
+                                            .foregroundStyle(.white.opacity(0.9))
+                                        Text("Playback failed")
+                                            .font(.caption)
+                                            .foregroundStyle(.white.opacity(0.9))
+                                    }
+                                    .padding(12)
+                                    .background(.black.opacity(0.6))
+                                    .clipShape(RoundedRectangle(cornerRadius: 8))
+                                }
                             }
-                            .onDisappear {
-                                player?.pause()
-                                player = nil
+                            .onAppear { setupPlayer(for: videoURL) }
+                            .onDisappear { teardownPlayer() }
+                    } else if post.isVideo {
+                        RoundedRectangle(cornerRadius: 8)
+                            .fill(Theme.surfaceElevated)
+                            .aspectRatio(16/9, contentMode: .fit)
+                            .overlay {
+                                VStack(spacing: 8) {
+                                    Image(systemName: "video.slash")
+                                        .font(.largeTitle)
+                                        .foregroundStyle(Theme.textMuted)
+                                    Text("Video unavailable")
+                                        .font(.caption)
+                                        .foregroundStyle(Theme.textMuted)
+                                }
                             }
                     } else if let imageURL = post.imageURL {
                         AsyncImage(url: imageURL) { phase in
@@ -193,8 +219,7 @@ struct PostDetailView: View {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Close") {
                         comments = []
-                        player?.pause()
-                        player = nil
+                        teardownPlayer()
                         dismiss()
                     }
                     .foregroundStyle(Theme.primary)
@@ -214,8 +239,7 @@ struct PostDetailView: View {
                             }
                             action.onComplete?(postId)
                             comments = []
-                            player?.pause()
-                            player = nil
+                            teardownPlayer()
                             dismiss()
                         }
                         .foregroundStyle(Theme.primary)
@@ -225,7 +249,7 @@ struct PostDetailView: View {
         }
         .preferredColorScheme(.dark)
         .fullScreenCover(isPresented: $showSubreddit) {
-            SubredditCoverView(subreddit: post.subreddit, title: post.subredditNamePrefixed, client: client, filterStore: filterStore, session: session, subStore: subStore) {
+            SubredditCoverView(subreddit: post.subreddit, title: post.subredditNamePrefixed, client: client, filterStore: filterStore, session: session, subStore: subStore, blockStore: blockStore) {
                 showSubreddit = false
             }
         }
@@ -245,6 +269,69 @@ struct PostDetailView: View {
             PostShareSheet(url: post.redditURL, title: post.title, imageURL: post.imageURL)
         }
     }
+
+    private func setupPlayer(for url: URL) {
+        if player == nil || playerPostID != post.id {
+            playerObservers.reset()
+            player?.pause()
+            player?.replaceCurrentItem(with: nil)
+            let newPlayer = AVPlayer(url: url)
+            player = newPlayer
+            playerPostID = post.id
+            if let item = newPlayer.currentItem {
+                playerObservers.observeFailure(for: item)
+            }
+        }
+        player?.play()
+    }
+
+    private func teardownPlayer() {
+        playerObservers.reset()
+        player?.pause()
+        player?.replaceCurrentItem(with: nil)
+        player = nil
+        playerPostID = ""
+    }
+}
+
+@Observable
+final class PlayerObservers {
+    var failed = false
+    @ObservationIgnored private var tokens: [NSObjectProtocol] = []
+
+    func observeFailure(for item: AVPlayerItem) {
+        let failHandler: @Sendable (Notification) -> Void = { [weak self] _ in
+            Task { @MainActor in self?.failed = true }
+        }
+        let errorLogHandler: @Sendable (Notification) -> Void = { [weak self, weak item] _ in
+            guard let item, item.error != nil else { return }
+            Task { @MainActor in self?.failed = true }
+        }
+        tokens.append(
+            NotificationCenter.default.addObserver(
+                forName: AVPlayerItem.failedToPlayToEndTimeNotification,
+                object: item,
+                queue: .main,
+                using: failHandler
+            )
+        )
+        tokens.append(
+            NotificationCenter.default.addObserver(
+                forName: AVPlayerItem.newErrorLogEntryNotification,
+                object: item,
+                queue: .main,
+                using: errorLogHandler
+            )
+        )
+    }
+
+    func reset() {
+        tokens.forEach { NotificationCenter.default.removeObserver($0) }
+        tokens.removeAll()
+        failed = false
+    }
+
+    deinit { reset() }
 }
 
 struct CommentRowView: View {

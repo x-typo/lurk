@@ -5,6 +5,7 @@ struct HiddenPostsView: View {
     let client: RedditClient
     let filterStore: PostFilterStore
     let subStore: SubredditStore
+    let blockStore: BlockedSubredditStore
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
@@ -12,6 +13,7 @@ struct HiddenPostsView: View {
             PaginatedFeedView(
                 filterStore: filterStore,
                 subStore: subStore,
+                blockStore: blockStore,
                 session: session,
                 client: client,
                 applyFilters: false,

@@ -77,6 +77,7 @@ struct Media: Decodable {
 
 struct RedditVideo: Decodable {
     let fallbackUrl: String
+    let hlsUrl: String?
     let width: Int
     let height: Int
 }
@@ -167,6 +168,9 @@ extension Post {
 
     var videoURL: URL? {
         guard isVideo, let video = media?.redditVideo else { return nil }
+        if let hlsUrl = video.hlsUrl, let url = URL(string: hlsUrl) {
+            return url
+        }
         return URL(string: video.fallbackUrl)
     }
 
