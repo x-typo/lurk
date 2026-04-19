@@ -1,9 +1,7 @@
 import SwiftUI
 
 private struct RedditClientKey: EnvironmentKey {
-    static var defaultValue: RedditClient {
-        fatalError("RedditClient is not injected. Add .environment(\\.redditClient, client) at the WindowGroup root.")
-    }
+    static let defaultValue = RedditClient()
 }
 
 extension EnvironmentValues {
