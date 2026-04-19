@@ -16,7 +16,7 @@ Flag violations of these conventions during review.
 - **Stores + Views**: `@Observable` stores manage state, views render it.
 - `RedditClient` is an actor for thread-safe API calls. Flag if changed to a class.
 - `RedditSession` manages cookie/auth state. `PostFilterStore` manages hidden posts. `SubredditStore` manages subreddit list.
-- Views receive stores as explicit parameters. `@Environment` is used only for system keys (`.dismiss`, `.openURL`). Not `@EnvironmentObject`.
+- Shared stores ride the SwiftUI environment. `RedditSession`, `PostFilterStore`, `SubredditStore`, and `BlockedSubredditStore` are injected at the `WindowGroup` root via `.environment(_:)` and read with `@Environment(Type.self)`. `RedditClient` (actor) uses a custom `EnvironmentKey` exposed as `\.redditClient` (see `Lurk/Views/RedditClientEnvironment.swift`). Views should not accept these stores as explicit parameters. Not `@EnvironmentObject`. Non-View types (e.g. `RedditWebView`'s `Coordinator`) still receive the session through their initializer since `@Environment` only works inside `View`.
 - Computed properties on models for display logic (`Post` extensions). No formatting in views.
 
 ## Concurrency

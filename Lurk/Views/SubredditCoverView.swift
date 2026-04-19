@@ -3,12 +3,12 @@ import SwiftUI
 struct SubredditCoverView: View {
     let subreddit: String
     let title: String
-    let client: RedditClient
-    let filterStore: PostFilterStore
-    let session: RedditSession
-    let subStore: SubredditStore
-    let blockStore: BlockedSubredditStore
     let onClose: () -> Void
+
+    @Environment(RedditSession.self) private var session
+    @Environment(SubredditStore.self) private var subStore
+    @Environment(BlockedSubredditStore.self) private var blockStore
+    @Environment(\.redditClient) private var client
 
     @State private var isPending = false
 
@@ -74,7 +74,7 @@ struct SubredditCoverView: View {
             .overlay(alignment: .bottom) {
                 Theme.border.frame(height: 1)
             }
-            SubredditFeedView(subreddit: subreddit, client: client, filterStore: filterStore, subStore: subStore, blockStore: blockStore, session: session)
+            SubredditFeedView(subreddit: subreddit)
         }
         .background(Theme.background)
         .preferredColorScheme(.dark)

@@ -7,16 +7,16 @@ struct PostRemoveAction {
 }
 
 struct PaginatedFeedView: View {
-    let filterStore: PostFilterStore
-    let subStore: SubredditStore
-    let blockStore: BlockedSubredditStore
-    let session: RedditSession
-    let client: RedditClient
     var showSubredditNav: Bool = true
     var applyFilters: Bool = true
     var applyBlockFilter: Bool = true
     var removeAction: PostRemoveAction? = nil
     let fetchPage: (_ after: String?) async throws -> RedditListing
+
+    @Environment(PostFilterStore.self) private var filterStore
+    @Environment(BlockedSubredditStore.self) private var blockStore
+    @Environment(RedditSession.self) private var session
+    @Environment(\.redditClient) private var client
 
     @State private var posts: [Post] = []
     @State private var after: String?
@@ -75,11 +75,6 @@ struct PaginatedFeedView: View {
         .sheet(item: $selectedPost) { post in
             PostDetailView(
                 post: post,
-                session: session,
-                client: client,
-                filterStore: filterStore,
-                subStore: subStore,
-                blockStore: blockStore,
                 removeAction: removeAction.map { action in
                     PostRemoveAction(label: action.label, apiURL: action.apiURL) { id in
                         action.onComplete?(id)
@@ -89,7 +84,7 @@ struct PaginatedFeedView: View {
             )
         }
         .fullScreenCover(item: $subredditPost) { post in
-            SubredditCoverView(subreddit: post.subreddit, title: post.subredditNamePrefixed, client: client, filterStore: filterStore, session: session, subStore: subStore, blockStore: blockStore) {
+            SubredditCoverView(subreddit: post.subreddit, title: post.subredditNamePrefixed) {
                 subredditPost = nil
             }
         }

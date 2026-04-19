@@ -1,11 +1,8 @@
 import SwiftUI
 
 struct SettingsView: View {
-    let session: RedditSession
-    let client: RedditClient
-    let filterStore: PostFilterStore
-    let subStore: SubredditStore
-    let blockStore: BlockedSubredditStore
+    @Environment(RedditSession.self) private var session
+    @Environment(BlockedSubredditStore.self) private var blockStore
 
     @State private var showLogin = false
     @State private var hiddenExpanded = false
@@ -230,19 +227,19 @@ struct SettingsView: View {
         }
         .background(Theme.background)
         .sheet(isPresented: $showLogin) {
-            RedditLoginView(session: session)
+            RedditLoginView()
         }
         .fullScreenCover(isPresented: $showHidden) {
-            HiddenPostsView(session: session, client: client, filterStore: filterStore, subStore: subStore, blockStore: blockStore)
+            HiddenPostsView()
         }
         .fullScreenCover(isPresented: $showSavedPosts) {
-            SavedPostsView(session: session, client: client, filterStore: filterStore, subStore: subStore, blockStore: blockStore)
+            SavedPostsView()
         }
         .fullScreenCover(isPresented: $showSavedComments) {
-            SavedCommentsView(session: session, client: client)
+            SavedCommentsView()
         }
         .fullScreenCover(isPresented: $showBlocked) {
-            BlockedSubredditsView(blockStore: blockStore)
+            BlockedSubredditsView()
         }
     }
 }

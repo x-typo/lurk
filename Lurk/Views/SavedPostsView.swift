@@ -1,21 +1,13 @@
 import SwiftUI
 
 struct SavedPostsView: View {
-    let session: RedditSession
-    let client: RedditClient
-    let filterStore: PostFilterStore
-    let subStore: SubredditStore
-    let blockStore: BlockedSubredditStore
+    @Environment(RedditSession.self) private var session
+    @Environment(\.redditClient) private var client
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
         NavigationStack {
             PaginatedFeedView(
-                filterStore: filterStore,
-                subStore: subStore,
-                blockStore: blockStore,
-                session: session,
-                client: client,
                 applyFilters: false,
                 removeAction: PostRemoveAction(label: "Unsave", apiURL: RedditAPI.unsave)
             ) { after in

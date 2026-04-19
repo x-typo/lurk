@@ -13,21 +13,26 @@ struct LurkApp: App {
     var body: some Scene {
         WindowGroup {
             TabView(selection: tabSelection) {
-                PopularFeedView(client: client, filterStore: filterStore, subStore: subStore, blockStore: blockStore, session: session)
+                PopularFeedView()
                     .tabItem { Label("Popular", systemImage: "flame") }
                     .tag(0)
-                HomeFeedView(client: client, filterStore: filterStore, subStore: subStore, blockStore: blockStore, session: session)
+                HomeFeedView()
                     .tabItem { Label("Home", systemImage: "house") }
                     .tag(1)
-                SubredditsView(client: client, filterStore: filterStore, subStore: subStore, blockStore: blockStore, session: session, resetKey: subredditResetKey)
+                SubredditsView(resetKey: subredditResetKey)
                     .tabItem { Label("Subreddits", systemImage: "list.bullet") }
                     .tag(2)
-                SettingsView(session: session, client: client, filterStore: filterStore, subStore: subStore, blockStore: blockStore)
+                SettingsView()
                     .tabItem { Label("Settings", systemImage: "gearshape") }
                     .tag(3)
             }
             .tint(Theme.primary)
             .preferredColorScheme(.dark)
+            .environment(session)
+            .environment(filterStore)
+            .environment(subStore)
+            .environment(blockStore)
+            .environment(\.redditClient, client)
             .onChange(of: session.isLoggedIn) { _, loggedIn in
                 guard loggedIn else { return }
                 Task { @MainActor in

@@ -1,12 +1,11 @@
 import SwiftUI
 
 struct SubredditsView: View {
-    let client: RedditClient
-    let filterStore: PostFilterStore
-    let subStore: SubredditStore
-    let blockStore: BlockedSubredditStore
-    let session: RedditSession
     var resetKey: Int = 0
+
+    @Environment(SubredditStore.self) private var subStore
+    @Environment(RedditSession.self) private var session
+    @Environment(\.redditClient) private var client
 
     @State private var selectedSubreddit: String?
     @State private var newSubName = ""
@@ -31,7 +30,7 @@ struct SubredditsView: View {
                             Theme.border.frame(height: 1)
                         }
                     }
-                    SubredditFeedView(subreddit: sub, client: client, filterStore: filterStore, subStore: subStore, blockStore: blockStore, session: session)
+                    SubredditFeedView(subreddit: sub)
                 }
             } else {
                 ScrollView {

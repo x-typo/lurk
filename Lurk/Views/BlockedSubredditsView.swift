@@ -1,7 +1,7 @@
 import SwiftUI
 
 struct BlockedSubredditsView: View {
-    let blockStore: BlockedSubredditStore
+    @Environment(BlockedSubredditStore.self) private var blockStore
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
