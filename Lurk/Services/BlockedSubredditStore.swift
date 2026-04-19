@@ -48,6 +48,7 @@ final class BlockedSubredditStore {
         } else {
             assertionFailure("BlockedSubredditStore: unexpected type \(type(of: raw)) at key \(Self.storageKey)")
             blockedNames = []
+            persist()
         }
     }
 

@@ -1,4 +1,3 @@
-import ImageIO
 import SwiftUI
 import UIKit
 
@@ -86,7 +85,7 @@ private struct ZoomableImageRepresentable: UIViewRepresentable {
         context.coordinator.onStateChange = { state in
             Task { @MainActor in loadState = state }
         }
-        if context.coordinator.currentURL != url {
+        if context.coordinator.currentURL != url || context.coordinator.currentIsAnimated != isAnimated {
             context.coordinator.load(url: url, isAnimated: isAnimated)
         }
     }
@@ -95,6 +94,7 @@ private struct ZoomableImageRepresentable: UIViewRepresentable {
         weak var imageView: UIImageView?
         weak var scrollView: UIScrollView?
         var currentURL: URL?
+        var currentIsAnimated: Bool = false
         var onStateChange: ((ZoomableImageView.LoadState) -> Void)?
         private var loadTask: Task<Void, Never>?
 
@@ -111,13 +111,14 @@ private struct ZoomableImageRepresentable: UIViewRepresentable {
         func load(url: URL, isAnimated: Bool) {
             loadTask?.cancel()
             currentURL = url
+            currentIsAnimated = isAnimated
             onStateChange?(.loading)
             loadTask = Task { [weak self] in
                 do {
                     let (data, _) = try await URLSession.shared.data(from: url)
                     try Task.checkCancellation()
                     let image = isAnimated
-                        ? Self.animatedImage(from: data) ?? UIImage(data: data)
+                        ? GIFDecoder.animatedImage(from: data) ?? UIImage(data: data)
                         : UIImage(data: data)
                     await MainActor.run {
                         guard let self, self.currentURL == url else { return }
@@ -157,28 +158,5 @@ private struct ZoomableImageRepresentable: UIViewRepresentable {
             }
         }
 
-        private static func animatedImage(from data: Data) -> UIImage? {
-            guard let source = CGImageSourceCreateWithData(data as CFData, nil) else { return nil }
-            let count = CGImageSourceGetCount(source)
-            guard count > 1 else { return nil }
-
-            var frames: [UIImage] = []
-            var totalDuration: Double = 0
-            for i in 0..<count {
-                guard let cgImage = CGImageSourceCreateImageAtIndex(source, i, nil) else { continue }
-                frames.append(UIImage(cgImage: cgImage))
-                if let props = CGImageSourceCopyPropertiesAtIndex(source, i, nil) as? [String: Any],
-                   let gifProps = props[kCGImagePropertyGIFDictionary as String] as? [String: Any] {
-                    let delay = gifProps[kCGImagePropertyGIFUnclampedDelayTime as String] as? Double
-                        ?? gifProps[kCGImagePropertyGIFDelayTime as String] as? Double
-                        ?? 0.1
-                    totalDuration += max(delay, 0.02)
-                } else {
-                    totalDuration += 0.1
-                }
-            }
-            guard !frames.isEmpty else { return nil }
-            return UIImage.animatedImage(with: frames, duration: totalDuration)
-        }
     }
 }
