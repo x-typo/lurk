@@ -5,9 +5,12 @@ struct SettingsView: View {
     let client: RedditClient
     let filterStore: PostFilterStore
     let subStore: SubredditStore
+    let blockStore: BlockedSubredditStore
 
     @State private var showLogin = false
+    @State private var hiddenExpanded = false
     @State private var showHidden = false
+    @State private var showBlocked = false
     @State private var savedExpanded = false
     @State private var showSavedPosts = false
     @State private var showSavedComments = false
@@ -68,11 +71,7 @@ struct SettingsView: View {
                         .foregroundStyle(Theme.text)
 
                     Button {
-                        if session.isLoggedIn {
-                            showHidden = true
-                        } else {
-                            showLogin = true
-                        }
+                        withAnimation(.easeInOut(duration: 0.2)) { hiddenExpanded.toggle() }
                     } label: {
                         HStack(spacing: 12) {
                             Image(systemName: "eye.slash.fill")
@@ -85,10 +84,66 @@ struct SettingsView: View {
                             Image(systemName: "chevron.right")
                                 .font(.caption.weight(.semibold))
                                 .foregroundStyle(Theme.textMuted)
+                                .rotationEffect(.degrees(hiddenExpanded ? 90 : 0))
                         }
                         .padding(16)
                         .background(Theme.surface)
                         .clipShape(RoundedRectangle(cornerRadius: 12))
+                    }
+
+                    if hiddenExpanded {
+                        VStack(spacing: 8) {
+                            Button {
+                                if session.isLoggedIn {
+                                    showHidden = true
+                                } else {
+                                    showLogin = true
+                                }
+                            } label: {
+                                HStack(spacing: 12) {
+                                    Image(systemName: "doc.text")
+                                        .font(.subheadline)
+                                        .foregroundStyle(Theme.primary)
+                                    Text("Hidden Posts")
+                                        .font(.subheadline.weight(.medium))
+                                        .foregroundStyle(Theme.text)
+                                    Spacer()
+                                    Image(systemName: "chevron.right")
+                                        .font(.caption2.weight(.semibold))
+                                        .foregroundStyle(Theme.textMuted)
+                                }
+                                .padding(14)
+                                .background(Theme.surfaceElevated)
+                                .clipShape(RoundedRectangle(cornerRadius: 10))
+                            }
+
+                            Button {
+                                showBlocked = true
+                            } label: {
+                                HStack(spacing: 12) {
+                                    Image(systemName: "nosign")
+                                        .font(.subheadline)
+                                        .foregroundStyle(Theme.primary)
+                                    Text("Blocked Subreddits")
+                                        .font(.subheadline.weight(.medium))
+                                        .foregroundStyle(Theme.text)
+                                    Spacer()
+                                    if !blockStore.blockedNames.isEmpty {
+                                        Text("\(blockStore.blockedNames.count)")
+                                            .font(.subheadline)
+                                            .foregroundStyle(Theme.textMuted)
+                                    }
+                                    Image(systemName: "chevron.right")
+                                        .font(.caption2.weight(.semibold))
+                                        .foregroundStyle(Theme.textMuted)
+                                }
+                                .padding(14)
+                                .background(Theme.surfaceElevated)
+                                .clipShape(RoundedRectangle(cornerRadius: 10))
+                            }
+                        }
+                        .padding(.leading, 16)
+                        .transition(.opacity.combined(with: .move(edge: .top)))
                     }
 
                     Button {
@@ -178,13 +233,16 @@ struct SettingsView: View {
             RedditLoginView(session: session)
         }
         .fullScreenCover(isPresented: $showHidden) {
-            HiddenPostsView(session: session, client: client, filterStore: filterStore, subStore: subStore)
+            HiddenPostsView(session: session, client: client, filterStore: filterStore, subStore: subStore, blockStore: blockStore)
         }
         .fullScreenCover(isPresented: $showSavedPosts) {
-            SavedPostsView(session: session, client: client, filterStore: filterStore, subStore: subStore)
+            SavedPostsView(session: session, client: client, filterStore: filterStore, subStore: subStore, blockStore: blockStore)
         }
         .fullScreenCover(isPresented: $showSavedComments) {
             SavedCommentsView(session: session, client: client)
+        }
+        .fullScreenCover(isPresented: $showBlocked) {
+            BlockedSubredditsView(blockStore: blockStore)
         }
     }
 }

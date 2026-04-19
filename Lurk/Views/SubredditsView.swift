@@ -4,6 +4,7 @@ struct SubredditsView: View {
     let client: RedditClient
     let filterStore: PostFilterStore
     let subStore: SubredditStore
+    let blockStore: BlockedSubredditStore
     let session: RedditSession
     var resetKey: Int = 0
 
@@ -30,7 +31,7 @@ struct SubredditsView: View {
                             Theme.border.frame(height: 1)
                         }
                     }
-                    SubredditFeedView(subreddit: sub, client: client, filterStore: filterStore, subStore: subStore, session: session)
+                    SubredditFeedView(subreddit: sub, client: client, filterStore: filterStore, subStore: subStore, blockStore: blockStore, session: session)
                 }
             } else {
                 ScrollView {

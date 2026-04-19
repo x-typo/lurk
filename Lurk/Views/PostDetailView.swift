@@ -8,6 +8,7 @@ struct PostDetailView: View {
     let client: RedditClient
     let filterStore: PostFilterStore
     let subStore: SubredditStore
+    let blockStore: BlockedSubredditStore
     var removeAction: PostRemoveAction? = nil
     @Environment(\.dismiss) private var dismiss
     @State private var player: AVPlayer?
@@ -18,6 +19,17 @@ struct PostDetailView: View {
     @State private var savingMedia = false
     @State private var showMediaViewer = false
     @State private var showShareSheet = false
+
+    init(post: Post, session: RedditSession, client: RedditClient, filterStore: PostFilterStore, subStore: SubredditStore, blockStore: BlockedSubredditStore, removeAction: PostRemoveAction? = nil) {
+        self.post = post
+        self.session = session
+        self.client = client
+        self.filterStore = filterStore
+        self.subStore = subStore
+        self.blockStore = blockStore
+        self.removeAction = removeAction
+        _player = State(initialValue: post.videoURL.map { AVPlayer(url: $0) })
+    }
 
     var body: some View {
         NavigationStack {
@@ -44,8 +56,8 @@ struct PostDetailView: View {
                         .font(.title3.weight(.semibold))
                         .foregroundStyle(Theme.text)
 
-                    if let videoURL = post.videoURL {
-                        VideoPlayer(player: player)
+                    if let player {
+                        AVKitPlayerView(player: player)
                             .aspectRatio(post.videoAspectRatio ?? 16/9, contentMode: .fit)
                             .clipShape(RoundedRectangle(cornerRadius: 8))
                             .overlay(alignment: .topTrailing) {
@@ -59,14 +71,8 @@ struct PostDetailView: View {
                                 }
                                 .padding(8)
                             }
-                            .onAppear {
-                                player = AVPlayer(url: videoURL)
-                                player?.play()
-                            }
-                            .onDisappear {
-                                player?.pause()
-                                player = nil
-                            }
+                            .onAppear { player.play() }
+                            .onDisappear { player.pause() }
                     } else if let imageURL = post.imageURL {
                         AsyncImage(url: imageURL) { phase in
                             switch phase {
@@ -225,7 +231,7 @@ struct PostDetailView: View {
         }
         .preferredColorScheme(.dark)
         .fullScreenCover(isPresented: $showSubreddit) {
-            SubredditCoverView(subreddit: post.subreddit, title: post.subredditNamePrefixed, client: client, filterStore: filterStore, session: session, subStore: subStore) {
+            SubredditCoverView(subreddit: post.subreddit, title: post.subredditNamePrefixed, client: client, filterStore: filterStore, session: session, subStore: subStore, blockStore: blockStore) {
                 showSubreddit = false
             }
         }

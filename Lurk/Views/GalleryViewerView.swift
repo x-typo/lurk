@@ -29,27 +29,8 @@ struct GalleryViewerView: View {
 
             TabView(selection: $currentPage) {
                 ForEach(items) { item in
-                    if item.isAnimated {
-                        AnimatedGIFView(url: item.url)
-                            .aspectRatio(contentMode: .fit)
-                            .tag(item.id)
-                    } else {
-                        AsyncImage(url: item.url) { phase in
-                            switch phase {
-                            case .success(let image):
-                                image
-                                    .resizable()
-                                    .aspectRatio(contentMode: .fit)
-                            case .failure:
-                                Image(systemName: "photo")
-                                    .font(.largeTitle)
-                                    .foregroundStyle(Theme.textMuted)
-                            default:
-                                ProgressView().tint(Theme.primary)
-                            }
-                        }
+                    ZoomableImageView(url: item.url, isAnimated: item.isAnimated)
                         .tag(item.id)
-                    }
                 }
             }
             .tabViewStyle(.page(indexDisplayMode: .automatic))

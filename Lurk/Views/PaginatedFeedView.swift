@@ -9,6 +9,7 @@ struct PostRemoveAction {
 struct PaginatedFeedView: View {
     let filterStore: PostFilterStore
     let subStore: SubredditStore
+    let blockStore: BlockedSubredditStore
     let session: RedditSession
     let client: RedditClient
     var showSubredditNav: Bool = true
@@ -77,6 +78,7 @@ struct PaginatedFeedView: View {
                 client: client,
                 filterStore: filterStore,
                 subStore: subStore,
+                blockStore: blockStore,
                 removeAction: removeAction.map { action in
                     PostRemoveAction(label: action.label, apiURL: action.apiURL) { id in
                         action.onComplete?(id)
@@ -86,7 +88,7 @@ struct PaginatedFeedView: View {
             )
         }
         .fullScreenCover(item: $subredditPost) { post in
-            SubredditCoverView(subreddit: post.subreddit, title: post.subredditNamePrefixed, client: client, filterStore: filterStore, session: session, subStore: subStore) {
+            SubredditCoverView(subreddit: post.subreddit, title: post.subredditNamePrefixed, client: client, filterStore: filterStore, session: session, subStore: subStore, blockStore: blockStore) {
                 subredditPost = nil
             }
         }
@@ -98,7 +100,7 @@ struct PaginatedFeedView: View {
     private func filteredPosts(from listing: RedditListing) -> [Post] {
         let pagePosts = listing.data.children.map(\.data)
         guard applyFilters else { return pagePosts }
-        return pagePosts.filter { !filterStore.isHidden($0.id) && !$0.matchesFilteredKeyword }
+        return pagePosts.filter { !filterStore.isHidden($0.id) && !$0.matchesFilteredKeyword && !blockStore.isBlocked($0.subreddit) }
     }
 
     private func loadPosts() async {
