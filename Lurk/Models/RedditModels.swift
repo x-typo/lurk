@@ -147,6 +147,15 @@ enum TimeFilter: String, CaseIterable {
 // MARK: - Computed Properties
 
 extension Post {
+    var youtubeVideoID: String? {
+        guard let parsedURL = URL(string: url) else { return nil }
+        return Self.youtubeVideoID(from: parsedURL)
+    }
+
+    var isYouTubeVideo: Bool {
+        youtubeVideoID != nil
+    }
+
     var imageURL: URL? {
         if let source = preview?.images?.first?.source {
             return URL(string: source.decodedUrl)
@@ -207,5 +216,47 @@ extension Post {
 
     var matchesFilteredKeyword: Bool {
         Post.filteredKeywords.contains { title.range(of: $0, options: .caseInsensitive) != nil }
+    }
+
+    private static func youtubeVideoID(from url: URL) -> String? {
+        guard let host = url.host?.lowercased() else { return nil }
+        let normalizedHost = host.hasPrefix("www.") ? String(host.dropFirst(4)) : host
+
+        if normalizedHost == "youtu.be" {
+            return sanitizedYouTubeVideoID(
+                url.pathComponents.first { $0 != "/" && !$0.isEmpty }
+            )
+        }
+
+        guard normalizedHost == "youtube.com" || normalizedHost.hasSuffix(".youtube.com") else {
+            return nil
+        }
+
+        let pathComponents = url.pathComponents.filter { $0 != "/" && !$0.isEmpty }
+        let queryItems = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems
+
+        switch pathComponents.first?.lowercased() {
+        case "watch":
+            return sanitizedYouTubeVideoID(
+                queryItems?.first(where: { $0.name == "v" })?.value
+            )
+        case "embed", "shorts", "live":
+            return sanitizedYouTubeVideoID(pathComponents.dropFirst().first)
+        default:
+            return sanitizedYouTubeVideoID(
+                queryItems?.first(where: { $0.name == "v" })?.value
+            )
+        }
+    }
+
+    private static func sanitizedYouTubeVideoID(_ rawValue: String?) -> String? {
+        guard let rawValue else { return nil }
+        let trimmed = rawValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+
+        let allowedCharacters = CharacterSet.alphanumerics.union(CharacterSet(charactersIn: "-_"))
+        guard trimmed.unicodeScalars.allSatisfy(allowedCharacters.contains) else { return nil }
+
+        return trimmed
     }
 }
