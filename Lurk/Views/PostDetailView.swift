@@ -77,6 +77,10 @@ struct PostDetailView: View {
                             }
                             .onAppear { setupPlayer(for: videoURL) }
                             .onDisappear { teardownPlayer() }
+                    } else if let youtubeVideoID = post.youtubeVideoID {
+                        YouTubePlayerView(videoID: youtubeVideoID)
+                            .aspectRatio(post.imageAspectRatio ?? 16/9, contentMode: .fit)
+                            .clipShape(RoundedRectangle(cornerRadius: 8))
                     } else if post.isVideo {
                         RoundedRectangle(cornerRadius: 8)
                             .fill(Theme.surfaceElevated)
@@ -128,7 +132,7 @@ struct PostDetailView: View {
 
                         Spacer()
 
-                        if post.videoURL != nil || post.imageURL != nil {
+                        if post.videoURL != nil || (post.imageURL != nil && !post.isYouTubeVideo) {
                             Button {
                                 savingMedia = true
                                 Task {

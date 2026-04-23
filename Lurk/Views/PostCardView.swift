@@ -56,7 +56,7 @@ struct PostCardView: View {
                         }
                     }
                     .overlay(alignment: .center) {
-                        if post.isVideo {
+                        if post.isVideo || post.isYouTubeVideo {
                             Image(systemName: "play.circle.fill")
                                 .font(.largeTitle)
                                 .foregroundStyle(.white.opacity(0.8))
