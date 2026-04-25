@@ -106,15 +106,17 @@ struct VideoViewerView: View {
                                 ac.completionWithItemsHandler = { _, _, _, _ in
                                     try? FileManager.default.removeItem(at: tempURL)
                                 }
-                                if let scene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
-                                   var presenter = scene.keyWindow?.rootViewController {
-                                    while let next = presenter.presentedViewController {
-                                        presenter = next
-                                    }
-                                    ac.popoverPresentationController?.sourceView = presenter.view
-                                    ac.popoverPresentationController?.sourceRect = CGRect(x: presenter.view.bounds.midX, y: presenter.view.bounds.midY, width: 0, height: 0)
-                                    presenter.present(ac, animated: true)
+                                guard let scene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
+                                      var presenter = scene.keyWindow?.rootViewController else {
+                                    try? FileManager.default.removeItem(at: tempURL)
+                                    return
                                 }
+                                while let next = presenter.presentedViewController {
+                                    presenter = next
+                                }
+                                ac.popoverPresentationController?.sourceView = presenter.view
+                                ac.popoverPresentationController?.sourceRect = CGRect(x: presenter.view.bounds.midX, y: presenter.view.bounds.midY, width: 0, height: 0)
+                                presenter.present(ac, animated: true)
                             }
                         } label: {
                             Image(systemName: "square.and.arrow.up")

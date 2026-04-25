@@ -62,7 +62,8 @@ enum MediaSaver {
 
     private static func exportVideo(from url: URL) async throws -> URL {
         let asset = AVURLAsset(url: url)
-        guard let exportSession = AVAssetExportSession(asset: asset, presetName: AVAssetExportPresetHighestQuality) else {
+        guard let presetName = await preferredExportPreset(for: asset),
+              let exportSession = AVAssetExportSession(asset: asset, presetName: presetName) else {
             throw VideoExportError.exportSessionUnavailable
         }
 
@@ -82,6 +83,19 @@ enum MediaSaver {
         exportSession.shouldOptimizeForNetworkUse = true
         try await exportSession.export(to: fileURL, as: fileType)
         return fileURL
+    }
+
+    private static func preferredExportPreset(for asset: AVAsset) async -> String? {
+        for preset in [
+            AVAssetExportPresetPassthrough,
+            AVAssetExportPresetHighestQuality,
+            AVAssetExportPresetMediumQuality
+        ] {
+            if await AVAssetExportSession.compatibility(ofExportPreset: preset, with: asset, outputFileType: nil) {
+                return preset
+            }
+        }
+        return nil
     }
 
     private static func saveToLibrary(_ changeBlock: @escaping () -> Void) async -> SaveResult {

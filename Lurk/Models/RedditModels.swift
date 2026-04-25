@@ -177,19 +177,18 @@ extension Post {
 
     var videoURL: URL? {
         guard isVideo, let video = media?.redditVideo else { return nil }
-        if let hlsUrl = video.hlsUrl, let url = URL(string: hlsUrl) {
+        if let hlsUrl = video.decodedHLSUrl, let url = URL(string: hlsUrl) {
             return url
         }
-        return URL(string: video.fallbackUrl)
+        return URL(string: video.decodedFallbackUrl)
     }
 
     var downloadableVideoURL: URL? {
         guard !isYouTubeVideo, isVideo, let video = media?.redditVideo else { return nil }
-        if let hlsUrl = video.hlsUrl?.replacingOccurrences(of: "&amp;", with: "&"),
-           let url = URL(string: hlsUrl) {
+        if let hlsUrl = video.decodedHLSUrl, let url = URL(string: hlsUrl) {
             return url
         }
-        return URL(string: video.fallbackUrl.replacingOccurrences(of: "&amp;", with: "&"))
+        return URL(string: video.decodedFallbackUrl)
     }
 
     var videoAspectRatio: CGFloat? {
@@ -267,5 +266,15 @@ extension Post {
         guard trimmed.unicodeScalars.allSatisfy(allowedCharacters.contains) else { return nil }
 
         return trimmed
+    }
+}
+
+private extension RedditVideo {
+    var decodedFallbackUrl: String {
+        fallbackUrl.replacingOccurrences(of: "&amp;", with: "&")
+    }
+
+    var decodedHLSUrl: String? {
+        hlsUrl?.replacingOccurrences(of: "&amp;", with: "&")
     }
 }
