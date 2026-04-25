@@ -53,9 +53,9 @@ struct Comment: Identifiable {
     let moreCount: Int
     let isSubmitter: Bool
 
-    static let maxRenderDepth = 3
+    nonisolated static let maxRenderDepth = 3
 
-    static let filteredBots: Set<String> = [
+    nonisolated static let filteredBots: Set<String> = [
         "AutoModerator",
         "AnimeMod",
         "trendingtattler",
@@ -65,7 +65,7 @@ struct Comment: Identifiable {
 }
 
 extension Comment {
-    static func parse(from listing: CommentListing) -> [Comment] {
+    nonisolated static func parse(from listing: CommentListing) -> [Comment] {
         listing.data.children.compactMap { wrapper in
             guard wrapper.kind == "t1" else { return nil }
             let d = wrapper.data
@@ -87,12 +87,12 @@ extension Comment {
         }
     }
 
-    private static func parseReplies(_ replies: CommentReplies?) -> [Comment] {
+    private nonisolated static func parseReplies(_ replies: CommentReplies?) -> [Comment] {
         guard case .listing(let listing) = replies else { return [] }
         return parse(from: listing)
     }
 
-    private static func countReplies(_ replies: CommentReplies?) -> Int {
+    private nonisolated static func countReplies(_ replies: CommentReplies?) -> Int {
         guard case .listing(let listing) = replies else { return 0 }
         return listing.data.children.reduce(0) { total, wrapper in
             guard wrapper.kind == "t1" else { return total }

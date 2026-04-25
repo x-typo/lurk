@@ -1,6 +1,6 @@
 import Foundation
 
-struct SavedCommentListing: Decodable {
+nonisolated struct SavedCommentListing: Decodable {
     let data: SavedCommentListingData
 }
 

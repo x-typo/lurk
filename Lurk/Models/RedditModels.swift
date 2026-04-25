@@ -3,7 +3,7 @@ import Foundation
 
 // MARK: - API Response Types
 
-struct RedditListing: Decodable {
+nonisolated struct RedditListing: Decodable {
     let data: ListingData
 }
 
@@ -181,6 +181,15 @@ extension Post {
             return url
         }
         return URL(string: video.fallbackUrl)
+    }
+
+    var downloadableVideoURL: URL? {
+        guard !isYouTubeVideo, isVideo, let video = media?.redditVideo else { return nil }
+        if let hlsUrl = video.hlsUrl?.replacingOccurrences(of: "&amp;", with: "&"),
+           let url = URL(string: hlsUrl) {
+            return url
+        }
+        return URL(string: video.fallbackUrl.replacingOccurrences(of: "&amp;", with: "&"))
     }
 
     var videoAspectRatio: CGFloat? {
