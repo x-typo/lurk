@@ -132,12 +132,12 @@ struct PostDetailView: View {
 
                         Spacer()
 
-                        if post.videoURL != nil || (post.imageURL != nil && !post.isYouTubeVideo) {
+                        if post.downloadableVideoURL != nil || (post.imageURL != nil && !post.isYouTubeVideo) {
                             Button {
                                 savingMedia = true
                                 Task {
                                     let result: MediaSaver.SaveResult
-                                    if let videoURL = post.videoURL {
+                                    if let videoURL = post.downloadableVideoURL {
                                         result = await MediaSaver.saveVideo(from: videoURL)
                                     } else if let imageURL = post.imageURL {
                                         result = await MediaSaver.saveImage(from: imageURL)
@@ -260,7 +260,7 @@ struct PostDetailView: View {
         }
         .fullScreenCover(isPresented: $showMediaViewer) {
             if let videoURL = post.videoURL {
-                VideoViewerView(url: videoURL, aspectRatio: post.videoAspectRatio)
+                VideoViewerView(url: videoURL, aspectRatio: post.videoAspectRatio, downloadURL: post.downloadableVideoURL)
             } else if post.isGallery && !post.galleryItems.isEmpty {
                 GalleryViewerView(items: post.galleryItems)
             } else if let imageURL = post.imageURL {
@@ -302,12 +302,14 @@ final class PlayerObservers {
     @ObservationIgnored private var tokens: [NSObjectProtocol] = []
 
     func observeFailure(for item: AVPlayerItem) {
-        let failHandler: @Sendable (Notification) -> Void = { [weak self] _ in
-            Task { @MainActor in self?.failed = true }
+        let failHandler: @Sendable (Notification) -> Void = { _ in
+            Task { @MainActor [weak self] in self?.failed = true }
         }
-        let errorLogHandler: @Sendable (Notification) -> Void = { [weak self, weak item] _ in
-            guard let item, item.error != nil else { return }
-            Task { @MainActor in self?.failed = true }
+        let errorLogHandler: @Sendable (Notification) -> Void = { _ in
+            Task { @MainActor [weak self, weak item] in
+                guard let item, item.error != nil else { return }
+                self?.failed = true
+            }
         }
         tokens.append(
             NotificationCenter.default.addObserver(

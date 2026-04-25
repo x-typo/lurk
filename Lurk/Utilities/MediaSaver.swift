@@ -1,3 +1,4 @@
+import AVFoundation
 import Photos
 import UIKit
 
@@ -36,9 +37,7 @@ enum MediaSaver {
 
     static func saveVideo(from url: URL) async -> SaveResult {
         do {
-            let (tempURL, _) = try await URLSession.shared.download(from: url)
-            let fileURL = FileManager.default.temporaryDirectory.appendingPathComponent("\(UUID().uuidString).mp4")
-            try FileManager.default.moveItem(at: tempURL, to: fileURL)
+            let fileURL = try await temporaryVideoFile(from: url)
             let result = await saveToLibrary {
                 PHAssetChangeRequest.creationRequestForAssetFromVideo(atFileURL: fileURL)
             }
@@ -47,6 +46,56 @@ enum MediaSaver {
         } catch {
             return .failed
         }
+    }
+
+    static func temporaryVideoFile(from url: URL) async throws -> URL {
+        if url.pathExtension.lowercased() == "m3u8" {
+            return try await exportVideo(from: url)
+        }
+
+        let (tempURL, _) = try await URLSession.shared.download(from: url)
+        let ext = url.pathExtension.isEmpty ? "mp4" : url.pathExtension
+        let fileURL = FileManager.default.temporaryDirectory.appendingPathComponent("\(UUID().uuidString).\(ext)")
+        try FileManager.default.moveItem(at: tempURL, to: fileURL)
+        return fileURL
+    }
+
+    private static func exportVideo(from url: URL) async throws -> URL {
+        let asset = AVURLAsset(url: url)
+        guard let presetName = await preferredExportPreset(for: asset),
+              let exportSession = AVAssetExportSession(asset: asset, presetName: presetName) else {
+            throw VideoExportError.exportSessionUnavailable
+        }
+
+        let fileType: AVFileType
+        let ext: String
+        if exportSession.supportedFileTypes.contains(.mp4) {
+            fileType = .mp4
+            ext = "mp4"
+        } else if exportSession.supportedFileTypes.contains(.mov) {
+            fileType = .mov
+            ext = "mov"
+        } else {
+            throw VideoExportError.unsupportedFileType
+        }
+
+        let fileURL = FileManager.default.temporaryDirectory.appendingPathComponent("\(UUID().uuidString).\(ext)")
+        exportSession.shouldOptimizeForNetworkUse = true
+        try await exportSession.export(to: fileURL, as: fileType)
+        return fileURL
+    }
+
+    private static func preferredExportPreset(for asset: AVAsset) async -> String? {
+        for preset in [
+            AVAssetExportPresetPassthrough,
+            AVAssetExportPresetHighestQuality,
+            AVAssetExportPresetMediumQuality
+        ] {
+            if await AVAssetExportSession.compatibility(ofExportPreset: preset, with: asset, outputFileType: nil) {
+                return preset
+            }
+        }
+        return nil
     }
 
     private static func saveToLibrary(_ changeBlock: @escaping () -> Void) async -> SaveResult {
@@ -59,5 +108,10 @@ enum MediaSaver {
         } catch {
             return .failed
         }
+    }
+
+    private enum VideoExportError: Error {
+        case exportSessionUnavailable
+        case unsupportedFileType
     }
 }

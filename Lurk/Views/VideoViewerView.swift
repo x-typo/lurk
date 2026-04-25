@@ -5,6 +5,7 @@ import UIKit
 struct VideoViewerView: View {
     let url: URL
     let aspectRatio: CGFloat?
+    let downloadURL: URL?
     @State private var player: AVPlayer
     @State private var dragOffset: CGSize = .zero
     @State private var dragAxis: Axis?
@@ -17,9 +18,10 @@ struct VideoViewerView: View {
         case idle, saving, saved, denied, failed
     }
 
-    init(url: URL, aspectRatio: CGFloat?) {
+    init(url: URL, aspectRatio: CGFloat?, downloadURL: URL? = nil) {
         self.url = url
         self.aspectRatio = aspectRatio
+        self.downloadURL = downloadURL
         _player = State(initialValue: AVPlayer(url: url))
     }
 
@@ -63,47 +65,52 @@ struct VideoViewerView: View {
                 HStack(spacing: 20) {
                     Spacer()
 
-                    Button {
-                        saveState = .saving
-                        Task {
-                            let result = await MediaSaver.saveVideo(from: url)
-                            switch result {
-                            case .saved: saveState = .saved
-                            case .denied: saveState = .denied
-                            case .failed: saveState = .failed
+                    if let downloadURL = downloadURL {
+                        Button {
+                            saveState = .saving
+                            Task {
+                                let result = await MediaSaver.saveVideo(from: downloadURL)
+                                switch result {
+                                case .saved: saveState = .saved
+                                case .denied: saveState = .denied
+                                case .failed: saveState = .failed
+                                }
+                                try? await Task.sleep(for: .seconds(1.5))
+                                saveState = .idle
                             }
-                            try? await Task.sleep(for: .seconds(1.5))
-                            saveState = .idle
-                        }
-                    } label: {
-                        Group {
-                            switch saveState {
-                            case .idle:
-                                Image(systemName: "square.and.arrow.down")
-                            case .saving:
-                                ProgressView().tint(.white)
-                            case .saved:
-                                Image(systemName: "checkmark")
-                            case .denied:
-                                Image(systemName: "lock.slash")
-                            case .failed:
-                                Image(systemName: "xmark")
+                        } label: {
+                            Group {
+                                switch saveState {
+                                case .idle:
+                                    Image(systemName: "square.and.arrow.down")
+                                case .saving:
+                                    ProgressView().tint(.white)
+                                case .saved:
+                                    Image(systemName: "checkmark")
+                                case .denied:
+                                    Image(systemName: "lock.slash")
+                                case .failed:
+                                    Image(systemName: "xmark")
+                                }
                             }
+                            .font(.title3)
+                            .foregroundStyle(.white.opacity(0.8))
+                            .frame(width: 44, height: 44)
                         }
-                        .font(.title3)
-                        .foregroundStyle(.white.opacity(0.8))
-                        .frame(width: 44, height: 44)
-                    }
-                    .disabled(saveState != .idle)
+                        .disabled(saveState != .idle)
 
-                    Button {
-                        Task {
-                            guard let (tempDownload, _) = try? await URLSession.shared.download(from: url) else { return }
-                            let tempURL = FileManager.default.temporaryDirectory.appendingPathComponent("\(UUID().uuidString).mp4")
-                            guard (try? FileManager.default.moveItem(at: tempDownload, to: tempURL)) != nil else { return }
-                            let ac = UIActivityViewController(activityItems: [tempURL], applicationActivities: nil)
-                            if let scene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
-                               var presenter = scene.keyWindow?.rootViewController {
+                        Button {
+                            Task {
+                                guard let tempURL = try? await MediaSaver.temporaryVideoFile(from: downloadURL) else { return }
+                                let ac = UIActivityViewController(activityItems: [tempURL], applicationActivities: nil)
+                                ac.completionWithItemsHandler = { _, _, _, _ in
+                                    try? FileManager.default.removeItem(at: tempURL)
+                                }
+                                guard let scene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
+                                      var presenter = scene.keyWindow?.rootViewController else {
+                                    try? FileManager.default.removeItem(at: tempURL)
+                                    return
+                                }
                                 while let next = presenter.presentedViewController {
                                     presenter = next
                                 }
@@ -111,12 +118,12 @@ struct VideoViewerView: View {
                                 ac.popoverPresentationController?.sourceRect = CGRect(x: presenter.view.bounds.midX, y: presenter.view.bounds.midY, width: 0, height: 0)
                                 presenter.present(ac, animated: true)
                             }
+                        } label: {
+                            Image(systemName: "square.and.arrow.up")
+                                .font(.title3)
+                                .foregroundStyle(.white.opacity(0.8))
+                                .frame(width: 44, height: 44)
                         }
-                    } label: {
-                        Image(systemName: "square.and.arrow.up")
-                            .font(.title3)
-                            .foregroundStyle(.white.opacity(0.8))
-                            .frame(width: 44, height: 44)
                     }
                 }
                 .padding(.horizontal, 20)
