@@ -58,6 +58,7 @@ struct Comment: Identifiable {
     nonisolated static let filteredBots: Set<String> = [
         "AutoModerator",
         "AnimeMod",
+        "flairassistant",
         "trendingtattler",
         "post-explainer",
         "ClaudeAI-mod-bot"
