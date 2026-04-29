@@ -5,7 +5,7 @@ import UIKit
 struct VideoViewerView: View {
     let url: URL
     let aspectRatio: CGFloat?
-    let downloadURL: URL?
+    let downloadURLs: [URL]
     @State private var player: AVPlayer
     @State private var dragOffset: CGSize = .zero
     @State private var dragAxis: Axis?
@@ -18,10 +18,10 @@ struct VideoViewerView: View {
         case idle, saving, saved, denied, failed
     }
 
-    init(url: URL, aspectRatio: CGFloat?, downloadURL: URL? = nil) {
+    init(url: URL, aspectRatio: CGFloat?, downloadURLs: [URL] = []) {
         self.url = url
         self.aspectRatio = aspectRatio
-        self.downloadURL = downloadURL
+        self.downloadURLs = downloadURLs
         _player = State(initialValue: AVPlayer(url: url))
     }
 
@@ -65,11 +65,11 @@ struct VideoViewerView: View {
                 HStack(spacing: 20) {
                     Spacer()
 
-                    if let downloadURL = downloadURL {
+                    if !downloadURLs.isEmpty {
                         Button {
                             saveState = .saving
                             Task {
-                                let result = await MediaSaver.saveVideo(from: downloadURL)
+                                let result = await MediaSaver.saveVideo(from: downloadURLs)
                                 switch result {
                                 case .saved: saveState = .saved
                                 case .denied: saveState = .denied
@@ -101,7 +101,7 @@ struct VideoViewerView: View {
 
                         Button {
                             Task {
-                                guard let tempURL = try? await MediaSaver.temporaryVideoFile(from: downloadURL) else { return }
+                                guard let tempURL = try? await MediaSaver.temporaryVideoFile(from: downloadURLs) else { return }
                                 let ac = UIActivityViewController(activityItems: [tempURL], applicationActivities: nil)
                                 ac.completionWithItemsHandler = { _, _, _, _ in
                                     try? FileManager.default.removeItem(at: tempURL)

@@ -132,13 +132,14 @@ struct PostDetailView: View {
 
                         Spacer()
 
-                        if post.downloadableVideoURL != nil || (post.imageURL != nil && !post.isYouTubeVideo) {
+                        if !post.downloadableVideoURLs.isEmpty || (post.imageURL != nil && !post.isYouTubeVideo) {
                             Button {
                                 savingMedia = true
                                 Task {
                                     let result: MediaSaver.SaveResult
-                                    if let videoURL = post.downloadableVideoURL {
-                                        result = await MediaSaver.saveVideo(from: videoURL)
+                                    let videoURLs = post.downloadableVideoURLs
+                                    if !videoURLs.isEmpty {
+                                        result = await MediaSaver.saveVideo(from: videoURLs)
                                     } else if let imageURL = post.imageURL {
                                         result = await MediaSaver.saveImage(from: imageURL)
                                     } else {
@@ -260,7 +261,7 @@ struct PostDetailView: View {
         }
         .fullScreenCover(isPresented: $showMediaViewer) {
             if let videoURL = post.videoURL {
-                VideoViewerView(url: videoURL, aspectRatio: post.videoAspectRatio, downloadURL: post.downloadableVideoURL)
+                VideoViewerView(url: videoURL, aspectRatio: post.videoAspectRatio, downloadURLs: post.downloadableVideoURLs)
             } else if post.isGallery && !post.galleryItems.isEmpty {
                 GalleryViewerView(items: post.galleryItems)
             } else if let imageURL = post.imageURL {
