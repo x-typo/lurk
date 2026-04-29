@@ -54,8 +54,6 @@ enum MediaSaver {
                 case .failed:
                     lastResult = result
                 }
-            } catch VideoExportError.blockedHost {
-                return .failed
             } catch {
                 lastResult = .failed
             }
@@ -68,8 +66,6 @@ enum MediaSaver {
         for url in urls {
             do {
                 return try await temporaryVideoFile(from: url)
-            } catch VideoExportError.blockedHost {
-                throw VideoExportError.blockedHost
             } catch {
                 lastError = error
             }
