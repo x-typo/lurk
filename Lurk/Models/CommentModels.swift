@@ -61,7 +61,8 @@ struct Comment: Identifiable {
         "flairassistant",
         "trendingtattler",
         "post-explainer",
-        "ClaudeAI-mod-bot"
+        "ClaudeAI-mod-bot",
+        "WithoutReason1729"
     ]
 }
 

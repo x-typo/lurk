@@ -183,12 +183,22 @@ extension Post {
         return URL(string: video.decodedFallbackUrl)
     }
 
-    var downloadableVideoURL: URL? {
-        guard !isYouTubeVideo, isVideo, let video = media?.redditVideo else { return nil }
-        if let hlsUrl = video.decodedHLSUrl, let url = URL(string: hlsUrl) {
-            return url
+    var downloadableVideoURLs: [URL] {
+        guard !isYouTubeVideo, isVideo, let video = media?.redditVideo else { return [] }
+
+        let candidates = [
+            video.decodedHLSUrl,
+            video.decodedFallbackUrl
+        ]
+        var seen = Set<String>()
+        return candidates.compactMap { rawURL in
+            guard let rawURL, let url = URL(string: rawURL) else { return nil }
+            return seen.insert(url.absoluteString).inserted ? url : nil
         }
-        return URL(string: video.decodedFallbackUrl)
+    }
+
+    var downloadableVideoURL: URL? {
+        downloadableVideoURLs.first
     }
 
     var videoAspectRatio: CGFloat? {

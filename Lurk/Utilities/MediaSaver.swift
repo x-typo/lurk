@@ -36,28 +36,63 @@ enum MediaSaver {
     }
 
     static func saveVideo(from url: URL) async -> SaveResult {
-        do {
-            let fileURL = try await temporaryVideoFile(from: url)
-            let result = await saveToLibrary {
-                PHAssetChangeRequest.creationRequestForAssetFromVideo(atFileURL: fileURL)
+        await saveVideo(from: [url])
+    }
+
+    static func saveVideo(from urls: [URL]) async -> SaveResult {
+        var lastResult: SaveResult = .failed
+        for url in urls {
+            do {
+                let fileURL = try await temporaryVideoFile(from: url)
+                let result = await saveToLibrary {
+                    PHAssetChangeRequest.creationRequestForAssetFromVideo(atFileURL: fileURL)
+                }
+                try? FileManager.default.removeItem(at: fileURL)
+                switch result {
+                case .saved, .denied:
+                    return result
+                case .failed:
+                    lastResult = result
+                }
+            } catch {
+                lastResult = .failed
             }
-            try? FileManager.default.removeItem(at: fileURL)
-            return result
-        } catch {
-            return .failed
         }
+        return lastResult
+    }
+
+    static func temporaryVideoFile(from urls: [URL]) async throws -> URL {
+        var lastError: Error?
+        for url in urls {
+            do {
+                return try await temporaryVideoFile(from: url)
+            } catch {
+                lastError = error
+            }
+        }
+        throw lastError ?? VideoExportError.noDownloadURL
     }
 
     static func temporaryVideoFile(from url: URL) async throws -> URL {
+        guard !url.isYouTubeVideoDownloadURL else {
+            throw VideoExportError.blockedHost
+        }
+
         if url.pathExtension.lowercased() == "m3u8" {
             return try await exportVideo(from: url)
         }
 
-        let (tempURL, _) = try await URLSession.shared.download(from: url)
-        let ext = url.pathExtension.isEmpty ? "mp4" : url.pathExtension
-        let fileURL = FileManager.default.temporaryDirectory.appendingPathComponent("\(UUID().uuidString).\(ext)")
-        try FileManager.default.moveItem(at: tempURL, to: fileURL)
-        return fileURL
+        let (tempURL, response) = try await URLSession.shared.download(from: url)
+        do {
+            try validateDownloadResponse(response)
+            let ext = url.pathExtension.isEmpty ? "mp4" : url.pathExtension
+            let fileURL = FileManager.default.temporaryDirectory.appendingPathComponent("\(UUID().uuidString).\(ext)")
+            try FileManager.default.moveItem(at: tempURL, to: fileURL)
+            return fileURL
+        } catch {
+            try? FileManager.default.removeItem(at: tempURL)
+            throw error
+        }
     }
 
     private static func exportVideo(from url: URL) async throws -> URL {
@@ -98,6 +133,13 @@ enum MediaSaver {
         return nil
     }
 
+    private static func validateDownloadResponse(_ response: URLResponse) throws {
+        guard let http = response as? HTTPURLResponse else { return }
+        guard (200...299).contains(http.statusCode) else {
+            throw VideoExportError.badResponse
+        }
+    }
+
     private static func saveToLibrary(_ changeBlock: @escaping () -> Void) async -> SaveResult {
         let status = await PHPhotoLibrary.requestAuthorization(for: .addOnly)
         guard status == .authorized || status == .limited else { return .denied }
@@ -113,5 +155,18 @@ enum MediaSaver {
     private enum VideoExportError: Error {
         case exportSessionUnavailable
         case unsupportedFileType
+        case blockedHost
+        case noDownloadURL
+        case badResponse
+    }
+}
+
+private extension URL {
+    var isYouTubeVideoDownloadURL: Bool {
+        guard let host = host?.lowercased() else { return false }
+        let normalizedHost = host.hasPrefix("www.") ? String(host.dropFirst(4)) : host
+        return normalizedHost == "youtu.be"
+            || normalizedHost == "youtube.com"
+            || normalizedHost.hasSuffix(".youtube.com")
     }
 }
