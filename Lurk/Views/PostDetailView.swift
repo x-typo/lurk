@@ -284,7 +284,7 @@ struct PostDetailView: View {
     private func performRemoveAction(_ action: PostRemoveAction) async {
         guard !removingPost else { return }
         guard session.isLoggedIn else {
-            removeError = URLError(.userAuthenticationRequired).localizedDescription
+            removeError = "Log in to Reddit to \(action.label.lowercased()) this post."
             return
         }
 
@@ -722,6 +722,7 @@ struct VoteControlsView: View {
 
     @State private var voted: Int = 0
     @State private var displayScore: Int
+    @State private var voteError: String?
 
     init(thingID: String, initialScore: Int, inactiveColor: Color = Theme.textSecondary) {
         self.thingID = thingID
@@ -760,11 +761,24 @@ struct VoteControlsView: View {
                     .foregroundStyle(inactiveColor)
             }
         }
+        .alert("Reddit action failed", isPresented: voteErrorPresented) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text(voteError ?? "")
+        }
+    }
+
+    private var voteErrorPresented: Binding<Bool> {
+        Binding(
+            get: { voteError != nil },
+            set: { if !$0 { voteError = nil } }
+        )
     }
 
     private func submitVote(_ newDir: Int) {
         let previousVote = voted
         let previousScore = displayScore
+        voteError = nil
         voted = newDir
         displayScore += newDir - previousVote
 
@@ -779,6 +793,7 @@ struct VoteControlsView: View {
                 guard voted == newDir else { return }
                 voted = previousVote
                 displayScore = previousScore
+                voteError = error.localizedDescription
             }
         }
     }
