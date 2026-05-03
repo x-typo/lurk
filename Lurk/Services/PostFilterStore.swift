@@ -11,14 +11,14 @@ final class PostFilterStore {
         load()
     }
 
-    func hidePost(_ id: String, remoteSync: (() async throws -> Void)? = nil) {
+    func hidePost(_ id: String) {
         hiddenIDs.insert(id)
         persist()
-        if let sync = remoteSync {
-            Task {
-                try? await sync()
-            }
-        }
+    }
+
+    func unhidePost(_ id: String) {
+        hiddenIDs.remove(id)
+        persist()
     }
 
     func isHidden(_ id: String) -> Bool {

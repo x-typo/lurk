@@ -2,6 +2,7 @@ import SwiftUI
 
 struct HiddenPostsView: View {
     @Environment(RedditSession.self) private var session
+    @Environment(PostFilterStore.self) private var filterStore
     @Environment(\.redditClient) private var client
     @Environment(\.dismiss) private var dismiss
 
@@ -9,7 +10,9 @@ struct HiddenPostsView: View {
         NavigationStack {
             PaginatedFeedView(
                 applyFilters: false,
-                removeAction: PostRemoveAction(label: "Unhide", apiURL: RedditAPI.unhide)
+                removeAction: PostRemoveAction(label: "Unhide", apiURL: RedditAPI.unhide) { id in
+                    filterStore.unhidePost(id)
+                }
             ) { after in
                 guard let username = session.username else { throw URLError(.userAuthenticationRequired) }
                 return try await client.fetchHiddenPosts(username: username, after: after)

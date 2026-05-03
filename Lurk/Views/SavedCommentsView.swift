@@ -89,6 +89,8 @@ private struct SavedCommentCard: View {
 
     @Environment(RedditSession.self) private var session
     @Environment(\.redditClient) private var client
+    @State private var isUnsaving = false
+    @State private var unsaveError: String?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -123,25 +125,45 @@ private struct SavedCommentCard: View {
                     .foregroundStyle(Theme.textSecondary)
                 Spacer()
                 Button {
-                    if session.isLoggedIn {
-                        Task {
-                            let request = session.authenticatedRequest(
-                                url: RedditAPI.unsave,
-                                formData: ["id": "t1_\(comment.id)"]
-                            )
-                            try? await client.execute(request)
-                        }
-                    }
-                    onUnsave(comment.id)
+                    Task { await unsaveComment() }
                 } label: {
-                    Text("Unsave")
-                        .font(.caption.weight(.medium))
-                        .foregroundStyle(Theme.swipeHide)
+                    if isUnsaving {
+                        ProgressView().tint(Theme.swipeHide)
+                    } else {
+                        Text("Unsave")
+                            .font(.caption.weight(.medium))
+                            .foregroundStyle(Theme.swipeHide)
+                    }
                 }
+                .disabled(isUnsaving)
+            }
+
+            if let unsaveError {
+                Text(unsaveError)
+                    .font(.caption)
+                    .foregroundStyle(Theme.swipeHide)
             }
         }
         .padding(16)
         .background(Theme.surface)
         .clipShape(RoundedRectangle(cornerRadius: 12))
+    }
+
+    private func unsaveComment() async {
+        guard session.isLoggedIn, !isUnsaving else { return }
+        isUnsaving = true
+        unsaveError = nil
+        defer { isUnsaving = false }
+
+        do {
+            let request = session.authenticatedRequest(
+                url: RedditAPI.unsave,
+                formData: ["id": "t1_\(comment.id)"]
+            )
+            try await client.execute(request)
+            onUnsave(comment.id)
+        } catch {
+            unsaveError = error.localizedDescription
+        }
     }
 }

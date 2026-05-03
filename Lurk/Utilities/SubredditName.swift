@@ -1,7 +1,7 @@
 import Foundation
 
 enum SubredditName {
-    static func normalize(_ name: String) -> String? {
+    nonisolated static func normalize(_ name: String) -> String? {
         let cleaned = name
             .trimmingCharacters(in: .whitespacesAndNewlines)
             .replacingOccurrences(of: "^r/", with: "", options: [.regularExpression, .caseInsensitive])
@@ -11,7 +11,7 @@ enum SubredditName {
         return cleaned
     }
 
-    static func canonicalKey(_ name: String) -> String? {
+    nonisolated static func canonicalKey(_ name: String) -> String? {
         normalize(name)?.lowercased()
     }
 }
