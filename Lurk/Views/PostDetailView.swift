@@ -19,6 +19,8 @@ struct PostDetailView: View {
     @State private var savingMedia = false
     @State private var showMediaViewer = false
     @State private var showShareSheet = false
+    @State private var removingPost = false
+    @State private var removeError: String?
 
     var body: some View {
         NavigationStack {
@@ -229,23 +231,17 @@ struct PostDetailView: View {
                 }
                 if let action = removeAction {
                     ToolbarItem(placement: .confirmationAction) {
-                        Button(action.label) {
-                            let postId = post.id
-                            if session.isLoggedIn {
-                                Task {
-                                    let request = session.authenticatedRequest(
-                                        url: action.apiURL,
-                                        formData: ["id": "t3_\(postId)"]
-                                    )
-                                    try? await client.execute(request)
-                                }
+                        Button {
+                            Task { await performRemoveAction(action) }
+                        } label: {
+                            if removingPost {
+                                ProgressView().tint(Theme.primary)
+                            } else {
+                                Text(action.label)
                             }
-                            action.onComplete?(postId)
-                            comments = []
-                            teardownPlayer()
-                            dismiss()
                         }
                         .foregroundStyle(Theme.primary)
+                        .disabled(removingPost)
                     }
                 }
             }
@@ -270,6 +266,44 @@ struct PostDetailView: View {
         }
         .sheet(isPresented: $showShareSheet) {
             PostShareSheet(url: post.redditURL, title: post.title, imageURL: post.imageURL)
+        }
+        .alert("Reddit action failed", isPresented: removeErrorPresented) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text(removeError ?? "")
+        }
+    }
+
+    private var removeErrorPresented: Binding<Bool> {
+        Binding(
+            get: { removeError != nil },
+            set: { if !$0 { removeError = nil } }
+        )
+    }
+
+    private func performRemoveAction(_ action: PostRemoveAction) async {
+        guard !removingPost else { return }
+        guard session.isLoggedIn else {
+            removeError = "Log in to Reddit to \(action.label.lowercased()) this post."
+            return
+        }
+
+        removingPost = true
+        defer { removingPost = false }
+
+        do {
+            let postId = post.id
+            let request = session.authenticatedRequest(
+                url: action.apiURL,
+                formData: ["id": "t3_\(postId)"]
+            )
+            try await client.execute(request)
+            action.onComplete?(postId)
+            comments = []
+            teardownPlayer()
+            dismiss()
+        } catch {
+            removeError = error.localizedDescription
         }
     }
 
@@ -688,6 +722,7 @@ struct VoteControlsView: View {
 
     @State private var voted: Int = 0
     @State private var displayScore: Int
+    @State private var voteError: String?
 
     init(thingID: String, initialScore: Int, inactiveColor: Color = Theme.textSecondary) {
         self.thingID = thingID
@@ -700,16 +735,7 @@ struct VoteControlsView: View {
             if session.isLoggedIn {
                 Button {
                     let newDir = voted == 1 ? 0 : 1
-                    let scoreDelta = newDir - voted
-                    voted = newDir
-                    displayScore += scoreDelta
-                    Task {
-                        let request = session.authenticatedRequest(
-                            url: RedditAPI.vote,
-                            formData: ["id": thingID, "dir": "\(newDir)"]
-                        )
-                        try? await client.execute(request)
-                    }
+                    submitVote(newDir)
                 } label: {
                     Image(systemName: "arrow.up")
                         .foregroundStyle(voted == 1 ? Theme.primary : inactiveColor)
@@ -725,16 +751,7 @@ struct VoteControlsView: View {
             if session.isLoggedIn {
                 Button {
                     let newDir = voted == -1 ? 0 : -1
-                    let scoreDelta = newDir - voted
-                    voted = newDir
-                    displayScore += scoreDelta
-                    Task {
-                        let request = session.authenticatedRequest(
-                            url: RedditAPI.vote,
-                            formData: ["id": thingID, "dir": "\(newDir)"]
-                        )
-                        try? await client.execute(request)
-                    }
+                    submitVote(newDir)
                 } label: {
                     Image(systemName: "arrow.down")
                         .foregroundStyle(voted == -1 ? Theme.downvote : inactiveColor)
@@ -742,6 +759,41 @@ struct VoteControlsView: View {
             } else {
                 Image(systemName: "arrow.down")
                     .foregroundStyle(inactiveColor)
+            }
+        }
+        .alert("Reddit action failed", isPresented: voteErrorPresented) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text(voteError ?? "")
+        }
+    }
+
+    private var voteErrorPresented: Binding<Bool> {
+        Binding(
+            get: { voteError != nil },
+            set: { if !$0 { voteError = nil } }
+        )
+    }
+
+    private func submitVote(_ newDir: Int) {
+        let previousVote = voted
+        let previousScore = displayScore
+        voteError = nil
+        voted = newDir
+        displayScore += newDir - previousVote
+
+        Task { @MainActor in
+            do {
+                let request = session.authenticatedRequest(
+                    url: RedditAPI.vote,
+                    formData: ["id": thingID, "dir": "\(newDir)"]
+                )
+                try await client.execute(request)
+            } catch {
+                guard voted == newDir else { return }
+                voted = previousVote
+                displayScore = previousScore
+                voteError = error.localizedDescription
             }
         }
     }
@@ -754,6 +806,7 @@ struct ComposeReplySheet: View {
     @Environment(\.redditClient) private var client
     @State private var text = ""
     @State private var posting = false
+    @State private var postError: String?
 
     private var isEmpty: Bool {
         text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
@@ -771,6 +824,14 @@ struct ComposeReplySheet: View {
                     .clipShape(RoundedRectangle(cornerRadius: 12))
                     .padding(16)
 
+                if let postError {
+                    Text(postError)
+                        .font(.caption)
+                        .foregroundStyle(Theme.swipeHide)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.horizontal, 16)
+                }
+
                 Spacer()
             }
             .background(Theme.background)
@@ -785,21 +846,7 @@ struct ComposeReplySheet: View {
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button {
-                        guard !isEmpty else { return }
-                        posting = true
-                        Task {
-                            let request = session.authenticatedRequest(
-                                url: RedditAPI.comment,
-                                formData: [
-                                    "thing_id": thingID,
-                                    "text": text
-                                ]
-                            )
-                            try? await client.execute(request)
-                            posting = false
-                            text = ""
-                            isPresented = false
-                        }
+                        Task { await postReply() }
                     } label: {
                         if posting {
                             ProgressView().tint(Theme.primary)
@@ -815,5 +862,34 @@ struct ComposeReplySheet: View {
         }
         .presentationDetents([.medium])
         .preferredColorScheme(.dark)
+        .onChange(of: text) { _, _ in
+            postError = nil
+        }
+    }
+
+    private func postReply() async {
+        guard !isEmpty, !posting else { return }
+        postError = nil
+        guard session.isLoggedIn else {
+            postError = "Log in to Reddit to post a reply."
+            return
+        }
+        posting = true
+        defer { posting = false }
+
+        do {
+            let request = session.authenticatedRequest(
+                url: RedditAPI.comment,
+                formData: [
+                    "thing_id": thingID,
+                    "text": text
+                ]
+            )
+            try await client.execute(request)
+            text = ""
+            isPresented = false
+        } catch {
+            postError = error.localizedDescription
+        }
     }
 }

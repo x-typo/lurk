@@ -9,6 +9,8 @@ struct SubredditsView: View {
 
     @State private var selectedSubreddit: String?
     @State private var newSubName = ""
+    @State private var syncingSubreddit: String?
+    @State private var syncError: String?
 
     var body: some View {
         Group {
@@ -59,6 +61,14 @@ struct SubredditsView: View {
                                     .background(Theme.primary)
                                     .clipShape(RoundedRectangle(cornerRadius: 12))
                             }
+                            .disabled(syncingSubreddit != nil)
+                        }
+
+                        if let syncError {
+                            Text(syncError)
+                                .font(.caption)
+                                .foregroundStyle(Theme.swipeHide)
+                                .frame(maxWidth: .infinity, alignment: .leading)
                         }
 
                         ForEach(subStore.subreddits, id: \.self) { sub in
@@ -77,16 +87,22 @@ struct SubredditsView: View {
                                 }
 
                                 Button {
-                                    subStore.removeSubreddit(sub)
-                                    syncSubscribe(sub, action: "unsub")
+                                    removeSub(sub)
                                 } label: {
-                                    Text("\u{2715}")
-                                        .font(.callout.bold())
-                                        .foregroundStyle(Theme.textSecondary)
-                                        .frame(width: 44, height: 44)
-                                        .background(Theme.surfaceElevated)
-                                        .clipShape(Circle())
+                                    Group {
+                                        if syncingSubreddit?.lowercased() == sub.lowercased() {
+                                            ProgressView().tint(Theme.textSecondary)
+                                        } else {
+                                            Text("\u{2715}")
+                                                .font(.callout.bold())
+                                        }
+                                    }
+                                    .foregroundStyle(Theme.textSecondary)
+                                    .frame(width: 44, height: 44)
+                                    .background(Theme.surfaceElevated)
+                                    .clipShape(Circle())
                                 }
+                                .disabled(syncingSubreddit != nil)
                             }
                         }
                     }
@@ -101,20 +117,42 @@ struct SubredditsView: View {
     }
 
     private func addSub() {
-        let raw = newSubName.trimmingCharacters(in: .whitespaces)
-        guard !raw.isEmpty else { return }
-        if let stored = subStore.addSubreddit(raw) {
-            syncSubscribe(stored, action: "sub")
+        guard let stored = SubredditName.normalize(newSubName) else { return }
+        guard !subStore.subreddits.contains(where: { $0.lowercased() == stored.lowercased() }) else {
+            newSubName = ""
+            return
         }
+
+        _ = subStore.addSubreddit(stored)
         newSubName = ""
+        syncSubscribe(stored, action: "sub") {
+            subStore.removeSubreddit(matching: stored)
+        }
     }
 
-    private func syncSubscribe(_ name: String, action: String) {
+    private func removeSub(_ sub: String) {
+        subStore.removeSubreddit(sub)
+        syncSubscribe(sub, action: "unsub") {
+            _ = subStore.addSubreddit(sub)
+        }
+    }
+
+    private func syncSubscribe(_ name: String, action: String, rollback: @escaping () -> Void) {
+        syncError = nil
         guard session.isLoggedIn else { return }
         let request = session.authenticatedRequest(
             url: RedditAPI.subscribe,
             formData: ["action": action, "sr_name": name, "api_type": "json"]
         )
-        Task { try? await client.execute(request) }
+        syncingSubreddit = name
+        Task { @MainActor in
+            defer { syncingSubreddit = nil }
+            do {
+                try await client.execute(request)
+            } catch {
+                rollback()
+                syncError = error.localizedDescription
+            }
+        }
     }
 }

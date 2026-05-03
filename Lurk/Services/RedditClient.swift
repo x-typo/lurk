@@ -10,6 +10,20 @@ enum RedditAPI {
     static let subscribe = URL(string: "https://www.reddit.com/api/subscribe")!
 }
 
+enum RedditClientError: LocalizedError {
+    case noSubreddits
+    case apiErrors([String])
+
+    var errorDescription: String? {
+        switch self {
+        case .noSubreddits:
+            return "Add at least one subreddit to build your Home feed."
+        case .apiErrors(let errors):
+            return errors.joined(separator: "\n")
+        }
+    }
+}
+
 actor RedditClient {
     private let baseURL = "https://www.reddit.com"
     private static let pageSize = "25"
@@ -29,12 +43,13 @@ actor RedditClient {
         self.session = URLSession(configuration: config)
     }
 
-    func fetchHomePosts(after: String? = nil) async throws -> RedditListing {
-        var components = try buildComponents(path: "/top/.json")
-        components.queryItems = [
-            URLQueryItem(name: "sort", value: "top"),
-            URLQueryItem(name: "t", value: "day"),
-        ] + baseQueryItems(after: after)
+    func fetchHomePosts(subreddits: [String], after: String? = nil) async throws -> RedditListing {
+        let normalized = subreddits.compactMap(SubredditName.normalize)
+        guard !normalized.isEmpty else { throw RedditClientError.noSubreddits }
+
+        let path = "/r/\(normalized.joined(separator: "+"))/hot.json"
+        var components = try buildComponents(path: path)
+        components.queryItems = baseQueryItems(after: after)
         guard let url = components.url else { throw URLError(.badURL) }
         return try await fetch(url)
     }
@@ -82,10 +97,11 @@ actor RedditClient {
     }
 
     func execute(_ request: URLRequest) async throws {
-        let (_, response) = try await session.data(for: request)
-        guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
+        let (data, response) = try await session.data(for: request)
+        guard let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode) else {
             throw URLError(.badServerResponse)
         }
+        try validateRedditErrors(in: data)
     }
 
     func fetchSavedPosts(username: String, after: String? = nil) async throws -> RedditListing {
@@ -194,5 +210,21 @@ actor RedditClient {
             throw URLError(.badServerResponse)
         }
         return try decoder.decode(RedditListing.self, from: data)
+    }
+
+    private func validateRedditErrors(in data: Data) throws {
+        guard !data.isEmpty,
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let envelope = json["json"] as? [String: Any],
+              let errors = envelope["errors"] as? [Any],
+              !errors.isEmpty
+        else { return }
+
+        let messages = errors.compactMap { error -> String? in
+            guard let fields = error as? [Any], !fields.isEmpty else { return nil }
+            let parts = fields.compactMap { $0 as? String }.filter { !$0.isEmpty }
+            return parts.isEmpty ? nil : parts.joined(separator: ": ")
+        }
+        throw RedditClientError.apiErrors(messages.isEmpty ? ["Reddit rejected the request."] : messages)
     }
 }

@@ -11,6 +11,7 @@ struct SubredditCoverView: View {
     @Environment(\.redditClient) private var client
 
     @State private var isPending = false
+    @State private var syncError: String?
 
     private var isJoined: Bool {
         subStore.subreddits.contains { $0.lowercased() == subreddit.lowercased() }
@@ -29,27 +30,14 @@ struct SubredditCoverView: View {
                     }
                     Spacer()
                     Button {
-                        guard !isPending else { return }
-                        let currentlyJoined = isJoined
-                        let action = currentlyJoined ? "unsub" : "sub"
-                        if currentlyJoined {
-                            subStore.removeSubreddit(matching: subreddit)
-                        } else {
-                            guard subStore.addSubreddit(subreddit) != nil else { return }
-                        }
-                        guard session.isLoggedIn else { return }
-                        let request = session.authenticatedRequest(
-                            url: RedditAPI.subscribe,
-                            formData: ["action": action, "sr_name": subreddit, "api_type": "json"]
-                        )
-                        isPending = true
-                        Task {
-                            try? await client.execute(request)
-                            isPending = false
-                        }
+                        Task { await toggleSubscription() }
                     } label: {
-                        Text(isJoined ? "Leave" : "Join")
-                            .foregroundStyle(Theme.primary)
+                        if isPending {
+                            ProgressView().tint(Theme.primary)
+                        } else {
+                            Text(isJoined ? "Leave" : "Join")
+                                .foregroundStyle(Theme.primary)
+                        }
                     }
                     .disabled(isPending)
                     Menu {
@@ -74,9 +62,51 @@ struct SubredditCoverView: View {
             .overlay(alignment: .bottom) {
                 Theme.border.frame(height: 1)
             }
+            if let syncError {
+                Text(syncError)
+                    .font(.caption)
+                    .foregroundStyle(Theme.swipeHide)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 8)
+            }
             SubredditFeedView(subreddit: subreddit)
         }
         .background(Theme.background)
         .preferredColorScheme(.dark)
+    }
+
+    private func toggleSubscription() async {
+        guard !isPending else { return }
+        syncError = nil
+        let currentlyJoined = isJoined
+        let action = currentlyJoined ? "unsub" : "sub"
+
+        guard session.isLoggedIn else {
+            applySubscriptionChange(joined: !currentlyJoined)
+            return
+        }
+
+        isPending = true
+        defer { isPending = false }
+
+        do {
+            let request = session.authenticatedRequest(
+                url: RedditAPI.subscribe,
+                formData: ["action": action, "sr_name": subreddit, "api_type": "json"]
+            )
+            try await client.execute(request)
+            applySubscriptionChange(joined: !currentlyJoined)
+        } catch {
+            syncError = error.localizedDescription
+        }
+    }
+
+    private func applySubscriptionChange(joined: Bool) {
+        if joined {
+            _ = subStore.addSubreddit(subreddit)
+        } else {
+            subStore.removeSubreddit(matching: subreddit)
+        }
     }
 }
