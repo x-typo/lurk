@@ -78,6 +78,7 @@ struct SubredditCoverView: View {
 
     private func toggleSubscription() async {
         guard !isPending else { return }
+        syncError = nil
         let currentlyJoined = isJoined
         let action = currentlyJoined ? "unsub" : "sub"
 
@@ -87,7 +88,6 @@ struct SubredditCoverView: View {
         }
 
         isPending = true
-        syncError = nil
         defer { isPending = false }
 
         do {

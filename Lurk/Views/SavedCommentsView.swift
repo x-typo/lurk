@@ -150,9 +150,13 @@ private struct SavedCommentCard: View {
     }
 
     private func unsaveComment() async {
-        guard session.isLoggedIn, !isUnsaving else { return }
-        isUnsaving = true
+        guard !isUnsaving else { return }
         unsaveError = nil
+        guard session.isLoggedIn else {
+            unsaveError = "Log in to Reddit to unsave comments."
+            return
+        }
+        isUnsaving = true
         defer { isUnsaving = false }
 
         do {

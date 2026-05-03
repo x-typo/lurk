@@ -854,8 +854,12 @@ struct ComposeReplySheet: View {
 
     private func postReply() async {
         guard !isEmpty, !posting else { return }
-        posting = true
         postError = nil
+        guard session.isLoggedIn else {
+            postError = "Log in to Reddit to post a reply."
+            return
+        }
+        posting = true
         defer { posting = false }
 
         do {

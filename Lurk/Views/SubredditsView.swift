@@ -138,13 +138,13 @@ struct SubredditsView: View {
     }
 
     private func syncSubscribe(_ name: String, action: String, rollback: @escaping () -> Void) {
+        syncError = nil
         guard session.isLoggedIn else { return }
         let request = session.authenticatedRequest(
             url: RedditAPI.subscribe,
             formData: ["action": action, "sr_name": name, "api_type": "json"]
         )
         syncingSubreddit = name
-        syncError = nil
         Task { @MainActor in
             defer { syncingSubreddit = nil }
             do {
