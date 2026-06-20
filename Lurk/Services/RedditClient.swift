@@ -20,8 +20,8 @@ enum RedditAPI {
             if let message = json["message"] as? String {
                 return message
             }
-            if let error = json["error"] as? String {
-                return error
+            if let error = json["error"], !(error is NSNull) {
+                return String(describing: error)
             }
             if let envelope = json["json"] as? [String: Any],
                let errors = envelope["errors"] as? [Any],
@@ -51,6 +51,7 @@ enum RedditAPI {
 enum RedditClientError: LocalizedError {
     case apiErrors([String])
     case httpStatus(Int, String?)
+    case invalidResponse
 
     var errorDescription: String? {
         switch self {
@@ -61,6 +62,8 @@ enum RedditClientError: LocalizedError {
                 return "Reddit returned \(status): \(summary)"
             }
             return "Reddit returned HTTP \(status)."
+        case .invalidResponse:
+            return "Reddit returned an invalid response."
         }
     }
 }
@@ -243,7 +246,9 @@ actor RedditClient {
     }
 
     private func validateHTTPResponse(_ response: URLResponse, data: Data) throws {
-        guard let http = response as? HTTPURLResponse else { return }
+        guard let http = response as? HTTPURLResponse else {
+            throw RedditClientError.invalidResponse
+        }
         guard (200...299).contains(http.statusCode) else {
             throw RedditClientError.httpStatus(http.statusCode, RedditAPI.responseSummary(from: data))
         }
