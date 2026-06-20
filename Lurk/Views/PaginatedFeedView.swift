@@ -40,7 +40,7 @@ struct PaginatedFeedView: View {
                         ForEach(posts) { post in
                             PostCardView(
                                 post: post,
-                                onHide: { _ in hidePost(post) },
+                                onHide: { _ in removePost(post) },
                                 onShowDetail: { selectedPost = post },
                                 onShowSubreddit: showSubredditNav ? { subredditPost = post } : nil,
                                 onShowGallery: { galleryPost = post }
@@ -96,6 +96,39 @@ struct PaginatedFeedView: View {
         )
     }
 
+    private func removePost(_ post: Post) {
+        if let removeAction {
+            performRemoveAction(removeAction, for: post)
+        } else {
+            hidePost(post)
+        }
+    }
+
+    private func performRemoveAction(_ action: PostRemoveAction, for post: Post) {
+        let removedIndex = posts.firstIndex { $0.id == post.id }
+        posts.removeAll { $0.id == post.id }
+
+        guard session.isLoggedIn else {
+            restoreRemovedPost(post, to: removedIndex)
+            writeError = "Log in to Reddit to \(action.label.lowercased()) this post."
+            return
+        }
+
+        Task { @MainActor in
+            do {
+                let request = session.authenticatedRequest(
+                    url: action.apiURL,
+                    formData: ["id": "t3_\(post.id)"]
+                )
+                try await client.execute(request)
+                action.onComplete?(post.id)
+            } catch {
+                restoreRemovedPost(post, to: removedIndex)
+                writeError = error.localizedDescription
+            }
+        }
+    }
+
     private func hidePost(_ post: Post) {
         let removedIndex = posts.firstIndex { $0.id == post.id }
         filterStore.hidePost(post.id)
@@ -119,6 +152,10 @@ struct PaginatedFeedView: View {
 
     private func restoreHiddenPost(_ post: Post, to index: Int?) {
         filterStore.unhidePost(post.id)
+        restoreRemovedPost(post, to: index)
+    }
+
+    private func restoreRemovedPost(_ post: Post, to index: Int?) {
         guard !posts.contains(where: { $0.id == post.id }) else { return }
         posts.insert(post, at: min(index ?? posts.count, posts.count))
     }

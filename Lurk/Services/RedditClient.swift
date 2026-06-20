@@ -8,18 +8,59 @@ enum RedditAPI {
     static let vote = URL(string: "https://www.reddit.com/api/vote")!
     static let comment = URL(string: "https://www.reddit.com/api/comment")!
     static let subscribe = URL(string: "https://www.reddit.com/api/subscribe")!
+
+    nonisolated static let decoder: JSONDecoder = {
+        let d = JSONDecoder()
+        d.keyDecodingStrategy = .convertFromSnakeCase
+        return d
+    }()
+
+    nonisolated static func responseSummary(from data: Data) -> String? {
+        if let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+            if let message = json["message"] as? String {
+                return message
+            }
+            if let error = json["error"] as? String {
+                return error
+            }
+            if let envelope = json["json"] as? [String: Any],
+               let errors = envelope["errors"] as? [Any],
+               !errors.isEmpty {
+                let messages = errors.compactMap { item -> String? in
+                    guard let fields = item as? [Any] else { return nil }
+                    let parts = fields.compactMap { $0 as? String }.filter { !$0.isEmpty }
+                    return parts.isEmpty ? nil : parts.joined(separator: ": ")
+                }
+                if !messages.isEmpty { return messages.joined(separator: "\n") }
+            }
+        }
+
+        guard let text = String(data: data, encoding: .utf8) else { return nil }
+        if text.contains("You've been blocked by network security") {
+            return "You've been blocked by Reddit network security."
+        }
+        let collapsed = text
+            .replacingOccurrences(of: "<[^>]+>", with: " ", options: .regularExpression)
+            .replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !collapsed.isEmpty else { return nil }
+        return String(collapsed.prefix(180))
+    }
 }
 
 enum RedditClientError: LocalizedError {
-    case noSubreddits
     case apiErrors([String])
+    case httpStatus(Int, String?)
 
     var errorDescription: String? {
         switch self {
-        case .noSubreddits:
-            return "Add at least one subreddit to build your Home feed."
         case .apiErrors(let errors):
             return errors.joined(separator: "\n")
+        case .httpStatus(let status, let summary):
+            if let summary, !summary.isEmpty {
+                return "Reddit returned \(status): \(summary)"
+            }
+            return "Reddit returned HTTP \(status)."
         }
     }
 }
@@ -29,11 +70,6 @@ actor RedditClient {
     private static let pageSize = "25"
     private static let profilePageSize = "20"
     private let session: URLSession
-    private let decoder: JSONDecoder = {
-        let d = JSONDecoder()
-        d.keyDecodingStrategy = .convertFromSnakeCase
-        return d
-    }()
 
     init() {
         let config = URLSessionConfiguration.default
@@ -43,13 +79,16 @@ actor RedditClient {
         self.session = URLSession(configuration: config)
     }
 
-    func fetchHomePosts(subreddits: [String], after: String? = nil) async throws -> RedditListing {
-        let normalized = subreddits.compactMap(SubredditName.normalize)
-        guard !normalized.isEmpty else { throw RedditClientError.noSubreddits }
-
-        let path = "/r/\(normalized.joined(separator: "+"))/hot.json"
-        var components = try buildComponents(path: path)
-        components.queryItems = baseQueryItems(after: after)
+    func fetchHomePosts(
+        sort: SortType = .top,
+        time: TimeFilter = .day,
+        after: String? = nil
+    ) async throws -> RedditListing {
+        var components = try buildComponents(path: "/\(sort.rawValue).json")
+        components.queryItems = [
+            URLQueryItem(name: "sort", value: sort.rawValue),
+            URLQueryItem(name: "t", value: time.rawValue),
+        ] + baseQueryItems(after: after)
         guard let url = components.url else { throw URLError(.badURL) }
         return try await fetch(url)
     }
@@ -61,6 +100,7 @@ actor RedditClient {
     ) async throws -> RedditListing {
         var components = try buildComponents(path: "/r/popular/\(sort.rawValue).json")
         components.queryItems = [
+            URLQueryItem(name: "sort", value: sort.rawValue),
             URLQueryItem(name: "t", value: time.rawValue),
         ] + baseQueryItems(after: after)
         guard let url = components.url else { throw URLError(.badURL) }
@@ -86,11 +126,9 @@ actor RedditClient {
         guard let url = components.url else { throw URLError(.badURL) }
 
         let (data, response) = try await session.data(from: url)
-        guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
-            throw URLError(.badServerResponse)
-        }
+        try validateHTTPResponse(response, data: data)
 
-        let listings = try decoder.decode([CommentListing].self, from: data)
+        let listings = try RedditAPI.decoder.decode([CommentListing].self, from: data)
 
         guard listings.count >= 2 else { return [] }
         return Comment.parse(from: listings[1])
@@ -98,9 +136,7 @@ actor RedditClient {
 
     func execute(_ request: URLRequest) async throws {
         let (data, response) = try await session.data(for: request)
-        guard let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode) else {
-            throw URLError(.badServerResponse)
-        }
+        try validateHTTPResponse(response, data: data)
         try validateRedditErrors(in: data)
     }
 
@@ -134,10 +170,8 @@ actor RedditClient {
         components.queryItems = items
         guard let url = components.url else { throw URLError(.badURL) }
         let (data, response) = try await session.data(from: url)
-        guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
-            throw URLError(.badServerResponse)
-        }
-        return try decoder.decode(SavedCommentListing.self, from: data)
+        try validateHTTPResponse(response, data: data)
+        return try RedditAPI.decoder.decode(SavedCommentListing.self, from: data)
     }
 
     func fetchHiddenPosts(username: String, after: String? = nil) async throws -> RedditListing {
@@ -169,9 +203,7 @@ actor RedditClient {
             components.queryItems = items
             guard let url = components.url else { throw URLError(.badURL) }
             let (data, response) = try await session.data(from: url)
-            guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
-                throw URLError(.badServerResponse)
-            }
+            try validateHTTPResponse(response, data: data)
             let json = try JSONSerialization.jsonObject(with: data) as? [String: Any]
             let dataDict = json?["data"] as? [String: Any]
             let children = dataDict?["children"] as? [[String: Any]] ?? []
@@ -206,10 +238,15 @@ actor RedditClient {
 
     private func fetch(_ url: URL) async throws -> RedditListing {
         let (data, response) = try await session.data(from: url)
-        guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
-            throw URLError(.badServerResponse)
+        try validateHTTPResponse(response, data: data)
+        return try RedditAPI.decoder.decode(RedditListing.self, from: data)
+    }
+
+    private func validateHTTPResponse(_ response: URLResponse, data: Data) throws {
+        guard let http = response as? HTTPURLResponse else { return }
+        guard (200...299).contains(http.statusCode) else {
+            throw RedditClientError.httpStatus(http.statusCode, RedditAPI.responseSummary(from: data))
         }
-        return try decoder.decode(RedditListing.self, from: data)
     }
 
     private func validateRedditErrors(in data: Data) throws {
