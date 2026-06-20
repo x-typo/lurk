@@ -1,20 +1,21 @@
 # Lurk
 
-A minimal, ad-free Reddit client built with SwiftUI. No accounts, no ads, no tracking.
+A personal, ad-free Reddit client built with SwiftUI. Dark, fast, and tuned for one person's reading workflow.
 
 ## About
 
-Lurk uses Reddit's anonymous `.json` endpoint to browse content without authentication. Zero dependencies, dark mode only, native SwiftUI on iOS 18+.
+Lurk uses Reddit's web session cookies for a personal signed-in browsing workflow. It is intended for local personal use only, not App Store distribution or public replacement of Reddit's official app.
 
 ## Features
 
-- **Home Feed** - Aggregated posts from followed subreddits
-- **Popular Feed** - Trending content from r/popular with time filtering
+- **Home Feed** - Front-page top posts for the day
+- **Popular Feed** - r/popular top posts for the day
 - **Subreddit Management** - Follow/unfollow subreddits, browse individual feeds
 - **Swipe Gestures** - Swipe left to hide a post, swipe right to open in Safari
 - **Post Hiding** - Hidden posts persist across sessions (UserDefaults, capped at 5,000)
 - **Dark Mode** - Native dark theme, no toggle
 - **Pull-to-Refresh** - Refresh any feed
+- **Optional Account Actions** - Sign in to vote, comment, sync subscribed subreddits, and manage saved/hidden posts
 
 ## Tech Stack
 
@@ -24,7 +25,7 @@ Lurk uses Reddit's anonymous `.json` endpoint to browse content without authenti
 | **@Observable** | State management (Bankai pattern) |
 | **Actor** | Thread-safe API client |
 | **UserDefaults** | Local persistence for hidden posts and subreddit list |
-| **Reddit .json API** | Anonymous endpoint, no auth required (100 QPM) |
+| **Reddit Web/API Endpoints** | Personal session-backed reads and account actions |
 
 ## Architecture
 
@@ -47,18 +48,19 @@ Lurk/
 ## Setup
 
 1. Clone the repository
-2. Open `Lurk/Lurk.xcodeproj` in Xcode 16+
+2. Open `Lurk.xcodeproj` in Xcode 26+
 3. Build and run on a simulator or device (iOS 18+)
+4. Sign in from the app's Settings tab using the embedded Reddit web login
 
 ### Deploy to Physical Device
 
 ```bash
-xcodebuild -project Lurk/Lurk.xcodeproj -scheme Lurk \
+xcodebuild -project Lurk.xcodeproj -scheme Lurk \
   -destination 'id=DEVICE_UUID' build
 ```
 
-No signing configuration or environment variables needed.
+No Reddit app client ID, server, or client secret is needed.
 
 ## Design Philosophy
 
-Two interactions beyond reading: hide (swipe left) or open in Safari (swipe right). Everything else stays in the browser. This keeps the app lightweight, within Reddit's rate limits, and free of auth complexity.
+Reading stays native and low-distraction. Account actions are available only after your personal Reddit web sign-in.
