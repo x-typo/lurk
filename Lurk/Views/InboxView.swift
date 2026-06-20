@@ -1,6 +1,8 @@
 import SwiftUI
 
 struct InboxView: View {
+    private static let emptyReplyPageLimit = 5
+
     @Environment(RedditSession.self) private var session
     @Environment(\.redditClient) private var client
     @Environment(\.dismiss) private var dismiss
@@ -20,8 +22,6 @@ struct InboxView: View {
                     ProgressView().tint(Theme.primary).frame(maxHeight: .infinity)
                 } else if let error {
                     Text(error).foregroundStyle(Theme.textSecondary).frame(maxHeight: .infinity)
-                } else if replies.isEmpty, loadingMore {
-                    ProgressView().tint(Theme.primary).frame(maxHeight: .infinity)
                 } else if replies.isEmpty {
                     Text("No replies").foregroundStyle(Theme.textMuted).frame(maxHeight: .infinity)
                 } else {
@@ -84,8 +84,15 @@ struct InboxView: View {
             let listing = try await client.fetchInboxReplies()
             replies = listing.data.replies
             after = listing.data.after
-            while replies.isEmpty, after != nil {
-                try await loadMoreReplies()
+            var emptyPageCount = 0
+            var previousAfter: String?
+            while replies.isEmpty,
+                  let nextAfter = after,
+                  nextAfter != previousAfter,
+                  emptyPageCount < Self.emptyReplyPageLimit {
+                previousAfter = nextAfter
+                try await loadMoreReplies(after: nextAfter)
+                emptyPageCount += 1
             }
             error = nil
         } catch {
@@ -133,11 +140,16 @@ private struct InboxReplyRow: View {
                     .font(.caption)
                     .foregroundStyle(Theme.textMuted)
 
-                Button {
-                    if let fullCommentsURL = reply.fullCommentsURL {
+                if let fullCommentsURL = reply.fullCommentsURL {
+                    Button {
                         openURL(fullCommentsURL)
+                    } label: {
+                        Text(reply.linkTitle)
+                            .font(.subheadline)
+                            .foregroundStyle(Theme.text)
+                            .lineLimit(1)
                     }
-                } label: {
+                } else {
                     Text(reply.linkTitle)
                         .font(.subheadline)
                         .foregroundStyle(Theme.text)

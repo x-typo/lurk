@@ -178,11 +178,16 @@ private struct UserCommentRow: View {
                 Text("\u{2022}")
                     .font(.caption)
                     .foregroundStyle(Theme.textMuted)
-                Button {
-                    if let postURL = comment.postURL {
+                if let postURL = comment.postURL {
+                    Button {
                         openURL(postURL)
+                    } label: {
+                        Text(comment.linkTitle)
+                            .font(.subheadline)
+                            .foregroundStyle(Theme.text)
+                            .lineLimit(1)
                     }
-                } label: {
+                } else {
                     Text(comment.linkTitle)
                         .font(.subheadline)
                         .foregroundStyle(Theme.text)
@@ -191,7 +196,7 @@ private struct UserCommentRow: View {
             }
 
             HStack(spacing: 6) {
-                Text(comment.author)
+                Text("u/\(comment.author)")
                     .font(.subheadline.weight(.semibold))
                     .foregroundStyle(Theme.primary)
                 Text(comment.actionLine)
