@@ -38,6 +38,20 @@ struct PostCardView: View {
                     .foregroundStyle(Theme.text)
                     .lineLimit(4)
 
+                if let externalURL = post.externalLinkURL, let domain = post.externalLinkDomain {
+                    Button {
+                        openURL(externalURL)
+                    } label: {
+                        HStack(spacing: 4) {
+                            Text(domain)
+                                .lineLimit(1)
+                            Image(systemName: "arrow.up.right.square")
+                        }
+                        .font(.subheadline.weight(.medium))
+                        .foregroundStyle(Theme.swipeOpen)
+                    }
+                }
+
                 if let imageURL = post.imageURL {
                     AsyncImage(url: imageURL) { phase in
                         switch phase {

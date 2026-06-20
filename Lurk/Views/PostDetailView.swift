@@ -98,28 +98,9 @@ struct PostDetailView: View {
                                 }
                             }
                     } else if let imageURL = post.imageURL {
-                        AsyncImage(url: imageURL) { phase in
-                            switch phase {
-                            case .success(let image):
-                                image
-                                    .resizable()
-                                    .aspectRatio(contentMode: .fit)
-                                    .clipShape(RoundedRectangle(cornerRadius: 8))
-                            case .failure:
-                                EmptyView()
-                            default:
-                                RoundedRectangle(cornerRadius: 8)
-                                    .fill(Theme.surfaceElevated)
-                                    .aspectRatio(16/9, contentMode: .fit)
-                                    .overlay { ProgressView().tint(Theme.textMuted) }
-                            }
+                        PostImagePreviewView(post: post, imageURL: imageURL) {
+                            showMediaViewer = true
                         }
-                        .overlay(alignment: .bottom) {
-                            if post.galleryItems.count > 1 {
-                                GalleryDotIndicator(count: post.galleryItems.count)
-                            }
-                        }
-                        .onTapGesture { showMediaViewer = true }
                     }
 
                     if !post.selftext.isEmpty {
@@ -371,6 +352,82 @@ final class PlayerObservers {
     }
 
     deinit { reset() }
+}
+
+private struct PostImagePreviewView: View {
+    let post: Post
+    let imageURL: URL
+    let showMediaViewer: () -> Void
+
+    @Environment(\.openURL) private var openURL
+
+    var body: some View {
+        if let externalURL = post.externalLinkURL, let domain = post.externalLinkDomain {
+            VStack(spacing: 0) {
+                imageContent
+                    .contentShape(Rectangle())
+                    .onTapGesture { openURL(externalURL) }
+
+                HStack(spacing: 12) {
+                    Text(domain)
+                        .font(.subheadline)
+                        .foregroundStyle(Theme.textSecondary)
+                        .lineLimit(1)
+
+                    Spacer()
+
+                    Button {
+                        openURL(externalURL)
+                    } label: {
+                        Text("Open")
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(Theme.text)
+                            .padding(.horizontal, 18)
+                            .padding(.vertical, 8)
+                            .overlay {
+                                Capsule()
+                                    .stroke(Theme.textSecondary, lineWidth: 1)
+                            }
+                    }
+                }
+                .padding(12)
+                .background(Theme.surface)
+            }
+            .clipShape(RoundedRectangle(cornerRadius: 8))
+            .overlay {
+                RoundedRectangle(cornerRadius: 8)
+                    .stroke(Theme.border, lineWidth: 1)
+            }
+        } else {
+            imageContent
+                .clipShape(RoundedRectangle(cornerRadius: 8))
+                .onTapGesture { showMediaViewer() }
+        }
+    }
+
+    @ViewBuilder
+    private var imageContent: some View {
+        AsyncImage(url: imageURL) { phase in
+            switch phase {
+            case .success(let image):
+                image
+                    .resizable()
+                    .aspectRatio(contentMode: .fit)
+            case .failure:
+                EmptyView()
+            default:
+                RoundedRectangle(cornerRadius: 8)
+                    .fill(Theme.surfaceElevated)
+                    .aspectRatio(post.imageAspectRatio ?? 16/9, contentMode: .fit)
+                    .overlay { ProgressView().tint(Theme.textMuted) }
+            }
+        }
+        .overlay(alignment: .bottom) {
+            if post.galleryItems.count > 1 {
+                GalleryDotIndicator(count: post.galleryItems.count)
+            }
+        }
+    }
 }
 
 struct CommentRowView: View {

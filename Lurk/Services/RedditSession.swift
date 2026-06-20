@@ -8,6 +8,7 @@ final class RedditSession {
     private(set) var username: String?
     private var modhash: String?
     private var cookies: [HTTPCookie] = []
+    private static let formAllowedCharacters = CharacterSet(charactersIn: "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~")
 
     private let loginCheckURL = URL(string: "https://www.reddit.com/api/me.json")!
 
@@ -66,14 +67,18 @@ final class RedditSession {
         }
 
         let body = params.map {
-            let key = $0.key.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? $0.key
-            let val = $0.value.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? $0.value
+            let key = Self.formEncode($0.key)
+            let val = Self.formEncode($0.value)
             return "\(key)=\(val)"
         }.joined(separator: "&")
         request.httpBody = body.data(using: .utf8)
         applyCookies(to: &request)
 
         return request
+    }
+
+    private static func formEncode(_ value: String) -> String {
+        value.addingPercentEncoding(withAllowedCharacters: formAllowedCharacters) ?? ""
     }
 
     func logout() async {
