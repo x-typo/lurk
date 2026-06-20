@@ -59,10 +59,10 @@ scripts/deploy-phone.sh
 ```
 
 If CoreDevice gets stuck during install, retry with `scripts/deploy-phone.sh --restart-coredevice`.
-For the fastest path, put your phone UDID in ignored local config:
+For the fastest path, put your phone UDID in ignored local config at `.env.local`:
 
 ```bash
-DEVICE_ID=DEVICE_UUID
+printf 'DEVICE_ID=DEVICE_UUID\n' > .env.local
 ```
 
 No Reddit app client ID, server, or client secret is needed.

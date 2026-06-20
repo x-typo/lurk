@@ -8,7 +8,6 @@ final class RedditSession {
     private(set) var username: String?
     private var modhash: String?
     private var cookies: [HTTPCookie] = []
-    private static let formAllowedCharacters = CharacterSet(charactersIn: "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~")
 
     private let loginCheckURL = URL(string: "https://www.reddit.com/api/me.json")!
 
@@ -78,7 +77,27 @@ final class RedditSession {
     }
 
     private static func formEncode(_ value: String) -> String {
-        value.addingPercentEncoding(withAllowedCharacters: formAllowedCharacters) ?? ""
+        var encoded = ""
+        for byte in value.utf8 {
+            if isFormAllowedByte(byte) {
+                encoded.unicodeScalars.append(UnicodeScalar(Int(byte))!)
+            } else if byte == 0x20 {
+                encoded.append("+")
+            } else {
+                encoded += String(format: "%%%02X", byte)
+            }
+        }
+        return encoded
+    }
+
+    private static func isFormAllowedByte(_ byte: UInt8) -> Bool {
+        (byte >= 0x41 && byte <= 0x5A)
+            || (byte >= 0x61 && byte <= 0x7A)
+            || (byte >= 0x30 && byte <= 0x39)
+            || byte == 0x2D
+            || byte == 0x2E
+            || byte == 0x5F
+            || byte == 0x7E
     }
 
     func logout() async {

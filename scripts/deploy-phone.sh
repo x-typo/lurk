@@ -198,6 +198,9 @@ else
 fi
 
 if [[ "$LAUNCH_ONLY" == "1" ]]; then
+    if [[ -z "$INSTALL_DEVICE_ID" ]]; then
+        INSTALL_DEVICE_ID="$(resolve_coredevice_id)"
+    fi
     log "Launching $BUNDLE_ID"
     xcrun devicectl device process launch --device "$INSTALL_DEVICE_ID" "$BUNDLE_ID"
     exit 0
