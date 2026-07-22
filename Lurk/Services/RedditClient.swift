@@ -7,6 +7,8 @@ enum RedditAPI {
     static let unsave = URL(string: "https://www.reddit.com/api/unsave")!
     static let vote = URL(string: "https://www.reddit.com/api/vote")!
     static let comment = URL(string: "https://www.reddit.com/api/comment")!
+    static let editUserText = URL(string: "https://www.reddit.com/api/editusertext")!
+    static let deleteComment = URL(string: "https://www.reddit.com/api/del")!
     static let subscribe = URL(string: "https://www.reddit.com/api/subscribe")!
 
     nonisolated static let decoder: JSONDecoder = {
@@ -175,6 +177,39 @@ actor RedditClient {
         let (data, response) = try await session.data(from: url)
         try validateHTTPResponse(response, data: data)
         return try RedditAPI.decoder.decode(SavedCommentListing.self, from: data)
+    }
+
+    func fetchUserComments(username: String, after: String? = nil) async throws -> UserCommentListing {
+        let encoded = username.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? username
+        var components = try buildComponents(path: "/user/\(encoded)/comments/.json")
+        var items: [URLQueryItem] = [
+            URLQueryItem(name: "limit", value: Self.profilePageSize),
+            URLQueryItem(name: "raw_json", value: "1"),
+        ]
+        if let after {
+            items.append(URLQueryItem(name: "after", value: after))
+        }
+        components.queryItems = items
+        guard let url = components.url else { throw URLError(.badURL) }
+        let (data, response) = try await session.data(from: url)
+        try validateHTTPResponse(response, data: data)
+        return try RedditAPI.decoder.decode(UserCommentListing.self, from: data)
+    }
+
+    func fetchInboxReplies(after: String? = nil) async throws -> InboxListing {
+        var components = try buildComponents(path: "/message/comments/.json")
+        var items: [URLQueryItem] = [
+            URLQueryItem(name: "limit", value: Self.profilePageSize),
+            URLQueryItem(name: "raw_json", value: "1"),
+        ]
+        if let after {
+            items.append(URLQueryItem(name: "after", value: after))
+        }
+        components.queryItems = items
+        guard let url = components.url else { throw URLError(.badURL) }
+        let (data, response) = try await session.data(from: url)
+        try validateHTTPResponse(response, data: data)
+        return try RedditAPI.decoder.decode(InboxListing.self, from: data)
     }
 
     func fetchHiddenPosts(username: String, after: String? = nil) async throws -> RedditListing {

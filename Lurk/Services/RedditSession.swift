@@ -66,14 +66,38 @@ final class RedditSession {
         }
 
         let body = params.map {
-            let key = $0.key.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? $0.key
-            let val = $0.value.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? $0.value
+            let key = Self.formEncode($0.key)
+            let val = Self.formEncode($0.value)
             return "\(key)=\(val)"
         }.joined(separator: "&")
         request.httpBody = body.data(using: .utf8)
         applyCookies(to: &request)
 
         return request
+    }
+
+    private static func formEncode(_ value: String) -> String {
+        var encoded = ""
+        for byte in value.utf8 {
+            if isFormAllowedByte(byte) {
+                encoded.unicodeScalars.append(UnicodeScalar(Int(byte))!)
+            } else if byte == 0x20 {
+                encoded.append("+")
+            } else {
+                encoded += String(format: "%%%02X", byte)
+            }
+        }
+        return encoded
+    }
+
+    private static func isFormAllowedByte(_ byte: UInt8) -> Bool {
+        (byte >= 0x41 && byte <= 0x5A)
+            || (byte >= 0x61 && byte <= 0x7A)
+            || (byte >= 0x30 && byte <= 0x39)
+            || byte == 0x2D
+            || byte == 0x2E
+            || byte == 0x5F
+            || byte == 0x7E
     }
 
     func logout() async {

@@ -11,6 +11,8 @@ struct SettingsView: View {
     @State private var savedExpanded = false
     @State private var showSavedPosts = false
     @State private var showSavedComments = false
+    @State private var showComments = false
+    @State private var showInbox = false
 
     var body: some View {
         ScrollView {
@@ -221,6 +223,54 @@ struct SettingsView: View {
                         .padding(.leading, 16)
                         .transition(.opacity.combined(with: .move(edge: .top)))
                     }
+
+                    Button {
+                        if session.isLoggedIn {
+                            showComments = true
+                        } else {
+                            showLogin = true
+                        }
+                    } label: {
+                        HStack(spacing: 12) {
+                            Image(systemName: "bubble.left.and.bubble.right.fill")
+                                .font(.body)
+                                .foregroundStyle(Theme.primary)
+                            Text("Comments")
+                                .font(.body.weight(.medium))
+                                .foregroundStyle(Theme.text)
+                            Spacer()
+                            Image(systemName: "chevron.right")
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(Theme.textMuted)
+                        }
+                        .padding(16)
+                        .background(Theme.surface)
+                        .clipShape(RoundedRectangle(cornerRadius: 12))
+                    }
+
+                    Button {
+                        if session.isLoggedIn {
+                            showInbox = true
+                        } else {
+                            showLogin = true
+                        }
+                    } label: {
+                        HStack(spacing: 12) {
+                            Image(systemName: "tray.fill")
+                                .font(.body)
+                                .foregroundStyle(Theme.primary)
+                            Text("Inbox")
+                                .font(.body.weight(.medium))
+                                .foregroundStyle(Theme.text)
+                            Spacer()
+                            Image(systemName: "chevron.right")
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(Theme.textMuted)
+                        }
+                        .padding(16)
+                        .background(Theme.surface)
+                        .clipShape(RoundedRectangle(cornerRadius: 12))
+                    }
                 }
             }
             .padding(16)
@@ -237,6 +287,12 @@ struct SettingsView: View {
         }
         .fullScreenCover(isPresented: $showSavedComments) {
             SavedCommentsView()
+        }
+        .fullScreenCover(isPresented: $showComments) {
+            UserCommentsView()
+        }
+        .fullScreenCover(isPresented: $showInbox) {
+            InboxView()
         }
         .fullScreenCover(isPresented: $showBlocked) {
             BlockedSubredditsView()

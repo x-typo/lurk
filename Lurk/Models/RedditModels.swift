@@ -232,6 +232,24 @@ extension Post {
         URL(string: "https://www.reddit.com\(permalink)")!
     }
 
+    var externalLinkURL: URL? {
+        guard !isSelf else { return nil }
+        guard let candidate = URL(string: url.replacingOccurrences(of: "&amp;", with: "&")) else { return nil }
+        guard let scheme = candidate.scheme?.lowercased(), scheme == "http" || scheme == "https" else { return nil }
+        guard let host = candidate.host?.lowercased() else { return nil }
+        let normalizedHost = host.hasPrefix("www.") ? String(host.dropFirst(4)) : host
+        guard normalizedHost != "reddit.com",
+              !normalizedHost.hasSuffix(".reddit.com"),
+              normalizedHost != "redd.it",
+              !normalizedHost.hasSuffix(".redd.it") else { return nil }
+        return candidate
+    }
+
+    var externalLinkDomain: String? {
+        guard let host = externalLinkURL?.host?.lowercased() else { return nil }
+        return host.hasPrefix("www.") ? String(host.dropFirst(4)) : host
+    }
+
     var matchesFilteredKeyword: Bool {
         Post.filteredKeywords.contains { title.range(of: $0, options: .caseInsensitive) != nil }
     }
