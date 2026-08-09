@@ -8,5 +8,6 @@ struct SubredditFeedView: View {
         PaginatedFeedView(showSubredditNav: false, applyBlockFilter: false) { after in
             try await client.fetchSubredditPosts(subreddit, after: after)
         }
+        .id(subreddit.lowercased())
     }
 }
