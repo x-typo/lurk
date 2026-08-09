@@ -6,11 +6,27 @@
 	objectVersion = 77;
 	objects = {
 
+/* Begin PBXContainerItemProxy section */
+		8F28E2B4A41F4BD498737D27 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 58DE7D182F78E66A00510F5C /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 58DE7D1F2F78E66A00510F5C;
+			remoteInfo = Lurk;
+		};
+/* End PBXContainerItemProxy section */
+
 /* Begin PBXFileReference section */
 		58DE7D202F78E66A00510F5C /* Lurk.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Lurk.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		E8435C5246E74FD88C94B505 /* LurkTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = LurkTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
+		C12EE6BBB0574708AB92C6D6 /* Tests */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = Tests;
+			sourceTree = "<group>";
+		};
 		58DE7D222F78E66A00510F5C /* Lurk */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
 			path = Lurk;
@@ -26,6 +42,13 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		521C53FBFF90413C84A91708 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
@@ -33,6 +56,7 @@
 			isa = PBXGroup;
 			children = (
 				58DE7D222F78E66A00510F5C /* Lurk */,
+				C12EE6BBB0574708AB92C6D6 /* Tests */,
 				58DE7D212F78E66A00510F5C /* Products */,
 			);
 			sourceTree = "<group>";
@@ -41,6 +65,7 @@
 			isa = PBXGroup;
 			children = (
 				58DE7D202F78E66A00510F5C /* Lurk.app */,
+				E8435C5246E74FD88C94B505 /* LurkTests.xctest */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -70,6 +95,29 @@
 			productReference = 58DE7D202F78E66A00510F5C /* Lurk.app */;
 			productType = "com.apple.product-type.application";
 		};
+		78B7DFFEAE1F46D197FE0D87 /* LurkTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 1A65EA9F1C13418190A6F440 /* Build configuration list for PBXNativeTarget "LurkTests" */;
+			buildPhases = (
+				914F339FCDFF42929641B7C8 /* Sources */,
+				521C53FBFF90413C84A91708 /* Frameworks */,
+				19080D6307B948D898060FF8 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				0C82462B91FF4EC99CEE22DA /* PBXTargetDependency */,
+			);
+			fileSystemSynchronizedGroups = (
+				C12EE6BBB0574708AB92C6D6 /* Tests */,
+			);
+			name = LurkTests;
+			packageProductDependencies = (
+			);
+			productName = LurkTests;
+			productReference = E8435C5246E74FD88C94B505 /* LurkTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
@@ -82,6 +130,10 @@
 				TargetAttributes = {
 					58DE7D1F2F78E66A00510F5C = {
 						CreatedOnToolsVersion = 26.4;
+					};
+					78B7DFFEAE1F46D197FE0D87 = {
+						CreatedOnToolsVersion = 26.6;
+						TestTargetID = 58DE7D1F2F78E66A00510F5C;
 					};
 				};
 			};
@@ -100,12 +152,20 @@
 			projectRoot = "";
 			targets = (
 				58DE7D1F2F78E66A00510F5C /* Lurk */,
+				78B7DFFEAE1F46D197FE0D87 /* LurkTests */,
 			);
 		};
 /* End PBXProject section */
 
 /* Begin PBXResourcesBuildPhase section */
 		58DE7D1E2F78E66A00510F5C /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		19080D6307B948D898060FF8 /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -122,7 +182,22 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		914F339FCDFF42929641B7C8 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		0C82462B91FF4EC99CEE22DA /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 58DE7D1F2F78E66A00510F5C /* Lurk */;
+			targetProxy = 8F28E2B4A41F4BD498737D27 /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
 
 /* Begin XCBuildConfiguration section */
 		58DE7D292F78E66B00510F5C /* Debug */ = {
@@ -314,7 +389,61 @@
 			};
 			name = Release;
 		};
-/* End XCBuildConfiguration section */
+		114A57A5B42E4D2BA437C37C /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = K83R42K74H;
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 18.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.xtypo.LurkTests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Lurk.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/Lurk";
+			};
+			name = Debug;
+		};
+		60B342E9AADE49E58C347F47 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = K83R42K74H;
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 18.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.xtypo.LurkTests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Lurk.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/Lurk";
+			};
+			name = Release;
+		};
+	/* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
 		58DE7D1B2F78E66A00510F5C /* Build configuration list for PBXProject "Lurk" */ = {
@@ -335,7 +464,16 @@
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
 		};
-/* End XCConfigurationList section */
+		1A65EA9F1C13418190A6F440 /* Build configuration list for PBXNativeTarget "LurkTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				114A57A5B42E4D2BA437C37C /* Debug */,
+				60B342E9AADE49E58C347F47 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+	/* End XCConfigurationList section */
 	};
 	rootObject = 58DE7D182F78E66A00510F5C /* Project object */;
 }
