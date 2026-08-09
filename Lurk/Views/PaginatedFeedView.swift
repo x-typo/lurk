@@ -222,6 +222,7 @@ struct PaginatedFeedView: View {
 
     private func requestLoadMoreIfNeeded(for post: Post) {
         guard post.id == pager.posts.last?.id,
+              pager.after != nil,
               !pager.isRefreshing,
               !pager.isLoadingMore,
               pager.paginationError == nil
