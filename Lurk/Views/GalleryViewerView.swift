@@ -253,29 +253,41 @@ struct GalleryViewerView: View {
     }
 
     private func oversizedGIFFallback(for item: GalleryMedia) -> some View {
-        VStack(spacing: 12) {
-            Image(systemName: "exclamationmark.triangle")
-                .font(.largeTitle)
-                .foregroundStyle(Theme.textMuted)
-            Text("GIF is too large to animate safely")
-                .font(.caption)
-                .foregroundStyle(Theme.textMuted)
-                .multilineTextAlignment(.center)
+        ZStack(alignment: .bottom) {
+            VStack(spacing: 12) {
+                Image(systemName: "exclamationmark.triangle")
+                    .font(.largeTitle)
+                    .foregroundStyle(Theme.textMuted)
+                Text("GIF is too large to animate safely")
+                    .font(.caption)
+                    .foregroundStyle(Theme.textMuted)
+                    .multilineTextAlignment(.center)
+                browserButtonLabel
+                    .hidden()
+            }
+            .padding(16)
+            .background(.black.opacity(0.75), in: RoundedRectangle(cornerRadius: 12))
+            .allowsHitTesting(false)
+            .accessibilityHidden(true)
+
             Button {
                 externalURLOpener.open(item.url)
             } label: {
-                Label("Open in Browser", systemImage: "arrow.up.right.square")
-                    .font(.callout.weight(.semibold))
-                    .frame(minHeight: 44)
-                    .padding(.horizontal, 8)
+                browserButtonLabel
             }
             .buttonStyle(.borderedProminent)
             .contentShape(Rectangle())
             .accessibilityHint("Opens the GIF in your default browser")
+            .padding(.bottom, 16)
         }
-        .padding(16)
-        .background(.black.opacity(0.75), in: RoundedRectangle(cornerRadius: 12))
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    private var browserButtonLabel: some View {
+        Label("Open in Browser", systemImage: "arrow.up.right.square")
+            .font(.callout.weight(.semibold))
+            .frame(minHeight: 44)
+            .padding(.horizontal, 8)
     }
 
     private func cancelSaveTask() {
