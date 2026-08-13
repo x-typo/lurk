@@ -4,14 +4,40 @@ import UIKit
 struct ZoomableImageView: View {
     let url: URL
     let isAnimated: Bool
+    let isActive: Bool
+    var posterURL: URL? = nil
+    var onLoadStateChange: ((LoadState) -> Void)? = nil
     @State private var loadState: LoadState = .loading
+    @State private var requestID = UUID()
 
-    enum LoadState: Equatable { case loading, loaded, failed }
+    enum LoadState: Equatable {
+        case loading
+        case loaded
+        case failed
+        case tooLarge
+    }
 
     var body: some View {
         ZStack {
-            ZoomableImageRepresentable(url: url, isAnimated: isAnimated, loadState: $loadState)
+            if let posterURL, posterURL != url {
+                AsyncImage(url: posterURL) { phase in
+                    if case .success(let image) = phase {
+                        image.resizable().aspectRatio(contentMode: .fit)
+                    } else {
+                        Theme.surfaceElevated
+                    }
+                }
+            }
+
+            ZoomableImageRepresentable(
+                url: url,
+                isAnimated: isAnimated,
+                requestID: requestID,
+                isActive: isActive,
+                loadState: $loadState
+            )
                 .opacity(loadState == .loaded ? 1 : 0)
+                .allowsHitTesting(isActive && loadState == .loaded)
 
             switch loadState {
             case .loading:
@@ -24,10 +50,20 @@ struct ZoomableImageView: View {
                     Text("Couldn't load image")
                         .font(.caption)
                         .foregroundStyle(Theme.textMuted)
+                    Button("Retry") {
+                        loadState = .loading
+                        requestID = UUID()
+                    }
+                    .font(.caption)
                 }
+            case .tooLarge:
+                EmptyView()
             case .loaded:
                 EmptyView()
             }
+        }
+        .onChange(of: loadState, initial: true) { _, state in
+            onLoadStateChange?(state)
         }
     }
 }
@@ -35,6 +71,8 @@ struct ZoomableImageView: View {
 private struct ZoomableImageRepresentable: UIViewRepresentable {
     let url: URL
     let isAnimated: Bool
+    let requestID: UUID
+    let isActive: Bool
     @Binding var loadState: ZoomableImageView.LoadState
 
     func makeCoordinator() -> Coordinator { Coordinator() }
@@ -74,27 +112,41 @@ private struct ZoomableImageRepresentable: UIViewRepresentable {
         context.coordinator.imageView = imageView
         context.coordinator.scrollView = scrollView
         context.coordinator.onStateChange = { state in
-            Task { @MainActor in loadState = state }
+            loadState = state
         }
-        context.coordinator.load(url: url, isAnimated: isAnimated)
+        if isActive {
+            context.coordinator.load(url: url, isAnimated: isAnimated, requestID: requestID)
+        }
 
         return scrollView
     }
 
     func updateUIView(_ uiView: UIScrollView, context: Context) {
         context.coordinator.onStateChange = { state in
-            Task { @MainActor in loadState = state }
+            loadState = state
         }
-        if context.coordinator.currentURL != url || context.coordinator.currentIsAnimated != isAnimated {
-            context.coordinator.load(url: url, isAnimated: isAnimated)
+        guard isActive else {
+            context.coordinator.cancel()
+            return
+        }
+        if context.coordinator.currentURL != url
+            || context.coordinator.currentIsAnimated != isAnimated
+            || context.coordinator.currentRequestID != requestID {
+            context.coordinator.load(url: url, isAnimated: isAnimated, requestID: requestID)
         }
     }
 
+    static func dismantleUIView(_ scrollView: UIScrollView, coordinator: Coordinator) {
+        coordinator.cancel()
+    }
+
+    @MainActor
     final class Coordinator: NSObject, UIScrollViewDelegate {
         weak var imageView: UIImageView?
         weak var scrollView: UIScrollView?
         var currentURL: URL?
         var currentIsAnimated: Bool = false
+        var currentRequestID: UUID?
         var onStateChange: ((ZoomableImageView.LoadState) -> Void)?
         private var loadTask: Task<Void, Never>?
 
@@ -108,35 +160,61 @@ private struct ZoomableImageRepresentable: UIViewRepresentable {
             scrollView.isScrollEnabled = scrollView.zoomScale > scrollView.minimumZoomScale
         }
 
-        func load(url: URL, isAnimated: Bool) {
+        func load(url: URL, isAnimated: Bool, requestID: UUID) {
             loadTask?.cancel()
+            imageView?.image = nil
+            scrollView?.setZoomScale(scrollView?.minimumZoomScale ?? 1, animated: false)
             currentURL = url
             currentIsAnimated = isAnimated
-            onStateChange?(.loading)
+            currentRequestID = requestID
             loadTask = Task { [weak self] in
+                guard let self,
+                      self.currentURL == url,
+                      self.currentIsAnimated == isAnimated,
+                      self.currentRequestID == requestID else { return }
+                self.onStateChange?(.loading)
+
                 do {
-                    let (data, _) = try await URLSession.shared.data(from: url)
-                    try Task.checkCancellation()
-                    let image = isAnimated
-                        ? GIFDecoder.animatedImage(from: data) ?? UIImage(data: data)
-                        : UIImage(data: data)
-                    await MainActor.run {
-                        guard let self, self.currentURL == url else { return }
-                        if let image {
-                            self.imageView?.image = image
-                            self.onStateChange?(.loaded)
-                        } else {
-                            self.onStateChange?(.failed)
-                        }
+                    let image: UIImage?
+                    if isAnimated {
+                        image = try await GIFImageLoader.load(from: url).image
+                    } else {
+                        let (data, _) = try await URLSession.shared.data(from: url)
+                        try Task.checkCancellation()
+                        image = UIImage(data: data)
                     }
-                } catch is CancellationError {
-                } catch {
-                    await MainActor.run {
-                        guard let self, self.currentURL == url else { return }
+                    try Task.checkCancellation()
+                    guard self.currentURL == url,
+                          self.currentIsAnimated == isAnimated,
+                          self.currentRequestID == requestID else { return }
+                    if let image {
+                        self.imageView?.image = image
+                        self.onStateChange?(.loaded)
+                    } else {
                         self.onStateChange?(.failed)
                     }
+                } catch is CancellationError {
+                } catch GIFImageLoader.Failure.tooLarge {
+                    guard self.currentURL == url,
+                          self.currentIsAnimated == isAnimated,
+                          self.currentRequestID == requestID else { return }
+                    self.onStateChange?(.tooLarge)
+                } catch {
+                    guard self.currentURL == url,
+                          self.currentIsAnimated == isAnimated,
+                          self.currentRequestID == requestID else { return }
+                    self.onStateChange?(.failed)
                 }
             }
+        }
+
+        func cancel() {
+            loadTask?.cancel()
+            loadTask = nil
+            currentURL = nil
+            currentRequestID = nil
+            onStateChange = nil
+            imageView?.image = nil
         }
 
         @objc func doubleTap(_ gesture: UITapGestureRecognizer) {
