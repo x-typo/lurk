@@ -9,14 +9,22 @@ struct PostDetailView: View {
     @Environment(RedditSession.self) private var session
     @Environment(\.redditClient) private var client
     @Environment(\.dismiss) private var dismiss
+    @Environment(InlineGIFPlaybackStore.self) private var playbackStore
     @State private var player: AVPlayer?
     @State private var playerPostID: String = ""
     @State private var playerObservers = PlayerObservers()
+    @State private var playbackID = UUID()
+    @State private var suspensionPlaybackID = UUID()
+    @State private var animatedMediaRefreshID = UUID()
+    @State private var ordinaryVideoIsVisible = false
+    @State private var detailMediaSuspended = false
     @State private var comments: [Comment] = []
     @State private var showCommentSheet = false
     @State private var showSubreddit = false
     @State private var mediaSaved = false
     @State private var savingMedia = false
+    @State private var mediaSaveTask: Task<Void, Never>?
+    @State private var mediaSaveTaskID: UUID?
     @State private var showMediaViewer = false
     @State private var showShareSheet = false
     @State private var removingPost = false
@@ -30,7 +38,7 @@ struct PostDetailView: View {
                         Text(post.subredditNamePrefixed)
                             .font(.subheadline.weight(.semibold))
                             .foregroundStyle(Theme.primary)
-                            .onTapGesture { showSubreddit = true }
+                            .onTapGesture { presentSubreddit() }
                         Text("\u{2022}")
                             .font(.caption)
                             .foregroundStyle(Theme.textMuted)
@@ -48,40 +56,59 @@ struct PostDetailView: View {
                         .foregroundStyle(Theme.text)
 
                     if let videoURL = post.videoURL {
-                        AVKitPlayerView(player: player)
-                            .aspectRatio(post.videoAspectRatio ?? 16/9, contentMode: .fit)
+                        if post.loopsVideo {
+                            InlineLoopingVideoView(
+                                url: videoURL,
+                                posterURL: post.imageURL,
+                                aspectRatio: post.videoAspectRatio ?? post.imageAspectRatio,
+                                activation: .whenVisible
+                            )
                             .clipShape(RoundedRectangle(cornerRadius: 8))
-                            .overlay(alignment: .topTrailing) {
-                                Button { showMediaViewer = true } label: {
-                                    Image(systemName: "arrow.up.left.and.arrow.down.right")
-                                        .font(.caption.weight(.semibold))
-                                        .foregroundStyle(.white)
-                                        .padding(8)
-                                        .background(.black.opacity(0.5))
-                                        .clipShape(Circle())
-                                }
-                                .padding(8)
-                            }
-                            .overlay {
-                                if playerObservers.failed {
-                                    VStack(spacing: 6) {
-                                        Image(systemName: "exclamationmark.triangle")
-                                            .font(.title2)
-                                            .foregroundStyle(.white.opacity(0.9))
-                                        Text("Playback failed")
-                                            .font(.caption)
-                                            .foregroundStyle(.white.opacity(0.9))
+                            .overlay(alignment: .topTrailing) { mediaExpandButton }
+                        } else {
+                            AVKitPlayerView(player: player)
+                                .aspectRatio(post.videoAspectRatio ?? 16/9, contentMode: .fit)
+                                .clipShape(RoundedRectangle(cornerRadius: 8))
+                                .overlay(alignment: .topTrailing) { mediaExpandButton }
+                                .overlay {
+                                    if playerObservers.failed {
+                                        VStack(spacing: 6) {
+                                            Image(systemName: "exclamationmark.triangle")
+                                                .font(.title2)
+                                                .foregroundStyle(.white.opacity(0.9))
+                                            Text("Playback failed")
+                                                .font(.caption)
+                                                .foregroundStyle(.white.opacity(0.9))
+                                        }
+                                        .padding(12)
+                                        .background(.black.opacity(0.6))
+                                        .clipShape(RoundedRectangle(cornerRadius: 8))
                                     }
-                                    .padding(12)
-                                    .background(.black.opacity(0.6))
-                                    .clipShape(RoundedRectangle(cornerRadius: 8))
                                 }
-                            }
-                            .onAppear { setupPlayer(for: videoURL) }
-                            .onDisappear { teardownPlayer() }
+                                .onScrollVisibilityChange(threshold: 0.1) { isVisible in
+                                    ordinaryVideoIsVisible = isVisible
+                                    if isVisible, !detailMediaSuspended {
+                                        setupPlayer(for: videoURL)
+                                    } else {
+                                        teardownPlayer()
+                                    }
+                                }
+                                .onDisappear { teardownPlayer() }
+                        }
                     } else if let youtubeVideoID = post.youtubeVideoID {
                         YouTubePlayerView(videoID: youtubeVideoID)
                             .aspectRatio(post.imageAspectRatio ?? 16/9, contentMode: .fit)
+                            .clipShape(RoundedRectangle(cornerRadius: 8))
+                    } else if let animatedImageURL = post.animatedImageURL {
+                        AnimatedGIFView(
+                            url: animatedImageURL,
+                            posterURL: post.imageURL,
+                            limits: .inline,
+                            activation: .whenVisible,
+                            onMediaTap: presentMediaViewer
+                        )
+                            .id(animatedMediaRefreshID)
+                            .aspectRatio(post.imageAspectRatio ?? 16 / 9, contentMode: .fit)
                             .clipShape(RoundedRectangle(cornerRadius: 8))
                     } else if post.isVideo {
                         RoundedRectangle(cornerRadius: 8)
@@ -99,7 +126,7 @@ struct PostDetailView: View {
                             }
                     } else if let imageURL = post.imageURL {
                         PostImagePreviewView(post: post, imageURL: imageURL) {
-                            showMediaViewer = true
+                            presentMediaViewer()
                         }
                     }
 
@@ -115,23 +142,43 @@ struct PostDetailView: View {
 
                         Spacer()
 
-                        if !post.downloadableVideoURLs.isEmpty || (post.imageURL != nil && !post.isYouTubeVideo) {
+                        if !post.downloadableVideoURLs.isEmpty
+                            || ((post.animatedImageURL ?? post.imageURL) != nil && !post.isYouTubeVideo) {
                             Button {
+                                cancelMediaSaveTask()
+                                let operationID = UUID()
+                                mediaSaveTaskID = operationID
+                                mediaSaved = false
                                 savingMedia = true
-                                Task {
+                                mediaSaveTask = Task { @MainActor in
+                                    defer {
+                                        if mediaSaveTaskID == operationID {
+                                            mediaSaveTask = nil
+                                            mediaSaveTaskID = nil
+                                        }
+                                    }
+                                    guard mediaSaveTaskID == operationID, !Task.isCancelled else { return }
                                     let result: MediaSaver.SaveResult
                                     let videoURLs = post.downloadableVideoURLs
                                     if !videoURLs.isEmpty {
                                         result = await MediaSaver.saveVideo(from: videoURLs)
+                                    } else if let animatedImageURL = post.animatedImageURL {
+                                        result = await MediaSaver.saveImageData(from: animatedImageURL)
                                     } else if let imageURL = post.imageURL {
                                         result = await MediaSaver.saveImage(from: imageURL)
                                     } else {
                                         result = .failed
                                     }
+                                    guard mediaSaveTaskID == operationID, !Task.isCancelled else { return }
                                     savingMedia = false
                                     if result == .saved {
                                         mediaSaved = true
-                                        try? await Task.sleep(for: .seconds(1.5))
+                                        do {
+                                            try await Task.sleep(for: .seconds(1.5))
+                                        } catch {
+                                            return
+                                        }
+                                        guard mediaSaveTaskID == operationID, !Task.isCancelled else { return }
                                         mediaSaved = false
                                     }
                                 }
@@ -152,7 +199,7 @@ struct PostDetailView: View {
                         }
 
                         Button {
-                            showShareSheet = true
+                            presentShareSheet()
                         } label: {
                             Image(systemName: "square.and.arrow.up")
                                 .foregroundStyle(Theme.textSecondary)
@@ -162,7 +209,7 @@ struct PostDetailView: View {
 
                     if session.isLoggedIn {
                         Button {
-                            showCommentSheet = true
+                            presentCommentSheet()
                         } label: {
                             Label("Comment", systemImage: "square.and.pencil")
                                 .font(.body.weight(.medium))
@@ -185,7 +232,11 @@ struct PostDetailView: View {
 
                             LazyVStack(alignment: .leading, spacing: 0) {
                                 ForEach(comments) { comment in
-                                    CommentRowView(comment: comment)
+                                    CommentRowView(
+                                        comment: comment,
+                                        onPresentReply: suspendDetailMedia,
+                                        onDismissReply: resumeAfterPresentation
+                                    )
                                 }
                             }
                         }
@@ -205,6 +256,7 @@ struct PostDetailView: View {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Close") {
                         comments = []
+                        cancelMediaSaveTask()
                         teardownPlayer()
                         dismiss()
                     }
@@ -228,24 +280,41 @@ struct PostDetailView: View {
             }
         }
         .preferredColorScheme(.dark)
-        .fullScreenCover(isPresented: $showSubreddit) {
+        .onDisappear {
+            cancelMediaSaveTask()
+        }
+        .fullScreenCover(isPresented: $showSubreddit, onDismiss: detailCoverDismissed) {
             SubredditCoverView(subreddit: post.subreddit, title: post.subredditNamePrefixed) {
                 showSubreddit = false
             }
         }
-        .sheet(isPresented: $showCommentSheet) {
+        .sheet(isPresented: $showCommentSheet, onDismiss: resumeAfterPresentation) {
             ComposeReplySheet(thingID: "t3_\(post.id)", isPresented: $showCommentSheet)
         }
-        .fullScreenCover(isPresented: $showMediaViewer) {
+        .fullScreenCover(isPresented: $showMediaViewer, onDismiss: mediaViewerDismissed) {
             if let videoURL = post.videoURL {
-                VideoViewerView(url: videoURL, aspectRatio: post.videoAspectRatio, downloadURLs: post.downloadableVideoURLs)
+                VideoViewerView(
+                    url: videoURL,
+                    aspectRatio: post.videoAspectRatio,
+                    downloadURLs: post.downloadableVideoURLs,
+                    loops: post.loopsVideo
+                )
             } else if post.isGallery && !post.galleryItems.isEmpty {
                 GalleryViewerView(items: post.galleryItems)
+            } else if let animatedImageURL = post.animatedImageURL {
+                GalleryViewerView(items: [
+                    GalleryMedia(
+                        id: 0,
+                        url: animatedImageURL,
+                        isAnimated: true,
+                        posterURL: post.imageURL
+                    ),
+                ])
             } else if let imageURL = post.imageURL {
                 GalleryViewerView(items: [GalleryMedia(id: 0, url: imageURL, isAnimated: false)])
             }
         }
-        .sheet(isPresented: $showShareSheet) {
+        .sheet(isPresented: $showShareSheet, onDismiss: resumeAfterPresentation) {
             PostShareSheet(url: post.redditURL, title: post.title, imageURL: post.imageURL)
         }
         .alert("Reddit action failed", isPresented: removeErrorPresented) {
@@ -260,6 +329,19 @@ struct PostDetailView: View {
             get: { removeError != nil },
             set: { if !$0 { removeError = nil } }
         )
+    }
+
+    private var mediaExpandButton: some View {
+        Button { presentMediaViewer() } label: {
+            Image(systemName: "arrow.up.left.and.arrow.down.right")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.white)
+                .padding(8)
+                .background(.black.opacity(0.5))
+                .clipShape(Circle())
+        }
+        .padding(8)
+        .accessibilityLabel("Open media viewer")
     }
 
     private func performRemoveAction(_ action: PostRemoveAction) async {
@@ -281,6 +363,7 @@ struct PostDetailView: View {
             try await client.execute(request)
             action.onComplete?(postId)
             comments = []
+            cancelMediaSaveTask()
             teardownPlayer()
             dismiss()
         } catch {
@@ -289,6 +372,7 @@ struct PostDetailView: View {
     }
 
     private func setupPlayer(for url: URL) {
+        playbackStore.activate(playbackID)
         if player == nil || playerPostID != post.id {
             playerObservers.reset()
             player?.pause()
@@ -297,7 +381,7 @@ struct PostDetailView: View {
             player = newPlayer
             playerPostID = post.id
             if let item = newPlayer.currentItem {
-                playerObservers.observeFailure(for: item)
+                playerObservers.observe(item: item, player: newPlayer, loops: post.loopsVideo)
             }
         }
         player?.play()
@@ -309,6 +393,65 @@ struct PostDetailView: View {
         player?.replaceCurrentItem(with: nil)
         player = nil
         playerPostID = ""
+        playbackStore.deactivate(playbackID)
+    }
+
+    private func cancelMediaSaveTask() {
+        mediaSaveTask?.cancel()
+        mediaSaveTask = nil
+        mediaSaveTaskID = nil
+        mediaSaved = false
+        savingMedia = false
+    }
+
+    private func presentMediaViewer() {
+        suspendDetailMedia()
+        showMediaViewer = true
+    }
+
+    private func mediaViewerDismissed() {
+        resumeAfterPresentation()
+    }
+
+    private func presentSubreddit() {
+        suspendDetailMedia()
+        showSubreddit = true
+    }
+
+    private func detailCoverDismissed() {
+        resumeAfterPresentation()
+    }
+
+    private func presentCommentSheet() {
+        suspendDetailMedia()
+        showCommentSheet = true
+    }
+
+    private func presentShareSheet() {
+        suspendDetailMedia()
+        showShareSheet = true
+    }
+
+    private func suspendDetailMedia() {
+        detailMediaSuspended = true
+        teardownPlayer()
+        playbackStore.activate(suspensionPlaybackID)
+    }
+
+    private func resumeAfterPresentation() {
+        playbackStore.deactivate(suspensionPlaybackID)
+        detailMediaSuspended = false
+        resumeDetailMedia()
+    }
+
+    private func resumeDetailMedia() {
+        if ordinaryVideoIsVisible,
+           let videoURL = post.videoURL,
+           !post.loopsVideo {
+            setupPlayer(for: videoURL)
+        } else if post.animatedImageURL != nil {
+            animatedMediaRefreshID = UUID()
+        }
     }
 }
 
@@ -317,7 +460,7 @@ final class PlayerObservers {
     var failed = false
     @ObservationIgnored private var tokens: [NSObjectProtocol] = []
 
-    func observeFailure(for item: AVPlayerItem) {
+    func observe(item: AVPlayerItem, player: AVPlayer, loops: Bool) {
         let failHandler: @Sendable (Notification) -> Void = { _ in
             Task { @MainActor [weak self] in self?.failed = true }
         }
@@ -335,6 +478,22 @@ final class PlayerObservers {
                 using: failHandler
             )
         )
+        if loops {
+            let loopController = PlayerLoopController(player: player)
+            let loopHandler: @Sendable (Notification) -> Void = { _ in
+                Task { @MainActor in
+                    loopController.restart()
+                }
+            }
+            tokens.append(
+                NotificationCenter.default.addObserver(
+                    forName: AVPlayerItem.didPlayToEndTimeNotification,
+                    object: item,
+                    queue: .main,
+                    using: loopHandler
+                )
+            )
+        }
         tokens.append(
             NotificationCenter.default.addObserver(
                 forName: AVPlayerItem.newErrorLogEntryNotification,
@@ -352,6 +511,20 @@ final class PlayerObservers {
     }
 
     deinit { reset() }
+}
+
+@MainActor
+final class PlayerLoopController {
+    weak var player: AVPlayer?
+
+    init(player: AVPlayer) {
+        self.player = player
+    }
+
+    func restart() {
+        player?.seek(to: .zero)
+        player?.play()
+    }
 }
 
 private struct PostImagePreviewView: View {
@@ -432,6 +605,8 @@ private struct PostImagePreviewView: View {
 
 struct CommentRowView: View {
     let comment: Comment
+    var onPresentReply: () -> Void = {}
+    var onDismissReply: () -> Void = {}
     @Environment(RedditSession.self) private var session
     @State private var collapsed = false
     @State private var selecting = false
@@ -439,25 +614,41 @@ struct CommentRowView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
-            HStack(spacing: 6) {
-                Text("u/\(comment.author)")
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(Theme.primary)
-                if comment.isSubmitter {
-                    Text("OP")
-                        .font(.caption2.weight(.bold))
-                        .foregroundStyle(Theme.opBadge)
+            Button(action: handleNonInteractiveTap) {
+                HStack(spacing: 6) {
+                    Text("u/\(comment.author)")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(Theme.primary)
+                    if comment.isSubmitter {
+                        Text("OP")
+                            .font(.caption2.weight(.bold))
+                            .foregroundStyle(Theme.opBadge)
+                    }
+                    Text(Formatters.timeAgo(comment.createdUtc))
+                        .font(.caption)
+                        .foregroundStyle(Theme.textMuted)
+                    Spacer()
                 }
-                Text(Formatters.timeAgo(comment.createdUtc))
-                    .font(.caption)
-                    .foregroundStyle(Theme.textMuted)
-                Spacer()
+                .frame(minHeight: 44)
+                .contentShape(Rectangle())
             }
+            .buttonStyle(.plain)
+            .accessibilityLabel(collapsed ? "Expand comment by \(comment.author)" : "Collapse comment by \(comment.author)")
             if !collapsed {
                 if selecting {
                     SelectableTextView(text: comment.body)
                 } else {
-                    CommentBodyView(content: comment.body)
+                    CommentBodyView(
+                        content: comment.body,
+                        nonInteractiveTapAction: CommentBodyTapAction(
+                            perform: handleNonInteractiveTap,
+                            mediaAccessibility: MediaActionAccessibility(
+                                label: "Collapse comment by \(comment.author)",
+                                hint: "Double-tap to collapse this comment."
+                            )
+                        ),
+                        onNonInteractiveLongPress: beginSelecting
+                    )
                 }
 
                 HStack(spacing: 12) {
@@ -465,6 +656,7 @@ struct CommentRowView: View {
 
                     if session.isLoggedIn {
                         Button {
+                            onPresentReply()
                             showReplySheet = true
                         } label: {
                             Label("Reply", systemImage: "bubble.left")
@@ -482,7 +674,11 @@ struct CommentRowView: View {
 
                 if !comment.replies.isEmpty {
                     ForEach(comment.replies) { reply in
-                        CommentRowView(comment: reply)
+                        CommentRowView(
+                            comment: reply,
+                            onPresentReply: onPresentReply,
+                            onDismissReply: onDismissReply
+                        )
                             .padding(.leading, 16)
                     }
                 }
@@ -498,18 +694,6 @@ struct CommentRowView: View {
         }
         .padding(.vertical, 8)
         .padding(.leading, CGFloat(comment.depth * 12))
-        .contentShape(Rectangle())
-        .onTapGesture {
-            if selecting {
-                withAnimation(.easeInOut(duration: 0.2)) { selecting = false }
-            } else {
-                withAnimation(.easeInOut(duration: 0.2)) { collapsed.toggle() }
-            }
-        }
-        .onLongPressGesture {
-            guard !collapsed else { return }
-            withAnimation(.easeInOut(duration: 0.2)) { selecting = true }
-        }
         .overlay(alignment: .leading) {
             if comment.depth > 0 {
                 Rectangle()
@@ -518,15 +702,35 @@ struct CommentRowView: View {
                     .padding(.leading, CGFloat((comment.depth - 1) * 12))
             }
         }
-        .sheet(isPresented: $showReplySheet) {
+        .sheet(isPresented: $showReplySheet, onDismiss: onDismissReply) {
             ComposeReplySheet(thingID: "t1_\(comment.id)", isPresented: $showReplySheet)
         }
     }
+
+    private func handleNonInteractiveTap() {
+        if selecting {
+            withAnimation(.easeInOut(duration: 0.2)) { selecting = false }
+        } else {
+            withAnimation(.easeInOut(duration: 0.2)) { collapsed.toggle() }
+        }
+    }
+
+    private func beginSelecting() {
+        guard !collapsed else { return }
+        withAnimation(.easeInOut(duration: 0.2)) { selecting = true }
+    }
+}
+
+struct CommentBodyTapAction {
+    let perform: () -> Void
+    let mediaAccessibility: MediaActionAccessibility
 }
 
 struct CommentBodyView: View {
     let content: String
     var textFont: Font = .subheadline
+    var nonInteractiveTapAction: CommentBodyTapAction? = nil
+    var onNonInteractiveLongPress: (() -> Void)? = nil
     @Environment(\.openURL) private var openURL
 
     // Matches in priority order: giphy embeds, markdown links, image URLs, plain URLs
@@ -543,65 +747,147 @@ struct CommentBodyView: View {
     private static let imageExtensions = ["jpg", "jpeg", "png", "gif", "webp"]
 
     var body: some View {
-        let parts = Self.parse(content)
+        let parts = Self.displayParts(from: content)
         VStack(alignment: .leading, spacing: 6) {
             ForEach(Array(parts.enumerated()), id: \.offset) { _, part in
                 switch part {
                 case .text(let text):
                     if !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                        VStack(alignment: .leading, spacing: 2) {
-                            let lines = text.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
-                            let groups = Self.groupLines(lines)
-                            ForEach(Array(groups.enumerated()), id: \.offset) { _, group in
-                                switch group {
-                                case .line(let line):
-                                    renderLine(line)
-                                case .quote(let qlines):
-                                    VStack(alignment: .leading, spacing: 2) {
-                                        ForEach(Array(qlines.enumerated()), id: \.offset) { _, ql in
-                                            renderLine(ql)
+                        nonInteractiveTextTarget {
+                            VStack(alignment: .leading, spacing: 2) {
+                                let lines = text.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
+                                let groups = Self.groupLines(lines)
+                                ForEach(Array(groups.enumerated()), id: \.offset) { _, group in
+                                    switch group {
+                                    case .line(let line):
+                                        renderLine(line)
+                                    case .quote(let qlines):
+                                        VStack(alignment: .leading, spacing: 2) {
+                                            ForEach(Array(qlines.enumerated()), id: \.offset) { _, ql in
+                                                renderLine(ql)
+                                            }
                                         }
-                                    }
-                                    .padding(.leading, 10)
-                                    .overlay(alignment: .leading) {
-                                        Rectangle()
-                                            .fill(Theme.primary)
-                                            .frame(width: 3)
+                                        .padding(.leading, 10)
+                                        .overlay(alignment: .leading) {
+                                            Rectangle()
+                                                .fill(Theme.primary)
+                                                .frame(width: 3)
+                                        }
                                     }
                                 }
                             }
+                            .frame(maxWidth: .infinity, alignment: .leading)
                         }
                     }
                 case .image(let url):
-                    AsyncImage(url: url) { phase in
-                        switch phase {
-                        case .success(let image):
-                            image
-                                .resizable()
-                                .aspectRatio(contentMode: .fit)
-                                .clipShape(RoundedRectangle(cornerRadius: 8))
-                        case .failure:
-                            EmptyView()
-                        default:
-                            RoundedRectangle(cornerRadius: 8)
-                                .fill(Theme.surfaceElevated)
-                                .aspectRatio(16/9, contentMode: .fit)
-                                .overlay { ProgressView().tint(Theme.textMuted) }
+                    nonInteractiveMediaTarget {
+                        AsyncImage(url: url) { phase in
+                            switch phase {
+                            case .success(let image):
+                                image
+                                    .resizable()
+                                    .aspectRatio(contentMode: .fit)
+                                    .clipShape(RoundedRectangle(cornerRadius: 8))
+                            case .failure:
+                                EmptyView()
+                            default:
+                                RoundedRectangle(cornerRadius: 8)
+                                    .fill(Theme.surfaceElevated)
+                                    .aspectRatio(16/9, contentMode: .fit)
+                                    .overlay { ProgressView().tint(Theme.textMuted) }
+                            }
                         }
                     }
                 case .gif(let url):
-                    AnimatedGIFView(url: url)
+                    AnimatedGIFView(
+                        url: url,
+                        onMediaTap: nonInteractiveTapAction?.perform,
+                        onMediaLongPress: onNonInteractiveLongPress,
+                        mediaActionAccessibility: nonInteractiveTapAction?.mediaAccessibility ?? .openGIF
+                    )
                         .aspectRatio(contentMode: .fit)
                         .frame(maxHeight: 250)
                         .clipShape(RoundedRectangle(cornerRadius: 8))
                 case .link(let title, let url):
-                    Text(title)
-                        .font(textFont)
-                        .foregroundStyle(Theme.primary)
-                        .underline()
-                        .onTapGesture { openURL(url) }
+                    Button {
+                        openURL(url)
+                    } label: {
+                        Text(title)
+                            .font(textFont)
+                            .foregroundStyle(Theme.primary)
+                            .underline()
+                    }
+                    .buttonStyle(.plain)
                 }
             }
+        }
+    }
+
+    @ViewBuilder
+    private func nonInteractiveTextTarget<Content: View>(
+        @ViewBuilder content: () -> Content
+    ) -> some View {
+        if let nonInteractiveTapAction, let onNonInteractiveLongPress {
+            content()
+                .contentShape(Rectangle())
+                .onTapGesture(perform: nonInteractiveTapAction.perform)
+                .onLongPressGesture(perform: onNonInteractiveLongPress)
+        } else if let nonInteractiveTapAction {
+            content()
+                .contentShape(Rectangle())
+                .onTapGesture(perform: nonInteractiveTapAction.perform)
+        } else if let onNonInteractiveLongPress {
+            content()
+                .contentShape(Rectangle())
+                .onLongPressGesture(perform: onNonInteractiveLongPress)
+        } else {
+            content()
+        }
+    }
+
+    @ViewBuilder
+    private func nonInteractiveMediaTarget<Content: View>(
+        @ViewBuilder content: () -> Content
+    ) -> some View {
+        if let nonInteractiveTapAction, let onNonInteractiveLongPress {
+            content()
+                .contentShape(Rectangle())
+                .gesture(
+                    LongPressGesture()
+                        .exclusively(before: TapGesture())
+                        .onEnded { value in
+                            switch value {
+                            case .first:
+                                onNonInteractiveLongPress()
+                            case .second:
+                                nonInteractiveTapAction.perform()
+                            }
+                        }
+                )
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel(nonInteractiveTapAction.mediaAccessibility.label)
+                .accessibilityAddTraits(.isButton)
+                .accessibilityHint(nonInteractiveTapAction.mediaAccessibility.hint)
+                .accessibilityAction { nonInteractiveTapAction.perform() }
+                .accessibilityAction(named: Text("Select comment text")) {
+                    onNonInteractiveLongPress()
+                }
+        } else if let nonInteractiveTapAction {
+            Button(action: nonInteractiveTapAction.perform) {
+                content()
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(nonInteractiveTapAction.mediaAccessibility.label)
+            .accessibilityHint(nonInteractiveTapAction.mediaAccessibility.hint)
+        } else if let onNonInteractiveLongPress {
+            content()
+                .contentShape(Rectangle())
+                .onLongPressGesture(perform: onNonInteractiveLongPress)
+                .accessibilityAction(named: Text("Select comment text")) {
+                    onNonInteractiveLongPress()
+                }
+        } else {
+            content()
         }
     }
 
@@ -688,21 +974,31 @@ struct CommentBodyView: View {
                 let linkText = nsText.substring(with: match.range(at: 2))
                 let urlStr = nsText.substring(with: match.range(at: 3))
                 if let url = URL(string: urlStr) {
-                    if isImageURL(urlStr) {
+                    if isGIFURL(url) {
+                        parts.append(.gif(url))
+                    } else if isImageURL(url) {
                         parts.append(.image(url))
                     } else {
                         parts.append(.link(linkText, url))
                     }
                 }
-            } else if isImageURL(full), let url = URL(string: full) {
-                // Bare image URL
-                parts.append(.image(url))
-            } else if let url = URL(string: full) {
-                // Bare non-image URL
-                let display = full
-                    .replacingOccurrences(of: "https://", with: "")
-                    .replacingOccurrences(of: "http://", with: "")
-                parts.append(.link(display, url))
+            } else {
+                let (urlString, trailingText) = splitTrailingPunctuation(from: full)
+                if let url = URL(string: urlString), isGIFURL(url) {
+                    parts.append(.gif(url))
+                } else if let url = URL(string: urlString), isImageURL(url) {
+                    parts.append(.image(url))
+                } else if let url = URL(string: urlString) {
+                    let display = urlString
+                        .replacingOccurrences(of: "https://", with: "")
+                        .replacingOccurrences(of: "http://", with: "")
+                    parts.append(.link(display, url))
+                } else {
+                    parts.append(.text(urlString))
+                }
+                if !trailingText.isEmpty {
+                    parts.append(.text(trailingText))
+                }
             }
 
             lastEnd = range.location + range.length
@@ -715,9 +1011,50 @@ struct CommentBodyView: View {
         return parts
     }
 
-    private static func isImageURL(_ urlStr: String) -> Bool {
-        let lower = urlStr.lowercased()
-        return imageExtensions.contains { lower.contains(".\($0)") }
+    static func displayParts(from text: String) -> [BodyPart] {
+        var inlineGIFCount = 0
+        return parse(text).map { part in
+            guard case .gif(let url) = part else { return part }
+            defer { inlineGIFCount += 1 }
+            return inlineGIFCount == 0 ? part : .link("Open GIF", url)
+        }
+    }
+
+    private static func isImageURL(_ url: URL) -> Bool {
+        imageExtensions.contains(url.pathExtension.lowercased())
+    }
+
+    private static func isGIFURL(_ url: URL) -> Bool {
+        url.pathExtension.caseInsensitiveCompare("gif") == .orderedSame
+    }
+
+    private static func splitTrailingPunctuation(from token: String) -> (String, String) {
+        var urlString = token
+        var trailingText = ""
+        let punctuation = CharacterSet.punctuationCharacters
+        let preservedURLCharacters = CharacterSet(charactersIn: "/-_~%+=&#@$*")
+
+        while let scalar = urlString.unicodeScalars.last,
+              punctuation.contains(scalar),
+              !preservedURLCharacters.contains(scalar),
+              !isIPv6AuthorityClosingBracket(scalar, in: urlString) {
+            let character = urlString.removeLast()
+            trailingText.insert(character, at: trailingText.startIndex)
+        }
+        return (urlString, trailingText)
+    }
+
+    private static func isIPv6AuthorityClosingBracket(
+        _ scalar: UnicodeScalar,
+        in urlString: String
+    ) -> Bool {
+        guard scalar == "]",
+              let url = URL(string: urlString),
+              url.path.isEmpty,
+              url.host?.contains(":") == true else {
+            return false
+        }
+        return true
     }
 
     private static func isHorizontalRule(_ line: String) -> Bool {

@@ -4,6 +4,7 @@ struct UserCommentsView: View {
     @Environment(RedditSession.self) private var session
     @Environment(\.redditClient) private var client
     @Environment(\.dismiss) private var dismiss
+    @Environment(InlineGIFPlaybackStore.self) private var playbackStore
 
     @State private var comments: [UserComment] = []
     @State private var after: String?
@@ -15,6 +16,7 @@ struct UserCommentsView: View {
     @State private var deletingComment: UserComment?
     @State private var deletingID: String?
     @State private var writeError: String?
+    @State private var playbackSuspension: InlineGIFPlaybackSuspension?
 
     var body: some View {
         NavigationStack {
@@ -32,8 +34,8 @@ struct UserCommentsView: View {
                                 UserCommentRow(
                                     comment: comment,
                                     deletingID: deletingID,
-                                    showSubreddit: { subredditComment = comment },
-                                    editComment: { editingComment = comment },
+                                    showSubreddit: { presentSubreddit(comment) },
+                                    editComment: { presentEditor(for: comment) },
                                     deleteComment: { deletingComment = comment }
                                 )
                                 .onAppear {
@@ -64,12 +66,16 @@ struct UserCommentsView: View {
             .toolbarColorScheme(.dark, for: .navigationBar)
         }
         .preferredColorScheme(.dark)
-        .sheet(item: $editingComment) { comment in
+        .onDisappear {
+            guard !isPresentingContent else { return }
+            resumeInlineGIFPlayback()
+        }
+        .sheet(item: $editingComment, onDismiss: resumeInlineGIFPlayback) { comment in
             EditUserCommentSheet(comment: comment) { updatedBody in
                 updateCommentBody(id: comment.id, body: updatedBody)
             }
         }
-        .fullScreenCover(item: $subredditComment) { comment in
+        .fullScreenCover(item: $subredditComment, onDismiss: resumeInlineGIFPlayback) { comment in
             SubredditCoverView(subreddit: comment.subreddit, title: comment.subredditNamePrefixed) {
                 subredditComment = nil
             }
@@ -103,6 +109,29 @@ struct UserCommentsView: View {
             get: { writeError != nil },
             set: { if !$0 { writeError = nil } }
         )
+    }
+
+    private var isPresentingContent: Bool {
+        editingComment != nil || subredditComment != nil
+    }
+
+    private func presentEditor(for comment: UserComment) {
+        suspendInlineGIFPlayback()
+        editingComment = comment
+    }
+
+    private func presentSubreddit(_ comment: UserComment) {
+        suspendInlineGIFPlayback()
+        subredditComment = comment
+    }
+
+    private func suspendInlineGIFPlayback() {
+        playbackSuspension = playbackStore.suspend()
+    }
+
+    private func resumeInlineGIFPlayback() {
+        playbackSuspension?.invalidate()
+        playbackSuspension = nil
     }
 
     private func loadComments() async {
@@ -208,9 +237,17 @@ private struct UserCommentRow: View {
                 Spacer()
             }
 
-            CommentBodyView(content: comment.body, textFont: .body)
-                .contentShape(Rectangle())
-                .onTapGesture { openURL(comment.redditURL) }
+            CommentBodyView(
+                content: comment.body,
+                textFont: .body,
+                nonInteractiveTapAction: CommentBodyTapAction(
+                    perform: { openURL(comment.redditURL) },
+                    mediaAccessibility: MediaActionAccessibility(
+                        label: "Open source comment",
+                        hint: "Double-tap to open this comment on Reddit."
+                    )
+                )
+            )
 
             HStack(spacing: 14) {
                 VoteControlsView(thingID: "t1_\(comment.id)", initialScore: comment.score, inactiveColor: Theme.textMuted)

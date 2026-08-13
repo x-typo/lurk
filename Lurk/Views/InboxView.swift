@@ -6,6 +6,7 @@ struct InboxView: View {
     @Environment(RedditSession.self) private var session
     @Environment(\.redditClient) private var client
     @Environment(\.dismiss) private var dismiss
+    @Environment(InlineGIFPlaybackStore.self) private var playbackStore
 
     @State private var replies: [InboxReply] = []
     @State private var after: String?
@@ -14,6 +15,7 @@ struct InboxView: View {
     @State private var error: String?
     @State private var subredditReply: InboxReply?
     @State private var replyingTo: InboxReply?
+    @State private var playbackSuspension: InlineGIFPlaybackSuspension?
 
     var body: some View {
         NavigationStack {
@@ -30,8 +32,8 @@ struct InboxView: View {
                             ForEach(replies) { reply in
                                 InboxReplyRow(
                                     reply: reply,
-                                    showSubreddit: { subredditReply = reply },
-                                    replyToComment: { replyingTo = reply }
+                                    showSubreddit: { presentSubreddit(reply) },
+                                    replyToComment: { presentReply(to: reply) }
                                 )
                                 .onAppear {
                                     if reply.id == replies.last?.id {
@@ -62,12 +64,16 @@ struct InboxView: View {
             .toolbarColorScheme(.dark, for: .navigationBar)
         }
         .preferredColorScheme(.dark)
-        .fullScreenCover(item: $subredditReply) { reply in
+        .onDisappear {
+            guard !isPresentingContent else { return }
+            resumeInlineGIFPlayback()
+        }
+        .fullScreenCover(item: $subredditReply, onDismiss: resumeInlineGIFPlayback) { reply in
             SubredditCoverView(subreddit: reply.subreddit, title: reply.subredditNamePrefixed) {
                 subredditReply = nil
             }
         }
-        .sheet(item: $replyingTo) { reply in
+        .sheet(item: $replyingTo, onDismiss: resumeInlineGIFPlayback) { reply in
             ComposeReplySheet(
                 thingID: reply.thingID,
                 isPresented: Binding(
@@ -76,6 +82,29 @@ struct InboxView: View {
                 )
             )
         }
+    }
+
+    private var isPresentingContent: Bool {
+        subredditReply != nil || replyingTo != nil
+    }
+
+    private func presentSubreddit(_ reply: InboxReply) {
+        suspendInlineGIFPlayback()
+        subredditReply = reply
+    }
+
+    private func presentReply(to reply: InboxReply) {
+        suspendInlineGIFPlayback()
+        replyingTo = reply
+    }
+
+    private func suspendInlineGIFPlayback() {
+        playbackSuspension = playbackStore.suspend()
+    }
+
+    private func resumeInlineGIFPlayback() {
+        playbackSuspension?.invalidate()
+        playbackSuspension = nil
     }
 
     private func loadReplies() async {

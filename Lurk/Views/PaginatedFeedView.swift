@@ -31,6 +31,9 @@ struct PaginatedFeedView: View {
     @State private var galleryPost: Post?
     @State private var writeError: String?
     @State private var readRequest: ReadRequest?
+    @State private var feedPlaybackStore = InlineGIFPlaybackStore()
+    @State private var presentationPlaybackStore = InlineGIFPlaybackStore()
+    @State private var feedSuspensionID = UUID()
 
     var body: some View {
         Group {
@@ -95,6 +98,14 @@ struct PaginatedFeedView: View {
             }
         }
         .background(Theme.background)
+        .environment(feedPlaybackStore)
+        .onChange(of: isPresentingContent) { _, isPresenting in
+            if isPresenting {
+                feedPlaybackStore.activate(feedSuspensionID)
+            } else {
+                feedPlaybackStore.deactivate(feedSuspensionID)
+            }
+        }
         .task { await loadInitialIfNeeded() }
         .task(id: readRequest) { await performReadRequest() }
         .sheet(item: $selectedPost) { post in
@@ -107,6 +118,7 @@ struct PaginatedFeedView: View {
                     }
                 }
             )
+            .environment(presentationPlaybackStore)
         }
         .fullScreenCover(item: $subredditPost) { post in
             SubredditCoverView(subreddit: post.subreddit, title: post.subredditNamePrefixed) {
@@ -115,6 +127,7 @@ struct PaginatedFeedView: View {
         }
         .fullScreenCover(item: $galleryPost) { post in
             GalleryViewerView(items: post.galleryItems)
+                .environment(presentationPlaybackStore)
         }
         .alert("Reddit action failed", isPresented: writeErrorPresented) {
             Button("OK", role: .cancel) {}
@@ -128,6 +141,10 @@ struct PaginatedFeedView: View {
             get: { writeError != nil },
             set: { if !$0 { writeError = nil } }
         )
+    }
+
+    private var isPresentingContent: Bool {
+        selectedPost != nil || subredditPost != nil || galleryPost != nil
     }
 
     private func removePost(_ post: Post) {

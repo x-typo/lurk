@@ -60,6 +60,7 @@ struct Post: Identifiable, Decodable {
     let over18: Bool
     let postHint: String?
     let media: Media?
+    let secureMedia: Media?
     let preview: Preview?
     let galleryData: GalleryData?
     let mediaMetadata: [String: MediaMetadataItem]?
@@ -76,14 +77,16 @@ struct Media: Decodable {
 }
 
 struct RedditVideo: Decodable {
-    let fallbackUrl: String
+    let fallbackUrl: String?
     let hlsUrl: String?
-    let width: Int
-    let height: Int
+    let width: Int?
+    let height: Int?
+    let isGif: Bool?
 }
 
 struct Preview: Decodable {
     let images: [PreviewImage]?
+    let redditVideoPreview: RedditVideo?
 }
 
 struct PreviewImage: Decodable {
@@ -123,8 +126,16 @@ struct MediaMetadataSource: Decodable {
     let x: Int?
     let y: Int?
 
+    var decodedStaticUrl: String? {
+        u?.replacingOccurrences(of: "&amp;", with: "&")
+    }
+
+    var decodedAnimatedUrl: String? {
+        gif?.replacingOccurrences(of: "&amp;", with: "&")
+    }
+
     var decodedUrl: String? {
-        (u ?? gif)?.replacingOccurrences(of: "&amp;", with: "&")
+        decodedStaticUrl ?? decodedAnimatedUrl
     }
 }
 
@@ -132,6 +143,19 @@ struct GalleryMedia: Identifiable {
     let id: Int
     let url: URL
     let isAnimated: Bool
+    let posterURL: URL?
+
+    init(id: Int, url: URL, isAnimated: Bool, posterURL: URL? = nil) {
+        self.id = id
+        self.url = url
+        self.isAnimated = isAnimated
+        self.posterURL = posterURL
+    }
+}
+
+enum AnimatedPostMedia: Equatable {
+    case gif(URL)
+    case video(URL)
 }
 
 // MARK: - Enums
@@ -157,34 +181,62 @@ extension Post {
     }
 
     var imageURL: URL? {
-        if let source = preview?.images?.first?.source {
-            return URL(string: source.decodedUrl)
+        if let source = preview?.images?.first?.source,
+           let url = URL(string: source.decodedUrl),
+           url.isHTTPMediaURL {
+            return url
         }
         if let firstItem = galleryData?.items?.first,
            let meta = mediaMetadata?[firstItem.mediaId],
-           let urlStr = meta.s?.decodedUrl {
-            return URL(string: urlStr)
+           let urlString = meta.s?.decodedUrl,
+           let url = URL(string: urlString),
+           url.isHTTPMediaURL {
+            return url
         }
         return nil
+    }
+
+    var animatedImageURL: URL? {
+        if let directURL = decodedPostURL,
+           directURL.isHTTPMediaURL,
+           directURL.isGIFURL {
+            return directURL
+        }
+        if let firstItem = galleryData?.items?.first,
+           let meta = mediaMetadata?[firstItem.mediaId],
+           meta.isAnimated,
+           let urlString = meta.s?.decodedAnimatedUrl ?? meta.s?.decodedStaticUrl,
+           let url = URL(string: urlString),
+           url.isHTTPMediaURL,
+           meta.s?.decodedAnimatedUrl != nil || url.isGIFURL {
+            return url
+        }
+        guard let imageURL,
+              imageURL.isHTTPMediaURL,
+              imageURL.isGIFURL else { return nil }
+        return imageURL
     }
 
     var imageAspectRatio: CGFloat? {
         if let source = preview?.images?.first?.source, source.height > 0 {
             return CGFloat(source.width) / CGFloat(source.height)
         }
+        if let firstItem = galleryData?.items?.first,
+           let source = mediaMetadata?[firstItem.mediaId]?.s,
+           let width = source.x,
+           let height = source.y,
+           height > 0 {
+            return CGFloat(width) / CGFloat(height)
+        }
         return nil
     }
 
     var videoURL: URL? {
-        guard isVideo, let video = media?.redditVideo else { return nil }
-        if let hlsUrl = video.decodedHLSUrl, let url = URL(string: hlsUrl) {
-            return url
-        }
-        return URL(string: video.decodedFallbackUrl)
+        playbackVideo?.playbackURL
     }
 
     var downloadableVideoURLs: [URL] {
-        guard !isYouTubeVideo, isVideo, let video = media?.redditVideo else { return [] }
+        guard !isYouTubeVideo, let video = playbackVideo else { return [] }
 
         let candidates = [
             video.decodedHLSUrl,
@@ -192,7 +244,9 @@ extension Post {
         ]
         var seen = Set<String>()
         return candidates.compactMap { rawURL in
-            guard let rawURL, let url = URL(string: rawURL) else { return nil }
+            guard let rawURL,
+                  let url = URL(string: rawURL),
+                  url.isHTTPMediaURL else { return nil }
             return seen.insert(url.absoluteString).inserted ? url : nil
         }
     }
@@ -202,8 +256,25 @@ extension Post {
     }
 
     var videoAspectRatio: CGFloat? {
-        if let video = media?.redditVideo, video.height > 0 {
-            return CGFloat(video.width) / CGFloat(video.height)
+        if let video = playbackVideo,
+           let width = video.width,
+           let height = video.height,
+           height > 0 {
+            return CGFloat(width) / CGFloat(height)
+        }
+        return nil
+    }
+
+    var loopsVideo: Bool {
+        playbackVideo?.isGif == true
+    }
+
+    var animatedMedia: AnimatedPostMedia? {
+        if loopsVideo, let videoURL {
+            return .video(videoURL)
+        }
+        if let animatedImageURL {
+            return .gif(animatedImageURL)
         }
         return nil
     }
@@ -220,10 +291,25 @@ extension Post {
         guard let items = galleryData?.items else { return [] }
         var result: [GalleryMedia] = []
         for item in items {
-            guard let meta = mediaMetadata?[item.mediaId],
-                  let urlStr = meta.s?.decodedUrl,
-                  let url = URL(string: urlStr) else { continue }
-            result.append(GalleryMedia(id: result.count, url: url, isAnimated: meta.isAnimated))
+            guard let meta = mediaMetadata?[item.mediaId] else { continue }
+            let animatedURL = meta.s?.decodedAnimatedUrl
+                .flatMap(URL.init(string:))
+                .flatMap { $0.isHTTPMediaURL ? $0 : nil }
+            let staticURL = meta.s?.decodedStaticUrl
+                .flatMap(URL.init(string:))
+                .flatMap { $0.isHTTPMediaURL ? $0 : nil }
+            guard let url = meta.isAnimated
+                ? (animatedURL ?? staticURL)
+                : (staticURL ?? animatedURL) else { continue }
+            let isAnimated = meta.isAnimated && (animatedURL != nil || url.isGIFURL)
+            result.append(
+                GalleryMedia(
+                    id: result.count,
+                    url: url,
+                    isAnimated: isAnimated,
+                    posterURL: staticURL
+                )
+            )
         }
         return result
     }
@@ -252,6 +338,24 @@ extension Post {
 
     var matchesFilteredKeyword: Bool {
         Post.filteredKeywords.contains { title.range(of: $0, options: .caseInsensitive) != nil }
+    }
+
+    private var decodedPostURL: URL? {
+        URL(string: url.replacingOccurrences(of: "&amp;", with: "&"))
+    }
+
+    private var playbackVideo: RedditVideo? {
+        for video in [media?.redditVideo, secureMedia?.redditVideo].compactMap({ $0 }) {
+            if (isVideo || video.isGif == true), video.playbackURL != nil {
+                return video
+            }
+        }
+        if let previewVideo = preview?.redditVideoPreview,
+           previewVideo.isGif == true,
+           previewVideo.playbackURL != nil {
+            return previewVideo
+        }
+        return nil
     }
 
     private static func youtubeVideoID(from url: URL) -> String? {
@@ -298,11 +402,33 @@ extension Post {
 }
 
 private extension RedditVideo {
-    var decodedFallbackUrl: String {
-        fallbackUrl.replacingOccurrences(of: "&amp;", with: "&")
+    var playbackURL: URL? {
+        [decodedHLSUrl, decodedFallbackUrl]
+            .compactMap { rawURL -> URL? in
+                guard let rawURL,
+                      let url = URL(string: rawURL),
+                      url.isHTTPMediaURL else { return nil }
+                return url
+            }
+            .first
+    }
+
+    var decodedFallbackUrl: String? {
+        fallbackUrl?.replacingOccurrences(of: "&amp;", with: "&")
     }
 
     var decodedHLSUrl: String? {
         hlsUrl?.replacingOccurrences(of: "&amp;", with: "&")
+    }
+}
+
+extension URL {
+    var isHTTPMediaURL: Bool {
+        guard let scheme = scheme?.lowercased() else { return false }
+        return scheme == "http" || scheme == "https"
+    }
+
+    var isGIFURL: Bool {
+        pathExtension.caseInsensitiveCompare("gif") == .orderedSame
     }
 }
