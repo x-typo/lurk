@@ -115,12 +115,17 @@ struct BoundedImageDataLoaderTests {
         await expectFailure(.emptyResponse, from: url, maximumBytes: 4)
     }
 
-    @Test("Task cancellation stops the underlying URL load")
+    @Test("Task cancellation stops the underlying URL load", .timeLimit(.minutes(1)))
     func cancellationStopsTransfer() async {
         let url = testURL()
         let cancellationProbe = TaskCancellationProbe()
+        let cancellationTrigger = TransferCancellationTrigger()
         BoundedLoaderURLProtocol.register(
-            .init(statusCode: 200, holdOpen: true, failureDelayMilliseconds: 1_000),
+            .init(
+                statusCode: 200,
+                holdOpen: true,
+                onStart: cancellationTrigger.transferDidStart
+            ),
             for: url
         )
         let session = BoundedImageDataSession(
@@ -132,8 +137,7 @@ struct BoundedImageDataLoaderTests {
         let task = Task {
             try await session.data(from: url, maximumBytes: 4)
         }
-        #expect(await waitForStart(url))
-        task.cancel()
+        cancellationTrigger.attach(task)
 
         do {
             _ = try await task.value
@@ -142,6 +146,7 @@ struct BoundedImageDataLoaderTests {
         } catch {
             Issue.record("Unexpected error: \(error)")
         }
+        #expect(BoundedLoaderURLProtocol.startCount(for: url) == 1)
         #expect(cancellationProbe.count(for: url) == 1)
     }
 
@@ -224,17 +229,6 @@ struct BoundedImageDataLoaderTests {
         URL(string: "https://gif-loader.test/\(UUID().uuidString)")!
     }
 
-    private func waitForStart(_ url: URL) async -> Bool {
-        let deadline = ContinuousClock.now + .seconds(1)
-        while ContinuousClock.now < deadline {
-            if BoundedLoaderURLProtocol.startCount(for: url) > 0 {
-                return true
-            }
-            try? await Task.sleep(for: .milliseconds(1))
-        }
-        return false
-    }
-
 }
 
 private nonisolated final class BoundedLoaderURLProtocol: URLProtocol, @unchecked Sendable {
@@ -244,7 +238,7 @@ private nonisolated final class BoundedLoaderURLProtocol: URLProtocol, @unchecke
         let chunks: [Data]
         let holdOpen: Bool
         let deliveryDelayMilliseconds: Int
-        let failureDelayMilliseconds: Int?
+        let onStart: (@Sendable () -> Void)?
 
         init(
             statusCode: Int,
@@ -252,14 +246,14 @@ private nonisolated final class BoundedLoaderURLProtocol: URLProtocol, @unchecke
             chunks: [Data] = [],
             holdOpen: Bool = false,
             deliveryDelayMilliseconds: Int = 1,
-            failureDelayMilliseconds: Int? = nil
+            onStart: (@Sendable () -> Void)? = nil
         ) {
             self.statusCode = statusCode
             self.contentLength = contentLength
             self.chunks = chunks
             self.holdOpen = holdOpen
             self.deliveryDelayMilliseconds = deliveryDelayMilliseconds
-            self.failureDelayMilliseconds = failureDelayMilliseconds
+            self.onStart = onStart
         }
     }
 
@@ -306,8 +300,8 @@ private nonisolated final class BoundedLoaderURLProtocol: URLProtocol, @unchecke
         }
 
         client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+        stub.onStart?()
         if stub.holdOpen {
-            scheduleFailureIfNeeded(stub: stub, url: url)
             return
         }
         deliver(stub: stub, url: url, chunkIndex: 0)
@@ -345,16 +339,42 @@ private nonisolated final class BoundedLoaderURLProtocol: URLProtocol, @unchecke
         }
     }
 
-    private func scheduleFailureIfNeeded(stub: Stub, url: URL) {
-        guard let delay = stub.failureDelayMilliseconds else { return }
-        DispatchQueue.global().asyncAfter(deadline: .now() + .milliseconds(delay)) {
-            [weak self] in
-            guard let self, Self.stopCount(for: url) == 0 else { return }
-            self.client?.urlProtocol(self, didFailWithError: URLError(.timedOut))
+    private static func withLock<Value>(_ operation: () -> Value) -> Value {
+        lock.lock()
+        defer { lock.unlock() }
+        return operation()
+    }
+}
+
+private nonisolated final class TransferCancellationTrigger: @unchecked Sendable {
+    private let lock = NSLock()
+    private var task: Task<Data, any Error>?
+    private var didStart = false
+    private var didCancel = false
+
+    func attach(_ task: Task<Data, any Error>) {
+        let taskToCancel = withLock {
+            self.task = task
+            return cancellationTaskIfReady()
         }
+        taskToCancel?.cancel()
     }
 
-    private static func withLock<Value>(_ operation: () -> Value) -> Value {
+    func transferDidStart() {
+        let taskToCancel = withLock {
+            didStart = true
+            return cancellationTaskIfReady()
+        }
+        taskToCancel?.cancel()
+    }
+
+    private func cancellationTaskIfReady() -> Task<Data, any Error>? {
+        guard didStart, !didCancel, let task else { return nil }
+        didCancel = true
+        return task
+    }
+
+    private func withLock<Value>(_ operation: () -> Value) -> Value {
         lock.lock()
         defer { lock.unlock() }
         return operation()
