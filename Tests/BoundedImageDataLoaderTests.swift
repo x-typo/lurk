@@ -4,6 +4,23 @@ import Testing
 
 @Suite("Bounded image networking")
 struct BoundedImageDataLoaderTests {
+    @Test("A reusable session rejects non-positive byte limits")
+    func reusableSessionRejectsInvalidMaximumBytes() async {
+        let session = BoundedImageDataSession(configuration: configuration())
+        defer { session.invalidate() }
+
+        for maximumBytes in [0, -1] {
+            do {
+                _ = try await session.data(from: testURL(), maximumBytes: maximumBytes)
+                Issue.record("Expected the reusable session to reject an invalid byte limit")
+            } catch let failure as BoundedImageDataLoader.Failure {
+                #expect(failure == .invalidMaximumBytes)
+            } catch {
+                Issue.record("Unexpected error: \(error)")
+            }
+        }
+    }
+
     @Test("Chunked networking accepts an exact byte boundary")
     func acceptsExactBoundary() async throws {
         let url = testURL()
@@ -101,17 +118,19 @@ struct BoundedImageDataLoaderTests {
     @Test("Task cancellation stops the underlying URL load")
     func cancellationStopsTransfer() async {
         let url = testURL()
+        let cancellationProbe = TaskCancellationProbe()
         BoundedLoaderURLProtocol.register(
             .init(statusCode: 200, holdOpen: true, failureDelayMilliseconds: 1_000),
             for: url
         )
+        let session = BoundedImageDataSession(
+            configuration: configuration(),
+            cancellationObserver: cancellationProbe.record
+        )
+        defer { session.invalidate() }
 
         let task = Task {
-            try await BoundedImageDataLoader.data(
-                from: url,
-                maximumBytes: 4,
-                configuration: configuration()
-            )
+            try await session.data(from: url, maximumBytes: 4)
         }
         #expect(await waitForStart(url))
         task.cancel()
@@ -123,7 +142,7 @@ struct BoundedImageDataLoaderTests {
         } catch {
             Issue.record("Unexpected error: \(error)")
         }
-        #expect(await waitForStop(url))
+        #expect(cancellationProbe.count(for: url) == 1)
     }
 
     @Test("A reusable session keeps concurrent transfer state isolated")
@@ -216,16 +235,6 @@ struct BoundedImageDataLoaderTests {
         return false
     }
 
-    private func waitForStop(_ url: URL) async -> Bool {
-        let deadline = ContinuousClock.now + .seconds(1)
-        while ContinuousClock.now < deadline {
-            if BoundedLoaderURLProtocol.stopCount(for: url) > 0 {
-                return true
-            }
-            try? await Task.sleep(for: .milliseconds(1))
-        }
-        return false
-    }
 }
 
 private nonisolated final class BoundedLoaderURLProtocol: URLProtocol, @unchecked Sendable {

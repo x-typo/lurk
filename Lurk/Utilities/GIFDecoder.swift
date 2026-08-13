@@ -121,6 +121,9 @@ nonisolated final class BoundedImageDataSession:
     }
 
     func data(from url: URL, maximumBytes: Int) async throws -> Data {
+        guard maximumBytes > 0 else {
+            throw BoundedImageDataLoader.Failure.invalidMaximumBytes
+        }
         try Task.checkCancellation()
         let requestID = UUID()
         defer { clearCancellationMarker(requestID) }
