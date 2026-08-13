@@ -276,6 +276,21 @@ struct GIFDecoderTests {
         }
         #expect(ipv6URL.host?.contains(":") == true)
 
+        for unsafeURL in [
+            "file:///private/tmp/loop.gif",
+            "ftp://example.com/loop.gif",
+            "data:image/gif;base64,R0lGODlh",
+            "[animation](file:///private/tmp/loop.gif)",
+        ] {
+            let unsafeParts = CommentBodyView.parse(unsafeURL)
+            guard unsafeParts.count == 1,
+                  case .text(let parsedText) = unsafeParts[0] else {
+                Issue.record("Expected non-HTTP media URL to remain plain text")
+                continue
+            }
+            #expect(parsedText == unsafeURL)
+        }
+
         let multipleGIFParts = CommentBodyView.displayParts(
             from: "https://example.com/first.gif https://example.com/second.gif"
         )
@@ -462,6 +477,29 @@ struct GIFDecoderTests {
         #expect(store.activeIDs == [feed])
     }
 
+    @Test("Releasing a playback suspension resumes visible candidates")
+    @MainActor
+    func releasedPlaybackSuspensionResumesCandidates() async {
+        let store = InlineGIFPlaybackStore()
+        let feed = UUID()
+        let viewport = CGRect(x: 0, y: 0, width: 100, height: 100)
+        store.updateCandidate(
+            feed,
+            frame: CGRect(x: 0, y: 20, width: 100, height: 60),
+            viewport: viewport
+        )
+
+        weak var releasedSuspension: InlineGIFPlaybackSuspension?
+        do {
+            let suspension = store.suspend()
+            releasedSuspension = suspension
+            #expect(store.activeIDs != [feed])
+        }
+
+        #expect(releasedSuspension == nil)
+        #expect(await waitForActiveIDs(store, expected: [feed]))
+    }
+
     @Test("Cancelling queued GIF loading releases its waiter")
     func cancelsQueuedGIFLoad() async throws {
         let limiter = GIFLoadLimiter(maximumConcurrentLoads: 1)
@@ -604,6 +642,20 @@ struct GIFDecoderTests {
     ) async -> Bool {
         for _ in 0..<1_000 {
             if await probe.completedCount() == count {
+                return true
+            }
+            await Task.yield()
+        }
+        return false
+    }
+
+    @MainActor
+    private func waitForActiveIDs(
+        _ store: InlineGIFPlaybackStore,
+        expected: Set<UUID>
+    ) async -> Bool {
+        for _ in 0..<1_000 {
+            if store.activeIDs == expected {
                 return true
             }
             await Task.yield()

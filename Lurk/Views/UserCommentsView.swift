@@ -16,7 +16,7 @@ struct UserCommentsView: View {
     @State private var deletingComment: UserComment?
     @State private var deletingID: String?
     @State private var writeError: String?
-    @State private var suspensionPlaybackID = UUID()
+    @State private var playbackSuspension: InlineGIFPlaybackSuspension?
 
     var body: some View {
         NavigationStack {
@@ -68,7 +68,7 @@ struct UserCommentsView: View {
         .preferredColorScheme(.dark)
         .onDisappear {
             guard !isPresentingContent else { return }
-            playbackStore.deactivate(suspensionPlaybackID)
+            resumeInlineGIFPlayback()
         }
         .sheet(item: $editingComment, onDismiss: resumeInlineGIFPlayback) { comment in
             EditUserCommentSheet(comment: comment) { updatedBody in
@@ -126,11 +126,12 @@ struct UserCommentsView: View {
     }
 
     private func suspendInlineGIFPlayback() {
-        playbackStore.activate(suspensionPlaybackID)
+        playbackSuspension = playbackStore.suspend()
     }
 
     private func resumeInlineGIFPlayback() {
-        playbackStore.deactivate(suspensionPlaybackID)
+        playbackSuspension?.invalidate()
+        playbackSuspension = nil
     }
 
     private func loadComments() async {

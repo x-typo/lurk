@@ -15,7 +15,7 @@ struct InboxView: View {
     @State private var error: String?
     @State private var subredditReply: InboxReply?
     @State private var replyingTo: InboxReply?
-    @State private var suspensionPlaybackID = UUID()
+    @State private var playbackSuspension: InlineGIFPlaybackSuspension?
 
     var body: some View {
         NavigationStack {
@@ -66,7 +66,7 @@ struct InboxView: View {
         .preferredColorScheme(.dark)
         .onDisappear {
             guard !isPresentingContent else { return }
-            playbackStore.deactivate(suspensionPlaybackID)
+            resumeInlineGIFPlayback()
         }
         .fullScreenCover(item: $subredditReply, onDismiss: resumeInlineGIFPlayback) { reply in
             SubredditCoverView(subreddit: reply.subreddit, title: reply.subredditNamePrefixed) {
@@ -99,11 +99,12 @@ struct InboxView: View {
     }
 
     private func suspendInlineGIFPlayback() {
-        playbackStore.activate(suspensionPlaybackID)
+        playbackSuspension = playbackStore.suspend()
     }
 
     private func resumeInlineGIFPlayback() {
-        playbackStore.deactivate(suspensionPlaybackID)
+        playbackSuspension?.invalidate()
+        playbackSuspension = nil
     }
 
     private func loadReplies() async {

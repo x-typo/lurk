@@ -67,6 +67,10 @@ final class InlineGIFPlaybackStore {
         selectCandidates()
     }
 
+    func suspend() -> InlineGIFPlaybackSuspension {
+        InlineGIFPlaybackSuspension(store: self)
+    }
+
     func updateCandidate(_ id: UUID, frame: CGRect) {
         guard let viewport = Self.activeViewport else { return }
         updateCandidate(id, frame: frame, viewport: viewport)
@@ -123,6 +127,30 @@ final class InlineGIFPlaybackStore {
             .flatMap(\.windows)
             .first(where: \.isKeyWindow)?
             .bounds
+    }
+}
+
+@MainActor
+final class InlineGIFPlaybackSuspension {
+    private weak var store: InlineGIFPlaybackStore?
+    private let id = UUID()
+
+    init(store: InlineGIFPlaybackStore) {
+        self.store = store
+        store.activate(id)
+    }
+
+    func invalidate() {
+        store?.deactivate(id)
+        store = nil
+    }
+
+    deinit {
+        guard let store else { return }
+        let id = id
+        Task { @MainActor in
+            store.deactivate(id)
+        }
     }
 }
 
