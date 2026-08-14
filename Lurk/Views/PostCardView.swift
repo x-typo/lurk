@@ -163,7 +163,7 @@ struct PostCardView: View {
                             .font(.subheadline)
                             .foregroundStyle(Theme.textSecondary)
                     }
-                    .frame(minHeight: 44)
+                    .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
                     .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
