@@ -1,10 +1,26 @@
 import Foundation
 
-nonisolated struct InboxListing: Decodable {
-    let data: InboxListingData
+nonisolated enum InboxFilter: String, CaseIterable {
+    case unread = "Unread"
+    case all = "All"
 }
 
-struct InboxListingData: Decodable {
+nonisolated struct InboxListing: Decodable {
+    let data: InboxListingData
+
+    func filtered(for filter: InboxFilter) -> InboxListing {
+        guard filter == .unread else { return self }
+        let replies = data.replies.compactMap { reply -> InboxReply? in
+            guard reply.reportedUnread != false else { return nil }
+            var unreadReply = reply
+            unreadReply.isUnread = true
+            return unreadReply
+        }
+        return InboxListing(data: InboxListingData(after: data.after, replies: replies))
+    }
+}
+
+nonisolated struct InboxListingData: Decodable {
     let after: String?
     let replies: [InboxReply]
 
@@ -20,6 +36,11 @@ struct InboxListingData: Decodable {
         case after, children
     }
 
+    init(after: String?, replies: [InboxReply]) {
+        self.after = after
+        self.replies = replies
+    }
+
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         after = try container.decodeIfPresent(String.self, forKey: .after)
@@ -28,7 +49,7 @@ struct InboxListingData: Decodable {
     }
 }
 
-struct InboxMessageWrapper: Decodable {
+nonisolated struct InboxMessageWrapper: Decodable {
     let kind: String?
     let data: InboxMessageData
 
@@ -37,7 +58,7 @@ struct InboxMessageWrapper: Decodable {
     }
 }
 
-struct InboxMessageData: Decodable {
+nonisolated struct InboxMessageData: Decodable {
     let id: String?
     let name: String?
     let author: String?
@@ -52,9 +73,10 @@ struct InboxMessageData: Decodable {
     let parentId: String?
     let wasComment: Bool?
     let subject: String?
+    let new: Bool?
 }
 
-struct InboxReply: Identifiable {
+nonisolated struct InboxReply: Identifiable {
     let id: String
     let thingID: String
     let author: String
@@ -65,31 +87,44 @@ struct InboxReply: Identifiable {
     let linkTitle: String
     let contextURL: URL?
     let fullCommentsURL: URL?
+    var isUnread: Bool
+    fileprivate let reportedUnread: Bool?
 
     init?(kind: String?, data: InboxMessageData) {
+        // Unread mixes comment replies with post replies and mentions, unlike /message/comments.
+        let subject = data.subject?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard subject == nil || subject == "" || subject == "comment reply",
+              data.parentId?.hasPrefix("t3_") != true else { return nil }
         let isCommentReply = kind == "t1"
             || data.wasComment == true
-            || data.subject?.localizedCaseInsensitiveContains("comment reply") == true
-            || data.parentId?.hasPrefix("t1_") == true
+            || (kind == nil && (
+                data.subject?.localizedCaseInsensitiveContains("comment reply") == true
+                    || data.parentId?.hasPrefix("t1_") == true
+            ))
 
         guard isCommentReply,
-              let rawID = data.id ?? data.name?.replacingOccurrences(of: "t1_", with: ""),
-              let author = data.author,
+              let rawID = data.id ?? data.name.map({ String($0.dropFirst(3)) }),
               let body = data.body,
               let createdUtc = data.createdUtc,
-              let subreddit = data.subreddit,
-              let linkTitle = data.linkTitle else {
+              let subreddit = data.subreddit else {
             return nil
         }
 
-        id = data.name ?? "t1_\(rawID)"
-        thingID = data.name ?? "t1_\(rawID)"
-        self.author = author
+        let thingID = data.name ?? "t1_\(rawID)"
+        // This fullname is also sent to the single-reply read and reply endpoints.
+        guard thingID.hasPrefix("t1_"), !thingID.dropFirst(3).isEmpty,
+              thingID.dropFirst(3).utf8.allSatisfy({ (48...57).contains($0) || (97...122).contains($0) })
+        else { return nil }
+        id = thingID
+        self.thingID = thingID
+        author = data.author ?? "[deleted]"
         self.body = body
         self.createdUtc = createdUtc
         self.subreddit = subreddit
         subredditNamePrefixed = data.subredditNamePrefixed ?? "r/\(subreddit)"
-        self.linkTitle = linkTitle
+        linkTitle = data.linkTitle ?? "Comment reply"
+        reportedUnread = data.new
+        isUnread = data.new ?? false
         contextURL = Self.redditURL(from: data.context ?? data.permalink)
         fullCommentsURL = Self.fullCommentsURL(
             linkPermalink: data.linkPermalink,
