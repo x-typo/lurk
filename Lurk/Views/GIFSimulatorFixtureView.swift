@@ -7,6 +7,8 @@ import UniformTypeIdentifiers
 struct GIFSimulatorFixtureView: View {
     private static let fixtureData = makeFixtureData(size: 240, frameCount: 3)
     private static let resourceLimitFixtureData = makeFixtureData(size: 512, frameCount: 31)
+    private static let longFixtureData = makeFixtureData(size: 128, frameCount: 240)
+    private static let rejectedFixtureData = makeFixtureData(size: 32, frameCount: 601)
     @State private var playbackStore = InlineGIFPlaybackStore()
     @State private var showExpandedOversizedGIF = false
 
@@ -31,10 +33,10 @@ struct GIFSimulatorFixtureView: View {
                         .id("third")
 
                     VStack(spacing: 10) {
-                        Text("Oversized GIF safety fallback")
+                        Text("Adaptive GIF playback")
                             .font(.headline)
                             .foregroundStyle(Theme.text)
-                        Text("This sample exceeds the inline budget but fits the expanded viewer budget.")
+                        Text("31 frames at 512 × 512. This previously exceeded the inline pixel budget; it should now animate at a smaller size.")
                             .font(.caption)
                             .foregroundStyle(Theme.textSecondary)
                             .multilineTextAlignment(.center)
@@ -50,6 +52,37 @@ struct GIFSimulatorFixtureView: View {
                             .buttonStyle(.borderedProminent)
                         }
                     }
+                    .id("adaptive")
+
+                    VStack(spacing: 10) {
+                        Text("Long GIF playback")
+                            .font(.headline)
+                            .foregroundStyle(Theme.text)
+                        Text("240 source frames. Sampling should preserve the full timeline within the retained-frame budget.")
+                            .font(.caption)
+                            .foregroundStyle(Theme.textSecondary)
+                        if let data = Self.longFixtureData {
+                            AnimatedGIFView(data: data, activation: .whenVisible)
+                                .aspectRatio(1, contentMode: .fit)
+                                .frame(maxWidth: 280)
+                        }
+                    }
+                    .id("long")
+
+                    VStack(spacing: 10) {
+                        Text("Source frame safety limit")
+                            .font(.headline)
+                            .foregroundStyle(Theme.text)
+                        Text("601 small frames. The bounded source-work limit should still show a fallback.")
+                            .font(.caption)
+                            .foregroundStyle(Theme.textSecondary)
+                        if let data = Self.rejectedFixtureData {
+                            AnimatedGIFView(data: data, activation: .whenVisible)
+                                .aspectRatio(1, contentMode: .fit)
+                                .frame(maxWidth: 280)
+                        }
+                    }
+                    .id("limit")
                 }
                 .padding(24)
             }
@@ -60,6 +93,15 @@ struct GIFSimulatorFixtureView: View {
                     }
                     Button("Show 2 + 3") {
                         proxy.scrollTo("second", anchor: .top)
+                    }
+                    Button("Adaptive GIF") {
+                        proxy.scrollTo("adaptive", anchor: .top)
+                    }
+                    Button("Long GIF") {
+                        proxy.scrollTo("long", anchor: .top)
+                    }
+                    Button("Safety limit") {
+                        proxy.scrollTo("limit", anchor: .top)
                     }
                 }
                 .buttonStyle(.borderedProminent)
@@ -141,8 +183,10 @@ struct GIFSimulatorFixtureView: View {
         ] as CFDictionary
 
         let colors: [UIColor] = [.systemRed, .systemGreen, .systemBlue]
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = 1
         for index in 0..<frameCount {
-            let image = UIGraphicsImageRenderer(size: CGSize(width: size, height: size)).image {
+            let image = UIGraphicsImageRenderer(size: CGSize(width: size, height: size), format: format).image {
                 let color = colors[index % colors.count]
                 color.setFill()
                 $0.fill(CGRect(x: 0, y: 0, width: size, height: size))

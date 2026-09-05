@@ -36,6 +36,7 @@ struct PaginatedFeedView: View {
     @State private var feedSuspensionID = UUID()
 
     var body: some View {
+        let posts = visiblePosts
         Group {
             if pager.isInitialLoading {
                 ProgressView()
@@ -53,7 +54,7 @@ struct PaginatedFeedView: View {
                             FeedRefreshErrorView(message: refreshError) {
                                 readRequest = .refresh(UUID())
                             }
-                        } else if pager.posts.isEmpty,
+                        } else if posts.isEmpty,
                                   pager.paginationError == nil
                         {
                             let canLoadMore = pager.after != nil
@@ -65,7 +66,7 @@ struct PaginatedFeedView: View {
                             }
                         }
 
-                        ForEach(pager.posts) { post in
+                        ForEach(posts) { post in
                             PostCardView(
                                 post: post,
                                 onHide: { _ in removePost(post) },
@@ -73,7 +74,7 @@ struct PaginatedFeedView: View {
                                 onShowSubreddit: showSubredditNav ? { subredditPost = post } : nil,
                                 onShowGallery: { galleryPost = post }
                             )
-                            .onAppear {
+                            .task(id: post.id == posts.last?.id) {
                                 requestLoadMoreIfNeeded(for: post)
                             }
                         }
@@ -145,6 +146,10 @@ struct PaginatedFeedView: View {
 
     private var isPresentingContent: Bool {
         selectedPost != nil || subredditPost != nil || galleryPost != nil
+    }
+
+    private var visiblePosts: [Post] {
+        pager.posts.filter(shouldInclude)
     }
 
     private func removePost(_ post: Post) {
@@ -238,7 +243,7 @@ struct PaginatedFeedView: View {
     }
 
     private func requestLoadMoreIfNeeded(for post: Post) {
-        guard post.id == pager.posts.last?.id,
+        guard post.id == visiblePosts.last?.id,
               pager.after != nil,
               !pager.isRefreshing,
               !pager.isLoadingMore,

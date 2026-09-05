@@ -5,10 +5,13 @@ import UIKit
 struct PostDetailView: View {
     let post: Post
     var removeAction: PostRemoveAction? = nil
+    var commentsFetch: CommentLoadStore.Fetch? = nil
+    var continueThreadAction: ((URL) -> Void)? = nil
 
     @Environment(RedditSession.self) private var session
     @Environment(\.redditClient) private var client
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.openURL) private var openURL
     @Environment(InlineGIFPlaybackStore.self) private var playbackStore
     @State private var player: AVPlayer?
     @State private var playerPostID: String = ""
@@ -18,7 +21,8 @@ struct PostDetailView: View {
     @State private var animatedMediaRefreshID = UUID()
     @State private var ordinaryVideoIsVisible = false
     @State private var detailMediaSuspended = false
-    @State private var comments: [Comment] = []
+    @State private var commentStore = CommentLoadStore()
+    @State private var commentLoadAttempt = 0
     @State private var showCommentSheet = false
     @State private var showSubreddit = false
     @State private var mediaSaved = false
@@ -29,6 +33,7 @@ struct PostDetailView: View {
     @State private var showShareSheet = false
     @State private var removingPost = false
     @State private var removeError: String?
+    @State private var safariDestination: SafariDestination?
 
     var body: some View {
         NavigationStack {
@@ -54,6 +59,25 @@ struct PostDetailView: View {
                     Text(post.title)
                         .font(.title3.weight(.semibold))
                         .foregroundStyle(Theme.text)
+
+                    if let crosspost = post.crosspost {
+                        if let originalURL = crosspost.originalURL {
+                            Button {
+                                openURL(originalURL)
+                            } label: {
+                                CrosspostAttributionLabel(crosspost: crosspost)
+                            }
+                            .buttonStyle(.plain)
+                            .accessibilityHint("Opens the original post in your browser")
+                        } else {
+                            CrosspostAttributionLabel(crosspost: crosspost)
+                        }
+                        if let originalTitle = crosspost.title, originalTitle != post.title {
+                            Text(originalTitle)
+                                .font(.subheadline.weight(.medium))
+                                .foregroundStyle(Theme.textSecondary)
+                        }
+                    }
 
                     if let videoURL = post.videoURL {
                         if post.loopsVideo {
@@ -110,7 +134,7 @@ struct PostDetailView: View {
                             .id(animatedMediaRefreshID)
                             .aspectRatio(post.imageAspectRatio ?? 16 / 9, contentMode: .fit)
                             .clipShape(RoundedRectangle(cornerRadius: 8))
-                    } else if post.isVideo {
+                    } else if post.effectiveIsVideo {
                         RoundedRectangle(cornerRadius: 8)
                             .fill(Theme.surfaceElevated)
                             .aspectRatio(16/9, contentMode: .fit)
@@ -132,6 +156,21 @@ struct PostDetailView: View {
 
                     if !post.selftext.isEmpty {
                         CommentBodyView(content: post.selftext, textFont: .body)
+                    }
+
+                    if !post.crosspostBody.isEmpty, post.crosspostBody != post.selftext {
+                        CommentBodyView(content: post.crosspostBody, textFont: .body)
+                    }
+
+                    if post.crosspost != nil, post.imageURL == nil,
+                       let externalURL = post.externalLinkURL,
+                       let domain = post.externalLinkDomain {
+                        Link(destination: externalURL) {
+                            Label("Open \(domain)", systemImage: "arrow.up.right.square")
+                                .font(.subheadline.weight(.medium))
+                                .foregroundStyle(Theme.swipeOpen)
+                                .frame(minHeight: 44)
+                        }
                     }
 
                     HStack(spacing: 16) {
@@ -221,41 +260,26 @@ struct PostDetailView: View {
                         }
                     }
 
-                    if !comments.isEmpty {
-                        Divider().background(Theme.border)
-
-                        VStack(alignment: .leading, spacing: 0) {
-                            Text("Comments")
-                                .font(.headline)
-                                .foregroundStyle(Theme.text)
-                                .padding(.bottom, 12)
-
-                            LazyVStack(alignment: .leading, spacing: 0) {
-                                ForEach(comments) { comment in
-                                    CommentRowView(
-                                        comment: comment,
-                                        onPresentReply: suspendDetailMedia,
-                                        onDismissReply: resumeAfterPresentation
-                                    )
-                                }
-                            }
-                        }
-                    }
+                    Divider().background(Theme.border)
+                    commentSection
                 }
                 .padding(16)
             }
             .background(Theme.background)
             .defaultScrollAnchor(.top)
-            .task {
-                var result = (try? await client.fetchComments(permalink: post.permalink)) ?? []
-                if result.count > 30 { result = Array(result.prefix(30)) }
-                comments = result
+            .task(id: commentLoadAttempt) {
+                await commentStore.load {
+                    if let commentsFetch {
+                        return try await commentsFetch()
+                    }
+                    return try await client.fetchComments(permalink: post.permalink)
+                }
             }
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Close") {
-                        comments = []
+                        commentStore.cancel()
                         cancelMediaSaveTask()
                         teardownPlayer()
                         dismiss()
@@ -281,6 +305,7 @@ struct PostDetailView: View {
         }
         .preferredColorScheme(.dark)
         .onDisappear {
+            commentStore.cancel()
             cancelMediaSaveTask()
         }
         .fullScreenCover(isPresented: $showSubreddit, onDismiss: detailCoverDismissed) {
@@ -290,6 +315,9 @@ struct PostDetailView: View {
         }
         .sheet(isPresented: $showCommentSheet, onDismiss: resumeAfterPresentation) {
             ComposeReplySheet(thingID: "t3_\(post.id)", isPresented: $showCommentSheet)
+        }
+        .sheet(item: $safariDestination, onDismiss: resumeAfterPresentation) { destination in
+            SafariView(url: destination.url) { safariDestination = nil }
         }
         .fullScreenCover(isPresented: $showMediaViewer, onDismiss: mediaViewerDismissed) {
             if let videoURL = post.videoURL {
@@ -322,6 +350,56 @@ struct PostDetailView: View {
         } message: {
             Text(removeError ?? "")
         }
+    }
+
+    private var commentSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Comments")
+                .font(.headline)
+                .foregroundStyle(Theme.text)
+
+            switch commentStore.state {
+            case .idle, .loading:
+                ProgressView("Loading comments…")
+                    .tint(Theme.primary)
+                    .foregroundStyle(Theme.textSecondary)
+            case .failed(let message):
+                Text("Couldn’t load comments")
+                    .foregroundStyle(Theme.text)
+                Text(message)
+                    .font(.subheadline)
+                    .foregroundStyle(Theme.textSecondary)
+                Button("Retry") { commentLoadAttempt += 1 }
+                    .foregroundStyle(Theme.primary)
+                    .accessibilityLabel("Retry loading comments")
+            case .loaded:
+                if commentStore.comments.isEmpty {
+                    Text("No comments to show.")
+                        .font(.subheadline)
+                        .foregroundStyle(Theme.textSecondary)
+                } else {
+                    LazyVStack(alignment: .leading, spacing: 0) {
+                        ForEach(commentStore.comments) { comment in
+                            CommentRowView(
+                                comment: comment,
+                                postPermalink: post.permalink,
+                                onContinueThread: { url in
+                                    if let continueThreadAction {
+                                        continueThreadAction(url)
+                                    } else {
+                                        suspendDetailMedia()
+                                        safariDestination = SafariDestination(url: url)
+                                    }
+                                },
+                                onPresentReply: suspendDetailMedia,
+                                onDismissReply: resumeAfterPresentation
+                            )
+                        }
+                    }
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private var removeErrorPresented: Binding<Bool> {
@@ -362,7 +440,7 @@ struct PostDetailView: View {
             )
             try await client.execute(request)
             action.onComplete?(postId)
-            comments = []
+            commentStore.cancel()
             cancelMediaSaveTask()
             teardownPlayer()
             dismiss()
@@ -605,6 +683,8 @@ private struct PostImagePreviewView: View {
 
 struct CommentRowView: View {
     let comment: Comment
+    let postPermalink: String
+    let onContinueThread: (URL) -> Void
     var onPresentReply: () -> Void = {}
     var onDismissReply: () -> Void = {}
     @Environment(RedditSession.self) private var session
@@ -635,21 +715,18 @@ struct CommentRowView: View {
             .buttonStyle(.plain)
             .accessibilityLabel(collapsed ? "Expand comment by \(comment.author)" : "Collapse comment by \(comment.author)")
             if !collapsed {
-                if selecting {
-                    SelectableTextView(text: comment.body)
-                } else {
-                    CommentBodyView(
-                        content: comment.body,
-                        nonInteractiveTapAction: CommentBodyTapAction(
-                            perform: handleNonInteractiveTap,
-                            mediaAccessibility: MediaActionAccessibility(
-                                label: "Collapse comment by \(comment.author)",
-                                hint: "Double-tap to collapse this comment."
-                            )
-                        ),
-                        onNonInteractiveLongPress: beginSelecting
-                    )
-                }
+                CommentBodyView(
+                    content: comment.body,
+                    nonInteractiveTapAction: CommentBodyTapAction(
+                        perform: handleNonInteractiveTap,
+                        mediaAccessibility: MediaActionAccessibility(
+                            label: "Collapse comment by \(comment.author)",
+                            hint: "Double-tap to collapse this comment."
+                        )
+                    ),
+                    onNonInteractiveLongPress: beginSelecting,
+                    isSelecting: selecting
+                )
 
                 HStack(spacing: 12) {
                     VoteControlsView(thingID: "t1_\(comment.id)", initialScore: comment.score, inactiveColor: Theme.textMuted)
@@ -676,32 +753,39 @@ struct CommentRowView: View {
                     ForEach(comment.replies) { reply in
                         CommentRowView(
                             comment: reply,
+                            postPermalink: postPermalink,
+                            onContinueThread: onContinueThread,
                             onPresentReply: onPresentReply,
                             onDismissReply: onDismissReply
                         )
                             .padding(.leading, 16)
+                            .overlay(alignment: .leading) {
+                                Rectangle()
+                                    .fill(Theme.border)
+                                    .frame(width: 2)
+                                    .padding(.leading, 4)
+                            }
                     }
                 }
 
-                if comment.moreCount > 0 {
-                    Text("\(comment.moreCount) more replies")
-                        .font(.caption.weight(.medium))
-                        .foregroundStyle(Theme.primary)
-                        .padding(.top, 4)
-                        .padding(.leading, 16)
+                if comment.hasMoreReplies,
+                   let url = comment.continuationURL(postPermalink: postPermalink) {
+                    Button {
+                        onContinueThread(url)
+                    } label: {
+                        Label("Continue thread in Safari", systemImage: "arrow.up.right.square")
+                            .font(.caption.weight(.medium))
+                            .foregroundStyle(Theme.primary)
+                            .frame(minHeight: 44, alignment: .leading)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityHint("Opens this comment and its replies in Safari")
+                    .padding(.top, 4)
                 }
             }
         }
         .padding(.vertical, 8)
-        .padding(.leading, CGFloat(comment.depth * 12))
-        .overlay(alignment: .leading) {
-            if comment.depth > 0 {
-                Rectangle()
-                    .fill(Theme.border)
-                    .frame(width: 2)
-                    .padding(.leading, CGFloat((comment.depth - 1) * 12))
-            }
-        }
         .sheet(isPresented: $showReplySheet, onDismiss: onDismissReply) {
             ComposeReplySheet(thingID: "t1_\(comment.id)", isPresented: $showReplySheet)
         }
@@ -731,6 +815,9 @@ struct CommentBodyView: View {
     var textFont: Font = .subheadline
     var nonInteractiveTapAction: CommentBodyTapAction? = nil
     var onNonInteractiveLongPress: (() -> Void)? = nil
+    var isSelecting = false
+    @State private var revealedSpoilers: Set<Int> = []
+    @State private var revealedContent: String?
     @Environment(\.openURL) private var openURL
 
     // Matches in priority order: giphy embeds, markdown links, image URLs, plain URLs
@@ -747,8 +834,22 @@ struct CommentBodyView: View {
     private static let imageExtensions = ["jpg", "jpeg", "png", "gif", "webp"]
 
     var body: some View {
-        let parts = Self.displayParts(from: content)
-        VStack(alignment: .leading, spacing: 6) {
+        Group {
+            if isSelecting {
+                SelectableTextView(text: CommentSpoilers.selectionText(from: content, revealed: activeRevealedSpoilers))
+            } else {
+                renderedBody
+            }
+        }
+    }
+
+    private var activeRevealedSpoilers: Set<Int> {
+        revealedContent == content ? revealedSpoilers : []
+    }
+
+    private var renderedBody: some View {
+        let parts = Self.displayParts(from: content, revealedSpoilers: activeRevealedSpoilers)
+        return VStack(alignment: .leading, spacing: 6) {
             ForEach(Array(parts.enumerated()), id: \.offset) { _, part in
                 switch part {
                 case .text(let text):
@@ -779,6 +880,25 @@ struct CommentBodyView: View {
                             .frame(maxWidth: .infinity, alignment: .leading)
                         }
                     }
+                case .spoiler(let id, _):
+                    Button {
+                        if revealedContent != content {
+                            revealedContent = content
+                            revealedSpoilers = []
+                        }
+                        revealedSpoilers.insert(id)
+                    } label: {
+                        Label("Reveal spoiler", systemImage: "eye.slash")
+                            .font(textFont)
+                            .foregroundStyle(Theme.textSecondary)
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 10)
+                            .background(Theme.surfaceElevated)
+                            .clipShape(RoundedRectangle(cornerRadius: 6))
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Reveal spoiler")
+                    .accessibilityHint("Double-tap to reveal hidden content.")
                 case .image(let url):
                     nonInteractiveMediaTarget {
                         AsyncImage(url: url) { phase in
@@ -907,6 +1027,7 @@ struct CommentBodyView: View {
 
     enum BodyPart {
         case text(String)
+        case spoiler(Int, String)
         case image(URL)
         case gif(URL)
         case link(String, URL)
@@ -943,7 +1064,33 @@ struct CommentBodyView: View {
         return groups
     }
 
-    static func parse(_ text: String) -> [BodyPart] {
+    static func parse(_ text: String, revealedSpoilers: Set<Int> = []) -> [BodyPart] {
+        guard !text.isEmpty else { return [.text(text)] }
+        var parts: [BodyPart] = []
+        var visibleText = ""
+        for part in CommentSpoilers.parse(text) {
+            switch part {
+            case .text(let text):
+                visibleText += text
+            case .spoiler(let id, let content):
+                if revealedSpoilers.contains(id) {
+                    visibleText += content
+                } else {
+                    if !visibleText.isEmpty {
+                        parts += parseVisibleText(visibleText)
+                        visibleText = ""
+                    }
+                    parts.append(.spoiler(id, content))
+                }
+            }
+        }
+        if !visibleText.isEmpty {
+            parts += parseVisibleText(visibleText)
+        }
+        return parts
+    }
+
+    private static func parseVisibleText(_ text: String) -> [BodyPart] {
         let nsText = text as NSString
         let fullRange = NSRange(location: 0, length: nsText.length)
         let matches = tokenPattern.matches(in: text, range: fullRange)
@@ -1011,9 +1158,9 @@ struct CommentBodyView: View {
         return parts
     }
 
-    static func displayParts(from text: String) -> [BodyPart] {
+    static func displayParts(from text: String, revealedSpoilers: Set<Int> = []) -> [BodyPart] {
         var inlineGIFCount = 0
-        return parse(text).map { part in
+        return parse(text, revealedSpoilers: revealedSpoilers).map { part in
             guard case .gif(let url) = part else { return part }
             defer { inlineGIFCount += 1 }
             return inlineGIFCount == 0 ? part : .link("Open GIF", url)
@@ -1073,8 +1220,6 @@ struct CommentBodyView: View {
                 result = String(stripped.dropFirst())
             }
         }
-        result = result.replacingOccurrences(of: ">!", with: "")
-        result = result.replacingOccurrences(of: "!<", with: "")
         return result
     }
 

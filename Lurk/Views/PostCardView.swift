@@ -58,6 +58,20 @@ struct PostCardView: View {
                 }
                 .buttonStyle(.plain)
 
+                if let crosspost = post.crosspost {
+                    if let originalURL = crosspost.originalURL {
+                        Button {
+                            performTap(.openExternalURL(originalURL))
+                        } label: {
+                            CrosspostAttributionLabel(crosspost: crosspost)
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityHint("Opens the original post in your browser")
+                    } else {
+                        CrosspostAttributionLabel(crosspost: crosspost)
+                    }
+                }
+
                 if let externalURL = post.externalLinkURL, let domain = post.externalLinkDomain {
                     Button {
                         performTap(.openExternalURL(externalURL))
@@ -131,7 +145,7 @@ struct PostCardView: View {
                     }
                     .buttonStyle(.plain)
                     .overlay(alignment: .center) {
-                        if post.videoURL != nil || post.isVideo || post.isYouTubeVideo {
+                        if post.videoURL != nil || post.effectiveIsVideo || post.isYouTubeVideo {
                             Image(systemName: "play.circle.fill")
                                 .font(.largeTitle)
                                 .foregroundStyle(.white.opacity(0.8))

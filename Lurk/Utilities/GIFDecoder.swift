@@ -229,17 +229,16 @@ nonisolated final class BoundedImageDataSession:
     ) {
         let failure = withLock { state -> BoundedImageDataLoader.Failure? in
             guard let requestID = state.requestIDsByTaskIdentifier[dataTask.taskIdentifier],
-                  var transfer = state.transfers[requestID] else {
+                  var transfer = state.transfers.removeValue(forKey: requestID) else {
                 return nil
             }
+            // Keep one owner of the buffer while appending, avoiding a full Data copy per chunk.
             let failure = BoundedImageDataLoader.append(
                 data,
                 to: &transfer.data,
                 maximumBytes: transfer.maximumBytes
             )
-            if failure == nil {
-                state.transfers[requestID] = transfer
-            }
+            state.transfers[requestID] = transfer
             return failure
         }
 
@@ -420,8 +419,12 @@ actor GIFLoadLimiter {
 }
 
 nonisolated enum GIFDecoder {
+    // Bounds metadata inspection and ImageIO composition work independently of retained frames.
+    static let maximumSourceFrameCount = 600
+
     struct Limits: Equatable, Sendable {
         let maximumEncodedBytes: Int
+        // Unique decoded frames retained for playback; longer sources are sampled.
         let maximumFrameCount: Int
         let maximumPixelDimension: Int
         let maximumPixelsPerFrame: Int
@@ -575,15 +578,41 @@ nonisolated enum GIFDecoder {
               UTType(sourceType as String)?.conforms(to: .gif) == true else {
             throw Failure.unsupportedImageType
         }
-        guard frameCount <= limits.maximumFrameCount else {
+        guard frameCount <= maximumSourceFrameCount else {
             throw Failure.frameCountExceeded(
                 actual: frameCount,
-                limit: limits.maximumFrameCount
+                limit: maximumSourceFrameCount
             )
         }
 
+        let groups = frameGroups(
+            sourceFrameCount: frameCount,
+            maximumFrameCount: min(limits.maximumFrameCount, limits.maximumPlaybackFrameCount)
+        )
+        guard !groups.isEmpty else { throw Failure.imageAssemblyFailed }
+
+        let sourceLimits = Limits(
+            maximumEncodedBytes: limits.maximumEncodedBytes,
+            maximumFrameCount: maximumSourceFrameCount,
+            maximumPixelDimension: limits.maximumPixelDimension,
+            maximumPixelsPerFrame: limits.maximumPixelsPerFrame,
+            maximumTotalDecodedPixels: .max,
+            maximumPlaybackFrameCount: limits.maximumPlaybackFrameCount
+        )
+        guard let properties = CGImageSourceCopyProperties(source, nil) as? [String: Any],
+              let gifProperties = properties[kCGImagePropertyGIFDictionary as String] as? [String: Any],
+              let canvasWidth = gifProperties[kCGImagePropertyGIFCanvasPixelWidth as String] as? NSNumber,
+              let canvasHeight = gifProperties[kCGImagePropertyGIFCanvasPixelHeight as String] as? NSNumber else {
+            throw Failure.invalidImageData
+        }
+        try validate(encodedByteCount: data.count, frames: [
+            .init(pixelWidth: canvasWidth.intValue, pixelHeight: canvasHeight.intValue)
+        ], limits: sourceLimits)
+
         var metadata: [FrameMetadata] = []
         metadata.reserveCapacity(frameCount)
+        var sourceDurations: [Double] = []
+        sourceDurations.reserveCapacity(frameCount)
         for index in 0..<frameCount {
             try Task.checkCancellation()
             guard let properties = CGImageSourceCopyPropertiesAtIndex(source, index, nil)
@@ -595,22 +624,67 @@ nonisolated enum GIFDecoder {
             metadata.append(
                 FrameMetadata(pixelWidth: width.intValue, pixelHeight: height.intValue)
             )
+            sourceDurations.append(frameDuration(properties: properties))
         }
 
-        try validate(encodedByteCount: data.count, frames: metadata, limits: limits)
+        // Source dimensions and frame count still bound ImageIO's work; the aggregate
+        // pixel budget applies to the thumbnails we retain for playback.
+        try validate(encodedByteCount: data.count, frames: metadata, limits: sourceLimits)
+        let canvasPixels = canvasWidth.intValue * canvasHeight.intValue
+        let largestFramePixels = metadata.map { $0.pixelWidth * $0.pixelHeight }.max() ?? canvasPixels
+        // Retained frames are composed canvases even if source metadata describes a subrect.
+        let (selectedPixels, pixelOverflow) = max(canvasPixels, largestFramePixels)
+            .multipliedReportingOverflow(by: groups.count)
+        guard !pixelOverflow else { throw Failure.totalPixelCountOverflow(index: groups.count - 1) }
+        let thumbnailDimension: Int?
+        if selectedPixels > limits.maximumTotalDecodedPixels {
+            let pixelsPerFrame = limits.maximumTotalDecodedPixels / groups.count
+            guard pixelsPerFrame > 0 else {
+                throw Failure.totalPixelsExceeded(
+                    atFrame: 0,
+                    actual: groups.count,
+                    limit: limits.maximumTotalDecodedPixels
+                )
+            }
+            // A square bound also contains narrow frames and avoids rounding over budget.
+            thumbnailDimension = Int(Double(pixelsPerFrame).squareRoot().rounded(.down))
+        } else {
+            thumbnailDimension = nil
+        }
 
         let decodeOptions = [kCGImageSourceShouldCacheImmediately: true] as CFDictionary
         var frames: [UIImage] = []
-        frames.reserveCapacity(frameCount)
+        frames.reserveCapacity(groups.count)
+        var decodedMetadata: [FrameMetadata] = []
+        decodedMetadata.reserveCapacity(groups.count)
         var frameDurations: [Double] = []
-        frameDurations.reserveCapacity(frameCount)
-        for index in 0..<frameCount {
+        frameDurations.reserveCapacity(groups.count)
+        for group in groups {
             try Task.checkCancellation()
-            guard let cgImage = CGImageSourceCreateImageAtIndex(source, index, decodeOptions) else {
+            // Preserve long-held poses instead of extending a brief transition over the group.
+            var index = group.lowerBound
+            for candidate in group.dropFirst() where sourceDurations[candidate] > sourceDurations[index] {
+                index = candidate
+            }
+            // ImageIO composes preceding disposal/transparency before returning this source index.
+            let decodedFrame: CGImage?
+            if let thumbnailDimension {
+                decodedFrame = CGImageSourceCreateThumbnailAtIndex(source, index, [
+                    kCGImageSourceCreateThumbnailFromImageAlways: true,
+                    kCGImageSourceThumbnailMaxPixelSize: thumbnailDimension,
+                    kCGImageSourceShouldCacheImmediately: true,
+                ] as CFDictionary)
+            } else {
+                decodedFrame = CGImageSourceCreateImageAtIndex(source, index, decodeOptions)
+            }
+            guard let cgImage = decodedFrame else {
                 throw Failure.frameDecodeFailed(index: index)
             }
+            try Task.checkCancellation()
+            decodedMetadata.append(.init(pixelWidth: cgImage.width, pixelHeight: cgImage.height))
+            try validate(encodedByteCount: data.count, frames: decodedMetadata, limits: limits)
             frames.append(UIImage(cgImage: cgImage))
-            frameDurations.append(frameDuration(source: source, index: index))
+            frameDurations.append(sourceDurations[group].reduce(0, +))
         }
 
         guard let firstFrame = frames.first else { throw Failure.imageAssemblyFailed }
@@ -631,10 +705,18 @@ nonisolated enum GIFDecoder {
         return DecodedImage(image: animatedImage)
     }
 
-    private static func frameDuration(source: CGImageSource, index: Int) -> Double {
-        guard let properties = CGImageSourceCopyPropertiesAtIndex(source, index, nil)
-            as? [String: Any],
-              let gifProperties = properties[kCGImagePropertyGIFDictionary as String]
+    static func frameGroups(sourceFrameCount: Int, maximumFrameCount: Int) -> [Range<Int>] {
+        guard (1...maximumSourceFrameCount).contains(sourceFrameCount), maximumFrameCount > 0 else {
+            return []
+        }
+        let retainedCount = min(sourceFrameCount, maximumFrameCount)
+        return (0..<retainedCount).map { index in
+            (index * sourceFrameCount / retainedCount)..<((index + 1) * sourceFrameCount / retainedCount)
+        }
+    }
+
+    private static func frameDuration(properties: [String: Any]) -> Double {
+        guard let gifProperties = properties[kCGImagePropertyGIFDictionary as String]
                 as? [String: Any] else {
             return 0.1
         }
@@ -648,7 +730,8 @@ nonisolated enum GIFDecoder {
 
     static func playbackDuration(clamped: Double?, unclamped: Double?) -> Double {
         let duration = clamped ?? unclamped ?? 0.1
-        return duration.isFinite ? min(max(duration, 0.1), 60) : 0.1
+        guard duration.isFinite, duration >= 0.02 else { return 0.1 }
+        return min(duration, 60)
     }
 
     static func playbackFrameIndices(

@@ -50,8 +50,8 @@ struct Comment: Identifiable {
     let createdUtc: TimeInterval
     let depth: Int
     let replies: [Comment]
-    let moreCount: Int
     let isSubmitter: Bool
+    var hasMoreReplies = false
 
     nonisolated static let maxRenderDepth = 3
 
@@ -68,13 +68,18 @@ struct Comment: Identifiable {
 
 extension Comment {
     nonisolated static func parse(from listing: CommentListing) -> [Comment] {
+        parse(from: listing, renderDepth: 0)
+    }
+
+    private nonisolated static func parse(from listing: CommentListing, renderDepth: Int) -> [Comment] {
         listing.data.children.compactMap { wrapper in
             guard wrapper.kind == "t1" else { return nil }
             let d = wrapper.data
             guard let author = d.author, let body = d.body,
                   !filteredBots.contains(author) else { return nil }
-            let depth = d.depth ?? 0
+            let depth = max(renderDepth, d.depth ?? 0)
             let withinDepth = depth < maxRenderDepth
+            let children = replyChildren(d.replies)
             return Comment(
                 id: d.id ?? UUID().uuidString,
                 author: author,
@@ -82,23 +87,52 @@ extension Comment {
                 score: d.score ?? 0,
                 createdUtc: d.createdUtc ?? 0,
                 depth: depth,
-                replies: withinDepth ? parseReplies(d.replies) : [],
-                moreCount: withinDepth ? 0 : countReplies(d.replies),
-                isSubmitter: d.isSubmitter ?? false
+                replies: withinDepth ? parseReplies(d.replies, renderDepth: depth + 1) : [],
+                isSubmitter: d.isSubmitter ?? false,
+                hasMoreReplies: children.contains { $0.kind == "more" || (!withinDepth && $0.kind == "t1") }
             )
         }
     }
 
-    private nonisolated static func parseReplies(_ replies: CommentReplies?) -> [Comment] {
+    private nonisolated static func parseReplies(_ replies: CommentReplies?, renderDepth: Int) -> [Comment] {
         guard case .listing(let listing) = replies else { return [] }
-        return parse(from: listing)
+        return parse(from: listing, renderDepth: renderDepth)
     }
 
-    private nonisolated static func countReplies(_ replies: CommentReplies?) -> Int {
-        guard case .listing(let listing) = replies else { return 0 }
-        return listing.data.children.reduce(0) { total, wrapper in
-            guard wrapper.kind == "t1" else { return total }
-            return total + 1 + countReplies(wrapper.data.replies)
+    private nonisolated static func replyChildren(_ replies: CommentReplies?) -> [CommentWrapper] {
+        guard case .listing(let listing) = replies else { return [] }
+        return listing.data.children
+    }
+
+    func continuationURL(postPermalink: String) -> URL? {
+        guard Self.isRedditID(id), let source = URLComponents(string: postPermalink),
+              source.user == nil, source.password == nil, source.port == nil,
+              source.query == nil, source.fragment == nil else { return nil }
+
+        if let scheme = source.scheme {
+            guard scheme.lowercased() == "https",
+                  let host = source.host?.lowercased(),
+                  ["reddit.com", "www.reddit.com", "old.reddit.com"].contains(host) else { return nil }
+        } else {
+            guard source.host == nil, postPermalink.hasPrefix("/"),
+                  !postPermalink.hasPrefix("//") else { return nil }
         }
+
+        let path = source.path.hasSuffix("/") ? String(source.path.dropLast()) : source.path
+        let parts = path.split(separator: "/", omittingEmptySubsequences: false)
+        guard parts.count == 6, parts[0].isEmpty, parts[1] == "r", parts[3] == "comments",
+              !parts[2].isEmpty, parts[2].allSatisfy({ $0.isASCII && ($0.isLetter || $0.isNumber || $0 == "_") }),
+              Self.isRedditID(String(parts[4])), !parts[5].isEmpty,
+              parts[5].allSatisfy({ $0.isLetter || $0.isNumber || $0 == "_" || $0 == "-" }) else { return nil }
+
+        var destination = URLComponents()
+        destination.scheme = "https"
+        destination.host = "www.reddit.com"
+        destination.path = "\(path)/\(id)/"
+        return destination.url
+    }
+
+    private static func isRedditID(_ value: String) -> Bool {
+        !value.isEmpty && value.utf8.allSatisfy { (48...57).contains($0) || (97...122).contains($0) }
     }
 }
