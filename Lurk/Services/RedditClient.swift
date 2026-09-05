@@ -10,6 +10,7 @@ enum RedditAPI {
     static let editUserText = URL(string: "https://www.reddit.com/api/editusertext")!
     static let deleteComment = URL(string: "https://www.reddit.com/api/del")!
     static let subscribe = URL(string: "https://www.reddit.com/api/subscribe")!
+    static let readMessage = URL(string: "https://www.reddit.com/api/read_message")!
 
     nonisolated static let decoder: JSONDecoder = {
         let d = JSONDecoder()
@@ -200,11 +201,13 @@ actor RedditClient {
         return try RedditAPI.decoder.decode(UserCommentListing.self, from: data)
     }
 
-    func fetchInboxReplies(after: String? = nil) async throws -> InboxListing {
-        var components = try buildComponents(path: "/message/comments/.json")
+    func fetchInboxReplies(filter: InboxFilter = .all, after: String? = nil) async throws -> InboxListing {
+        let path = filter == .unread ? "/message/unread/.json" : "/message/comments/.json"
+        var components = try buildComponents(path: path)
         var items: [URLQueryItem] = [
             URLQueryItem(name: "limit", value: Self.profilePageSize),
             URLQueryItem(name: "raw_json", value: "1"),
+            URLQueryItem(name: "mark", value: "false"),
         ]
         if let after {
             items.append(URLQueryItem(name: "after", value: after))
@@ -213,7 +216,7 @@ actor RedditClient {
         guard let url = components.url else { throw URLError(.badURL) }
         let (data, response) = try await session.data(from: url)
         try validateHTTPResponse(response, data: data)
-        return try RedditAPI.decoder.decode(InboxListing.self, from: data)
+        return try RedditAPI.decoder.decode(InboxListing.self, from: data).filtered(for: filter)
     }
 
     func fetchHiddenPosts(username: String, after: String? = nil) async throws -> RedditListing {

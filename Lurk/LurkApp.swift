@@ -5,7 +5,10 @@ struct LurkApp: App {
     var body: some Scene {
         WindowGroup {
 #if DEBUG
-            if ProcessInfo.processInfo.arguments.contains("-gif-simulator-fixture") {
+            if ProcessInfo.processInfo.arguments.contains("-inbox-simulator-fixture"),
+               Bundle.main.bundleIdentifier == "com.xtypo.Lurk.inboxQA" {
+                InboxSimulatorFixtureView()
+            } else if ProcessInfo.processInfo.arguments.contains("-gif-simulator-fixture") {
                 GIFSimulatorFixtureView()
             } else if ProcessInfo.processInfo.arguments.contains("-reading-simulator-fixture"),
                       Bundle.main.bundleIdentifier == "com.xtypo.Lurk.readingQA" {
