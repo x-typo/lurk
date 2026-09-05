@@ -7,6 +7,9 @@ struct LurkApp: App {
 #if DEBUG
             if ProcessInfo.processInfo.arguments.contains("-gif-simulator-fixture") {
                 GIFSimulatorFixtureView()
+            } else if ProcessInfo.processInfo.arguments.contains("-reading-simulator-fixture"),
+                      Bundle.main.bundleIdentifier == "com.xtypo.Lurk.readingQA" {
+                ReadingSimulatorFixtureView()
             } else {
                 LurkRootView()
             }

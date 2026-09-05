@@ -279,6 +279,82 @@ struct PostMediaTests {
         #expect(post.animatedMedia == .video(expectedURL))
     }
 
+    @Test("Reddit MP4 preview variants play instead of decoding the original GIF")
+    func prefersMP4VariantToRawGIF() throws {
+        let post = try makePost(
+            url: "https://i.redd.it/original.gif",
+            preview: variantPreview(mp4URL: "https://preview.redd.it/loop.mp4?x=1&amp;y=2")
+        )
+        let videoURL = URL(string: "https://preview.redd.it/loop.mp4?x=1&y=2")!
+        #expect(post.animatedMedia == .video(videoURL))
+        #expect(post.videoURL == videoURL)
+        #expect(post.loopsVideo)
+        #expect(post.downloadableVideoURLs == [videoURL])
+        #expect(post.videoAspectRatio == 0.5)
+        #expect(post.imageURL?.absoluteString == "https://preview.redd.it/poster.jpg")
+    }
+
+    @Test("Ordinary Reddit HLS remains preferred over animation variants")
+    func preservesOrdinaryVideoPriority() throws {
+        let post = try makePost(
+            url: "https://v.redd.it/original",
+            isVideo: true,
+            media: ["reddit_video": [
+                "hls_url": "https://v.redd.it/original/HLSPlaylist.m3u8",
+                "is_gif": false,
+            ]],
+            preview: variantPreview(mp4URL: "https://preview.redd.it/loop.mp4")
+        )
+        #expect(post.videoURL?.lastPathComponent == "HLSPlaylist.m3u8")
+        #expect(!post.loopsVideo)
+    }
+
+    @Test("GIF variants remain animated when the outer URL has no GIF suffix")
+    func resolvesGIFVariantWithoutDirectGIFURL() throws {
+        let post = try makePost(
+            url: "https://www.reddit.com/r/gifs/comments/fixture/",
+            preview: variantPreview(mp4URL: nil)
+        )
+        #expect(post.animatedMedia == .gif(URL(string: "https://preview.redd.it/loop.gif")!))
+        #expect(post.imageURL?.lastPathComponent == "poster.jpg")
+    }
+
+    @Test("Unsafe and malformed MP4 variants fall back without losing the poster")
+    func fallsBackFromInvalidMP4Variant() throws {
+        for unsafeURL in ["file:///private/tmp/loop.mp4", "data:video/mp4;base64,AA"] {
+            let post = try makePost(
+                url: "https://www.reddit.com/r/gifs/comments/fixture/",
+                preview: variantPreview(mp4URL: unsafeURL)
+            )
+            #expect(post.videoURL == nil)
+            #expect(post.animatedImageURL?.lastPathComponent == "loop.gif")
+            #expect(post.imageURL?.lastPathComponent == "poster.jpg")
+        }
+        let malformed = try makePost(
+            url: "https://www.reddit.com/r/gifs/comments/fixture/",
+            preview: ["images": [[
+                "source": ["url": "https://preview.redd.it/poster.jpg", "width": 300, "height": 600],
+                "variants": ["mp4": "bad", "gif": ["source": ["url": "https://preview.redd.it/loop.gif", "width": 300, "height": 600]]],
+            ]]]
+        )
+        #expect(malformed.videoURL == nil)
+        #expect(malformed.animatedImageURL?.lastPathComponent == "loop.gif")
+        #expect(malformed.imageURL?.lastPathComponent == "poster.jpg")
+    }
+
+    private func variantPreview(mp4URL: String?) -> [String: Any] {
+        var variants: [String: Any] = [
+            "gif": ["source": ["url": "https://preview.redd.it/loop.gif", "width": 300, "height": 600]],
+        ]
+        if let mp4URL {
+            variants["mp4"] = ["source": ["url": mp4URL, "width": 300, "height": 600]]
+        }
+        return ["images": [[
+            "source": ["url": "https://preview.redd.it/poster.jpg", "width": 300, "height": 600],
+            "variants": variants,
+        ]]]
+    }
+
     private func makePost(
         url: String,
         isVideo: Bool = false,

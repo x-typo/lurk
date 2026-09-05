@@ -84,6 +84,10 @@ actor RedditClient {
         self.session = URLSession(configuration: config)
     }
 
+    init(session: URLSession) {
+        self.session = session
+    }
+
     func fetchHomePosts(
         sort: SortType = .top,
         time: TimeFilter = .day,

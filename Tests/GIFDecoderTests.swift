@@ -186,7 +186,191 @@ struct GIFDecoderTests {
         let decoded = try GIFDecoder.image(from: data)
 
         #expect(decoded.image.images?.count == 2)
+        #expect(abs(decoded.image.duration - 0.1) < 0.001)
+    }
+
+    @Test("A modest GIF over the aggregate source budget animates within the output budget")
+    func downsamplesGIFWithinInlineBudget() throws {
+        let data = try makeGIF(width: 512, height: 512, frameCount: 31, delay: 0.05)
+        let decoded = try GIFDecoder.image(from: data, limits: .inline)
+        let frames = try #require(decoded.image.images)
+        let metadata = try frames.map { frame in
+            let image = try #require(frame.cgImage)
+            #expect(image.width < 512)
+            #expect(image.width == image.height)
+            return GIFDecoder.FrameMetadata(pixelWidth: image.width, pixelHeight: image.height)
+        }
+
+        #expect(frames.count == 31)
+        #expect(abs(decoded.image.duration - 1.55) < 0.001)
+        try GIFDecoder.validate(encodedByteCount: data.count, frames: metadata, limits: .inline)
+        #expect(metadata.reduce(0) { $0 + $1.pixelWidth * $1.pixelHeight }
+                <= GIFDecoder.Limits.inline.maximumTotalDecodedPixels)
+    }
+
+    @Test("Adaptive decoding retains unequal frame timing")
+    func downsamplingPreservesVariableTiming() throws {
+        let data = try makeGIF(width: 20, height: 10, delays: [0.05, 0.15])
+        let resourceLimits = limits(
+            encodedBytes: data.count,
+            frameCount: 2,
+            dimension: 20,
+            pixelsPerFrame: 200,
+            totalPixels: 100
+        )
+        let decoded = try GIFDecoder.image(from: data, limits: resourceLimits)
+        let frames = try #require(decoded.image.images)
+
+        #expect(frames.count == 4)
         #expect(abs(decoded.image.duration - 0.2) < 0.001)
+        #expect(frames.allSatisfy { ($0.cgImage?.width ?? 20) < 20 })
+    }
+
+    @Test("Adaptive GIF thumbnails preserve partial-frame transparency and disposal")
+    func adaptiveDecodingPreservesFrameComposition() throws {
+        let data = try compositionGIF()
+        let original = try GIFDecoder.image(from: data)
+        let adaptive = try GIFDecoder.image(from: data, limits: limits(
+            encodedBytes: data.count,
+            frameCount: 4,
+            dimension: 16,
+            pixelsPerFrame: 256,
+            totalPixels: 256
+        ))
+        let originalFrames = try #require(original.image.images)
+        let adaptiveFrames = try #require(adaptive.image.images)
+        try #require(originalFrames.count == 4)
+        try #require(adaptiveFrames.count == 4)
+        #expect(abs(adaptive.image.duration - original.image.duration) < 0.001)
+
+        let red: [UInt8] = [255, 0, 0, 255]
+        let green: [UInt8] = [0, 255, 0, 255]
+        let blue: [UInt8] = [0, 0, 255, 255]
+        let clear: [UInt8] = [0, 0, 0, 0]
+        let expectedSamples = [
+            [red, red, red, red, red],
+            [green, red, red, red, red],
+            [clear, blue, red, red, red],
+            [clear, red, green, red, red],
+        ]
+        for index in originalFrames.indices {
+            let fullImage = try #require(originalFrames[index].cgImage)
+            let smallImage = try #require(adaptiveFrames[index].cgImage)
+            #expect(fullImage.width == 16 && fullImage.height == 16)
+            #expect(smallImage.width == 8 && smallImage.height == 8)
+            let fullSamples = try compositionSamples(from: fullImage)
+            let smallSamples = try compositionSamples(from: smallImage)
+            #expect(fullSamples == expectedSamples[index])
+            for (fullPixel, smallPixel) in zip(fullSamples, smallSamples) {
+                // Interior samples avoid filter edges; allow only channel-rounding noise.
+                #expect(zip(fullPixel, smallPixel).allSatisfy {
+                    abs(Int($0.0) - Int($0.1)) <= 2
+                })
+            }
+        }
+    }
+
+    @Test("Long GIFs preserve the full timeline under retained-frame and pixel caps", arguments: [121, 240])
+    func samplesLongGIFsWithinResourceBudgets(sourceFrameCount: Int) throws {
+        var delays = Array(repeating: 0.05, count: sourceFrameCount)
+        delays[sourceFrameCount - 1] = 0.35
+        let data = try makeGIF(width: 320, height: 240, delays: delays)
+        let decoded = try GIFDecoder.image(from: data, limits: .inline)
+        let frames = try #require(decoded.image.images)
+        let images = try frames.map { try #require($0.cgImage) }
+        var seen = Set<ObjectIdentifier>()
+        let retainedImages = images.filter { seen.insert(ObjectIdentifier($0)).inserted }
+
+        #expect(abs(decoded.image.duration - delays.reduce(0, +)) < 0.001)
+        #expect(retainedImages.count <= GIFDecoder.Limits.inline.maximumFrameCount)
+        #expect(frames.count <= GIFDecoder.Limits.inline.maximumPlaybackFrameCount)
+        #expect(retainedImages.count > 1)
+        #expect(retainedImages.allSatisfy { $0.width < 320 })
+        try GIFDecoder.validate(encodedByteCount: data.count, frames: retainedImages.map {
+            .init(pixelWidth: $0.width, pixelHeight: $0.height)
+        }, limits: .inline)
+    }
+
+    @Test("Sampling retains a long-held final image rather than the preceding transition")
+    func samplingPreservesDominantFinalFrame() throws {
+        let delays = Array(repeating: 0.02, count: 120) + [60.0]
+        // The fixture alternates red/green: source119 is green, source120 is red.
+        let data = try makeGIF(width: 2, height: 2, delays: delays)
+        let decoded = try GIFDecoder.image(from: data, limits: .inline)
+        let frames = try #require(decoded.image.images)
+        let lastImage = try #require(frames.last?.cgImage)
+        let red: [UInt8] = [255, 0, 0, 255]
+        #expect(try compositionSamples(from: lastImage).first == red)
+
+        var redFrameCount = 0
+        for frame in frames {
+            let image = try #require(frame.cgImage)
+            if try compositionSamples(from: image).first == red {
+                redFrameCount += 1
+            }
+        }
+        #expect(redFrameCount * 5 > frames.count * 4)
+        #expect(abs(decoded.image.duration - 62.4) < 0.001)
+        #expect(frames.count <= GIFDecoder.Limits.inline.maximumPlaybackFrameCount)
+    }
+
+    @Test("Sampled GIF frames include skipped transparency and disposal operations")
+    func sampledFramesPreserveCompositionAndTimeline() throws {
+        let data = try compositionGIF(appendingTransparentFrame: true)
+        let originalFrames = try #require(GIFDecoder.image(from: data).image.images)
+        let sampled = try GIFDecoder.image(from: data, limits: limits(
+            encodedBytes: data.count,
+            frameCount: 3,
+            dimension: 16,
+            pixelsPerFrame: 256,
+            totalPixels: 192
+        ))
+        let sampledFrames = try #require(sampled.image.images)
+        try #require(originalFrames.count == 5)
+        try #require(sampledFrames.count == 5)
+        #expect(abs(sampled.image.duration - 0.5) < 0.001)
+
+        // Contiguous groups 0..<1, 1..<3, 3..<5 retain 0/1/3 for 0.1/0.2/0.2 seconds.
+        // Source frame 2 is skipped, but its restore-previous disposal must affect frame 3.
+        let sourceIndices = [0, 1, 1, 3, 3]
+        for (playbackIndex, sourceIndex) in sourceIndices.enumerated() {
+            let reference = try #require(originalFrames[sourceIndex].cgImage)
+            let thumbnail = try #require(sampledFrames[playbackIndex].cgImage)
+            #expect(thumbnail.width == 8 && thumbnail.height == 8)
+            let expected = try compositionSamples(from: reference)
+            let observed = try compositionSamples(from: thumbnail)
+            for (fullPixel, smallPixel) in zip(expected, observed) {
+                #expect(zip(fullPixel, smallPixel).allSatisfy {
+                    abs(Int($0.0) - Int($0.1)) <= 2
+                })
+            }
+        }
+    }
+
+    @Test("Frame sampling rejects unusable budgets without dividing by zero")
+    func frameSamplingRejectsInvalidBudgets() throws {
+        #expect(GIFDecoder.frameGroups(sourceFrameCount: 0, maximumFrameCount: 120).isEmpty)
+        #expect(GIFDecoder.frameGroups(sourceFrameCount: 601, maximumFrameCount: 120).isEmpty)
+        #expect(GIFDecoder.frameGroups(sourceFrameCount: 5, maximumFrameCount: 0).isEmpty)
+        let data = try makeGIF(width: 2, height: 2, frameCount: 2, delay: 0.05)
+        for frameCount in [0, -1] {
+            #expect(gifFailure {
+                try GIFDecoder.image(from: data, limits: limits(encodedBytes: data.count, frameCount: frameCount))
+            } == .imageAssemblyFailed)
+        }
+    }
+
+    @Test("Adaptive decoding keeps hard source frame and dimension guards")
+    func adaptiveDecodingRejectsExcessiveSourceWork() throws {
+        let tooManyFrames = try makeGIF(width: 2, height: 2, frameCount: 601, delay: 0.05)
+        #expect(gifFailure {
+            try GIFDecoder.image(from: tooManyFrames, limits: .inline)
+        } == .frameCountExceeded(actual: 601, limit: 600))
+
+        let tooWide = try makeGIF(width: 2_049, height: 1, frameCount: 1, delay: 0.05)
+        #expect(gifFailure {
+            try GIFDecoder.image(from: tooWide, limits: .inline)
+        } == .frameDimensionExceeded(index: 0, actual: 2_049, limit: 2_048))
     }
 
     @Test("Unequal frame delays retain their playback proportions")
@@ -210,12 +394,15 @@ struct GIFDecoderTests {
         #expect(cappedIndices.count(where: { $0 == 1 }) == 599)
     }
 
-    @Test("Playback timing matches the system-clamped GIF delay")
+    @Test("Valid fast GIF delays are preserved and pathological delays are bounded")
     func clampsFastPlaybackAndPreservesNormalDelays() {
-        #expect(GIFDecoder.playbackDuration(clamped: 0.02, unclamped: 0.02) == 0.1)
+        #expect(GIFDecoder.playbackDuration(clamped: 0.02, unclamped: 0.02) == 0.02)
+        #expect(GIFDecoder.playbackDuration(clamped: 0.05, unclamped: 0.05) == 0.05)
         #expect(GIFDecoder.playbackDuration(clamped: nil, unclamped: 0.01) == 0.1)
         #expect(GIFDecoder.playbackDuration(clamped: 0.25, unclamped: 0.01) == 0.25)
         #expect(GIFDecoder.playbackDuration(clamped: .infinity, unclamped: nil) == 0.1)
+        #expect(GIFDecoder.playbackDuration(clamped: -1, unclamped: nil) == 0.1)
+        #expect(GIFDecoder.playbackDuration(clamped: 90, unclamped: nil) == 60)
     }
 
     @Test("Bare and Markdown GIF URLs use the bounded GIF renderer")
@@ -730,6 +917,46 @@ struct GIFDecoderTests {
         )
         context.fill(CGRect(x: 0, y: 0, width: width, height: height))
         return context.makeImage()
+    }
+
+    private func compositionGIF(appendingTransparentFrame: Bool = false) throws -> Data {
+        // Authored GIF records: red canvas; green subrect with background disposal (2);
+        // blue subrect with previous disposal (3); green/transparent final subrect.
+        // The literal uses reset-delimited LZW codes, so an encoder cannot flatten it.
+        var data = try #require(Data(base64Encoded: """
+        R0lGODlhEAAQAIEAAAAAAP8AAAD/AAAA/yH5BAQKAAAALAAAAAAQABAAAALBDMMwDMMwDMMwDMMwDMMwDMMwDMMwDMMwDMMwDMMwDMMwDMMwDMMwDMMwDMMwDMMwDMMwDMMwDMMwDMMwDMMwDMMwDMMwDMMwDMMwDMMwDMMwDMMwDMMwDMMwDMMwDMMwDMMwDMMwDMMwDMMwDMMwDMMwDMMwDMMwDMMwDMMwDMMwDMMwDMMwDMMwDMMwDMMwDMMwDMMwDMMwDMMwDMMwDMMwDMMwDMMwDMMwDMMwDMMwDMMwDMMwDMMwDMMwDMMwBQAh+QQJCgAAACwAAAAACAAIAAACMRRFURRFURRFURRFURRFURRFURRFURRFURRFURRFURRFURRFURRFURRFURRFURRFUQUAIfkEDQoAAAAsCAAAAAgACAAAAjEcx3Ecx3Ecx3Ecx3Ecx3Ecx3Ecx3Ecx3Ecx3Ecx3Ecx3Ecx3Ecx3Ecx3Ecx3Ecx3EFACH5BAUKAAAALAAACAAIAAgAAAIxFEVRBEEQFEVRBEEQFEVRBEEQFEVRBEEQFEVRBEEQFEVRBEEQFEVRBEEQFEVRBEEQBQA7
+        """, options: .ignoreUnknownCharacters))
+        if appendingTransparentFrame {
+            data.removeLast()
+            // One transparent pixel leaves the previous canvas unchanged for a fifth frame.
+            data.append(contentsOf: [
+                0x21, 0xF9, 4, 5, 10, 0, 0, 0,
+                0x2C, 0, 0, 0, 0, 1, 0, 1, 0, 0,
+                2, 2, 0x44, 1, 0, 0x3B,
+            ])
+        }
+        return data
+    }
+
+    private func compositionSamples(from image: CGImage) throws -> [[UInt8]] {
+        let context = try #require(CGContext(
+            data: nil,
+            width: image.width,
+            height: image.height,
+            bitsPerComponent: 8,
+            bytesPerRow: image.width * 4,
+            space: CGColorSpaceCreateDeviceRGB(),
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+                | CGBitmapInfo.byteOrder32Big.rawValue
+        ))
+        context.draw(image, in: CGRect(x: 0, y: 0, width: image.width, height: image.height))
+        let bytes = try #require(context.data).assumingMemoryBound(to: UInt8.self)
+        // Coordinates in eighths cover background clearing, previous-frame restoration,
+        // the opaque final subrect, its transparent half, and the untouched canvas.
+        return [(1, 1), (5, 1), (1, 5), (3, 5), (5, 5)].map { x, y in
+            let offset = ((y * image.height / 8) * image.width + x * image.width / 8) * 4
+            return Array(UnsafeBufferPointer(start: bytes + offset, count: 4))
+        }
     }
 
     private enum FixtureFailure: Error {

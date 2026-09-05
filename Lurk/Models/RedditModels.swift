@@ -64,10 +64,129 @@ struct Post: Identifiable, Decodable {
     let preview: Preview?
     let galleryData: GalleryData?
     let mediaMetadata: [String: MediaMetadataItem]?
+    var crosspost: CrosspostContent? = nil
 
     static let filteredKeywords: Set<String> = [
         "Artemis"
     ]
+}
+
+extension Post {
+    private enum CodingKeys: String, CodingKey {
+        case id, title, author, subreddit, subredditNamePrefixed, score, numComments
+        case createdUtc, permalink, url, selftext, isSelf, isVideo, stickied, over18
+        case postHint, media, secureMedia, preview, galleryData, mediaMetadata, crosspostParentList
+    }
+
+    init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        id = try values.decode(String.self, forKey: .id)
+        title = try values.decode(String.self, forKey: .title)
+        author = try values.decode(String.self, forKey: .author)
+        subreddit = try values.decode(String.self, forKey: .subreddit)
+        subredditNamePrefixed = try values.decode(String.self, forKey: .subredditNamePrefixed)
+        score = try values.decode(Int.self, forKey: .score)
+        numComments = try values.decode(Int.self, forKey: .numComments)
+        createdUtc = try values.decode(TimeInterval.self, forKey: .createdUtc)
+        permalink = try values.decode(String.self, forKey: .permalink)
+        url = try values.decode(String.self, forKey: .url)
+        selftext = try values.decode(String.self, forKey: .selftext)
+        isSelf = try values.decode(Bool.self, forKey: .isSelf)
+        isVideo = try values.decode(Bool.self, forKey: .isVideo)
+        stickied = try values.decode(Bool.self, forKey: .stickied)
+        over18 = try values.decode(Bool.self, forKey: .over18)
+        postHint = try values.decodeIfPresent(String.self, forKey: .postHint)
+        media = try values.decodeIfPresent(Media.self, forKey: .media)
+        secureMedia = try values.decodeIfPresent(Media.self, forKey: .secureMedia)
+        preview = try values.decodeIfPresent(Preview.self, forKey: .preview)
+        galleryData = try values.decodeIfPresent(GalleryData.self, forKey: .galleryData)
+        mediaMetadata = try values.decodeIfPresent([String: MediaMetadataItem].self, forKey: .mediaMetadata)
+        if var parents = try? values.nestedUnkeyedContainer(forKey: .crosspostParentList),
+           !parents.isAtEnd,
+           let parentDecoder = try? parents.superDecoder() {
+            crosspost = try? CrosspostContent(from: parentDecoder)
+        }
+    }
+}
+
+// Only the immediate original contributes content; nested crossposts are not decoded.
+struct CrosspostContent: Decodable {
+    let title: String?
+    let author: String?
+    let subreddit: String?
+    let permalink: String?
+    let url: String?
+    let selftext: String?
+    let isSelf: Bool?
+    let isVideo: Bool?
+    let media: Media?
+    let secureMedia: Media?
+    let preview: Preview?
+    let galleryData: GalleryData?
+    let mediaMetadata: [String: MediaMetadataItem]?
+
+    private enum CodingKeys: String, CodingKey {
+        case title, author, subreddit, permalink, url, selftext, isSelf, isVideo
+        case media, secureMedia, preview, galleryData, mediaMetadata
+    }
+
+    init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        title = try? values.decode(String.self, forKey: .title)
+        author = try? values.decode(String.self, forKey: .author)
+        subreddit = try? values.decode(String.self, forKey: .subreddit)
+        permalink = try? values.decode(String.self, forKey: .permalink)
+        url = try? values.decode(String.self, forKey: .url)
+        selftext = try? values.decode(String.self, forKey: .selftext)
+        isSelf = try? values.decode(Bool.self, forKey: .isSelf)
+        isVideo = try? values.decode(Bool.self, forKey: .isVideo)
+        media = try? values.decode(Media.self, forKey: .media)
+        secureMedia = try? values.decode(Media.self, forKey: .secureMedia)
+        preview = try? values.decode(Preview.self, forKey: .preview)
+        galleryData = try? values.decode(GalleryData.self, forKey: .galleryData)
+        mediaMetadata = try? values.decode([String: MediaMetadataItem].self, forKey: .mediaMetadata)
+    }
+
+    fileprivate var hasUsableContent: Bool {
+        for video in [media?.redditVideo, secureMedia?.redditVideo].compactMap({ $0 }) {
+            if (isVideo == true || video.isGif == true), video.playbackURL != nil { return true }
+        }
+        if let video = preview?.redditVideoPreview, video.isGif == true, video.playbackURL != nil {
+            return true
+        }
+        if let image = preview?.images?.first {
+            let sources = [image.source, image.variants?.gif?.source, image.variants?.mp4?.source]
+            if sources.compactMap({ $0 }).contains(where: { Self.isUsableURL($0.decodedUrl) }) { return true }
+        }
+        if galleryData?.items?.contains(where: { item in
+            guard let source = mediaMetadata?[item.mediaId]?.s else { return false }
+            return [source.decodedStaticUrl, source.decodedAnimatedUrl]
+                .compactMap { $0 }.contains(where: { Self.isUsableURL($0) })
+        }) == true { return true }
+        if let body = selftext?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !body.isEmpty, body != "[removed]", body != "[deleted]" { return true }
+        guard let rawURL = url?.replacingOccurrences(of: "&amp;", with: "&"),
+              Self.isUsableURL(rawURL), let candidate = URL(string: rawURL),
+              let host = candidate.host?.lowercased() else { return false }
+        if ["jpg", "jpeg", "png", "webp", "gif"].contains(candidate.pathExtension.lowercased()) { return true }
+        // A Reddit permalink without embedded content is an attribution link, not media.
+        return host != "reddit.com" && !host.hasSuffix(".reddit.com")
+            && host != "redd.it" && !host.hasSuffix(".redd.it")
+    }
+
+    private static func isUsableURL(_ rawURL: String) -> Bool {
+        guard let candidate = URL(string: rawURL), candidate.host != nil else { return false }
+        return candidate.isHTTPMediaURL
+    }
+
+    var subredditNamePrefixed: String? {
+        subreddit.map { "r/\($0)" }
+    }
+
+    var originalURL: URL? {
+        guard let permalink, permalink.hasPrefix("/"), !permalink.hasPrefix("//") else { return nil }
+        return URL(string: "https://www.reddit.com\(permalink)")
+    }
 }
 
 // MARK: - Media Types
@@ -90,6 +209,34 @@ struct Preview: Decodable {
 }
 
 struct PreviewImage: Decodable {
+    let source: ImageSource
+    var variants: PreviewVariants? = nil
+}
+
+extension PreviewImage {
+    private enum CodingKeys: String, CodingKey { case source, variants }
+
+    init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        source = try values.decode(ImageSource.self, forKey: .source)
+        variants = try? values.decode(PreviewVariants.self, forKey: .variants)
+    }
+}
+
+struct PreviewVariants: Decodable {
+    let gif: PreviewVariant?
+    let mp4: PreviewVariant?
+
+    private enum CodingKeys: String, CodingKey { case gif, mp4 }
+
+    init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        gif = try? values.decode(PreviewVariant.self, forKey: .gif)
+        mp4 = try? values.decode(PreviewVariant.self, forKey: .mp4)
+    }
+}
+
+struct PreviewVariant: Decodable {
     let source: ImageSource
 }
 
@@ -171,8 +318,49 @@ enum TimeFilter: String, CaseIterable {
 // MARK: - Computed Properties
 
 extension Post {
+    var crosspostBody: String { crosspost?.selftext ?? "" }
+    var effectiveIsVideo: Bool {
+        guard let original = contentOriginal else { return isVideo }
+        return original.isVideo ?? false
+    }
+
+    // Keep media and metadata from the same source; missing original fields stay absent.
+    private var contentOriginal: CrosspostContent? {
+        guard let crosspost, crosspost.hasUsableContent else { return nil }
+        return crosspost
+    }
+
+    private var contentURL: String {
+        guard let original = contentOriginal else { return url }
+        return original.url ?? ""
+    }
+    private var contentIsSelf: Bool {
+        guard let original = contentOriginal else { return isSelf }
+        return original.isSelf ?? false
+    }
+    private var contentPreview: Preview? {
+        guard let original = contentOriginal else { return preview }
+        return original.preview
+    }
+    private var contentMedia: Media? {
+        guard let original = contentOriginal else { return media }
+        return original.media
+    }
+    private var contentSecureMedia: Media? {
+        guard let original = contentOriginal else { return secureMedia }
+        return original.secureMedia
+    }
+    private var contentGalleryData: GalleryData? {
+        guard let original = contentOriginal else { return galleryData }
+        return original.galleryData
+    }
+    private var contentMediaMetadata: [String: MediaMetadataItem]? {
+        guard let original = contentOriginal else { return mediaMetadata }
+        return original.mediaMetadata
+    }
+
     var youtubeVideoID: String? {
-        guard let parsedURL = URL(string: url) else { return nil }
+        guard let parsedURL = URL(string: contentURL) else { return nil }
         return Self.youtubeVideoID(from: parsedURL)
     }
 
@@ -181,17 +369,22 @@ extension Post {
     }
 
     var imageURL: URL? {
-        if let source = preview?.images?.first?.source,
+        if let source = contentPreview?.images?.first?.source,
            let url = URL(string: source.decodedUrl),
            url.isHTTPMediaURL {
             return url
         }
-        if let firstItem = galleryData?.items?.first,
-           let meta = mediaMetadata?[firstItem.mediaId],
+        if let firstItem = contentGalleryData?.items?.first,
+           let meta = contentMediaMetadata?[firstItem.mediaId],
            let urlString = meta.s?.decodedUrl,
            let url = URL(string: urlString),
            url.isHTTPMediaURL {
             return url
+        }
+        if let directURL = decodedPostURL,
+           directURL.isHTTPMediaURL,
+           ["jpg", "jpeg", "png", "webp", "gif"].contains(directURL.pathExtension.lowercased()) {
+            return directURL
         }
         return nil
     }
@@ -202,14 +395,19 @@ extension Post {
            directURL.isGIFURL {
             return directURL
         }
-        if let firstItem = galleryData?.items?.first,
-           let meta = mediaMetadata?[firstItem.mediaId],
+        if let firstItem = contentGalleryData?.items?.first,
+           let meta = contentMediaMetadata?[firstItem.mediaId],
            meta.isAnimated,
            let urlString = meta.s?.decodedAnimatedUrl ?? meta.s?.decodedStaticUrl,
            let url = URL(string: urlString),
            url.isHTTPMediaURL,
            meta.s?.decodedAnimatedUrl != nil || url.isGIFURL {
             return url
+        }
+        if let source = contentPreview?.images?.first?.variants?.gif?.source,
+           let variantURL = URL(string: source.decodedUrl),
+           variantURL.isHTTPMediaURL {
+            return variantURL
         }
         guard let imageURL,
               imageURL.isHTTPMediaURL,
@@ -218,11 +416,11 @@ extension Post {
     }
 
     var imageAspectRatio: CGFloat? {
-        if let source = preview?.images?.first?.source, source.height > 0 {
+        if let source = contentPreview?.images?.first?.source, source.height > 0 {
             return CGFloat(source.width) / CGFloat(source.height)
         }
-        if let firstItem = galleryData?.items?.first,
-           let source = mediaMetadata?[firstItem.mediaId]?.s,
+        if let firstItem = contentGalleryData?.items?.first,
+           let source = contentMediaMetadata?[firstItem.mediaId]?.s,
            let width = source.x,
            let height = source.y,
            height > 0 {
@@ -284,14 +482,14 @@ extension Post {
     }
 
     var galleryCount: Int {
-        galleryData?.items?.count ?? 0
+        contentGalleryData?.items?.count ?? 0
     }
 
     var galleryItems: [GalleryMedia] {
-        guard let items = galleryData?.items else { return [] }
+        guard let items = contentGalleryData?.items else { return [] }
         var result: [GalleryMedia] = []
         for item in items {
-            guard let meta = mediaMetadata?[item.mediaId] else { continue }
+            guard let meta = contentMediaMetadata?[item.mediaId] else { continue }
             let animatedURL = meta.s?.decodedAnimatedUrl
                 .flatMap(URL.init(string:))
                 .flatMap { $0.isHTTPMediaURL ? $0 : nil }
@@ -319,8 +517,8 @@ extension Post {
     }
 
     var externalLinkURL: URL? {
-        guard !isSelf else { return nil }
-        guard let candidate = URL(string: url.replacingOccurrences(of: "&amp;", with: "&")) else { return nil }
+        guard !contentIsSelf else { return nil }
+        guard let candidate = URL(string: contentURL.replacingOccurrences(of: "&amp;", with: "&")) else { return nil }
         guard let scheme = candidate.scheme?.lowercased(), scheme == "http" || scheme == "https" else { return nil }
         guard let host = candidate.host?.lowercased() else { return nil }
         let normalizedHost = host.hasPrefix("www.") ? String(host.dropFirst(4)) : host
@@ -341,19 +539,30 @@ extension Post {
     }
 
     private var decodedPostURL: URL? {
-        URL(string: url.replacingOccurrences(of: "&amp;", with: "&"))
+        URL(string: contentURL.replacingOccurrences(of: "&amp;", with: "&"))
     }
 
     private var playbackVideo: RedditVideo? {
-        for video in [media?.redditVideo, secureMedia?.redditVideo].compactMap({ $0 }) {
-            if (isVideo || video.isGif == true), video.playbackURL != nil {
+        for video in [contentMedia?.redditVideo, contentSecureMedia?.redditVideo].compactMap({ $0 }) {
+            if (effectiveIsVideo || video.isGif == true), video.playbackURL != nil {
                 return video
             }
         }
-        if let previewVideo = preview?.redditVideoPreview,
+        if let previewVideo = contentPreview?.redditVideoPreview,
            previewVideo.isGif == true,
            previewVideo.playbackURL != nil {
             return previewVideo
+        }
+        if let source = contentPreview?.images?.first?.variants?.mp4?.source,
+           let variantURL = URL(string: source.decodedUrl),
+           variantURL.isHTTPMediaURL {
+            return RedditVideo(
+                fallbackUrl: variantURL.absoluteString,
+                hlsUrl: nil,
+                width: source.width,
+                height: source.height,
+                isGif: true
+            )
         }
         return nil
     }
