@@ -30,6 +30,8 @@ private struct LurkRootView: View {
     @State private var blockStore = BlockedSubredditStore()
     @State private var session = RedditSession()
     @State private var playbackStore = InlineGIFPlaybackStore()
+    @State private var unreadReplies = UnreadRepliesStore()
+    @Environment(\.scenePhase) private var scenePhase
     @State private var selectedTab = 0
     @State private var subredditResetKey = 0
 
@@ -42,7 +44,15 @@ private struct LurkRootView: View {
             .environment(subStore)
             .environment(blockStore)
             .environment(playbackStore)
+            .environment(unreadReplies)
             .environment(\.redditClient, client)
+            .onChange(of: account, initial: true) { _, account in
+                unreadReplies.setAccount(account)
+            }
+            .task(id: account) { await refreshUnreadReplies() }
+            .onChange(of: scenePhase) { _, phase in
+                if phase == .active { Task { await refreshUnreadReplies() } }
+            }
             .onChange(of: session.isLoggedIn) { _, loggedIn in
                 guard loggedIn else { return }
                 Task { @MainActor in
@@ -66,7 +76,20 @@ private struct LurkRootView: View {
                 .tag(2)
             SettingsView()
                 .tabItem { Label("Settings", systemImage: "gearshape") }
+                .modifier(UnreadRepliesTabBadge())
                 .tag(3)
+        }
+    }
+
+    private var account: String? { session.isLoggedIn ? session.username : nil }
+
+    private func refreshUnreadReplies() async {
+        let currentAccount = account
+        await unreadReplies.refresh(account: currentAccount) { filter, after in
+            guard let currentAccount, account == currentAccount else {
+                throw URLError(.userAuthenticationRequired)
+            }
+            return try await client.fetchInboxReplies(filter: filter, after: after)
         }
     }
 

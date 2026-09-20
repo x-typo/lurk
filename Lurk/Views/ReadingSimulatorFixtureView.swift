@@ -3,11 +3,11 @@ import SwiftUI
 
 struct ReadingSimulatorFixtureView: View {
     private enum Sample: String, Identifiable {
-        case comments, empty, crosspost
+        case comments, empty, crosspost, collapseScroll
         var id: String { rawValue }
     }
 
-    @State private var session = RedditSession()
+    @State private var session = RedditSession(restoringSession: false)
     @State private var filters = PostFilterStore()
     @State private var blocks = BlockedSubredditStore()
     @State private var subscriptions = SubredditStore()
@@ -76,6 +76,10 @@ struct ReadingSimulatorFixtureView: View {
                     }
                 }
             }
+            Button("Collapse scroll") {
+                lastBrowserURL = nil
+                selectedSample = .collapseScroll
+            }
             Toggle("Capture browser links", isOn: $captureLinks)
                 .padding(.horizontal)
             Text("Feed requests: \(requests)")
@@ -106,6 +110,7 @@ struct ReadingSimulatorFixtureView: View {
         }
         .sheet(item: $selectedSample) { sample in
             PostDetailView(post: sample == .crosspost ? Self.crosspost : Self.posts[0], commentsFetch: {
+                if sample == .collapseScroll { return Self.collapseScrollComments }
                 if sample != .comments { return [] }
                 attempts += 1
                 try await Task.sleep(for: .milliseconds(300))
@@ -189,6 +194,27 @@ struct ReadingSimulatorFixtureView: View {
             )]
         }
         return replies
+    }
+
+    private static let collapseScrollComments: [Comment] = (1...30).map { index in
+        let timestamp: TimeInterval = 1_750_000_000
+        let replies: [Comment] = index == 1 ? [
+            Comment(
+                id: "collapse_child", author: "scroll_child",
+                body: "Collapse this nested reply, then collapse and expand its parent. This reply should stay collapsed.",
+                score: 3, createdUtc: timestamp, depth: 1,
+                replies: [Comment(
+                    id: "collapse_grandchild", author: "scroll_grandchild",
+                    body: "This grandchild is hidden whenever its parent is collapsed.",
+                    score: 1, createdUtc: timestamp, depth: 2, replies: [], isSubmitter: false
+                )], isSubmitter: false
+            )
+        ] : []
+        return Comment(
+            id: "collapse_\(index)", author: "scroll_\(index)",
+            body: "Comment \(index). Collapse the first five comments, scroll far down to later numbered comments, then return. Each collapsed comment should remain closed for this visit. Closing and reopening the post starts a fresh visit.",
+            score: index, createdUtc: timestamp, depth: 0, replies: replies, isSubmitter: false
+        )
     }
 
     private static let crosspost: Post = {

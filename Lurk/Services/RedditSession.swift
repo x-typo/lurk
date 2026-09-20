@@ -11,8 +11,8 @@ final class RedditSession {
 
     private let loginCheckURL = URL(string: "https://www.reddit.com/api/me.json")!
 
-    init() {
-        restoreSession()
+    init(restoringSession: Bool = true) {
+        if restoringSession { restoreSession() }
     }
 
     func syncCookies(from webView: WKWebView) async {
