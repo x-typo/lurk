@@ -1,6 +1,8 @@
 import SwiftUI
 
 struct SettingsView: View {
+    var inboxContent: (() -> InboxContentView)? = nil
+    @Environment(UnreadRepliesStore.self) private var unreadReplies
     @Environment(RedditSession.self) private var session
     @Environment(BlockedSubredditStore.self) private var blockStore
 
@@ -249,7 +251,7 @@ struct SettingsView: View {
                     }
 
                     Button {
-                        if session.isLoggedIn {
+                        if session.isLoggedIn || inboxContent != nil {
                             showInbox = true
                         } else {
                             showLogin = true
@@ -262,6 +264,12 @@ struct SettingsView: View {
                             Text("Inbox")
                                 .font(.body.weight(.medium))
                                 .foregroundStyle(Theme.text)
+                            if unreadReplies.hasUnread {
+                                Circle()
+                                    .fill(Theme.primary)
+                                    .frame(width: 7, height: 7)
+                                    .accessibilityLabel("Unread comment replies")
+                            }
                             Spacer()
                             Image(systemName: "chevron.right")
                                 .font(.caption.weight(.semibold))
@@ -292,7 +300,11 @@ struct SettingsView: View {
             UserCommentsView()
         }
         .fullScreenCover(isPresented: $showInbox) {
-            InboxView()
+            if let inboxContent {
+                inboxContent()
+            } else {
+                InboxView()
+            }
         }
         .fullScreenCover(isPresented: $showBlocked) {
             BlockedSubredditsView()

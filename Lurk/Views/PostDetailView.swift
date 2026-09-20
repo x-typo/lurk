@@ -22,6 +22,8 @@ struct PostDetailView: View {
     @State private var ordinaryVideoIsVisible = false
     @State private var detailMediaSuspended = false
     @State private var commentStore = CommentLoadStore()
+    // Keep collapse state for this post visit when lazy rows or their ancestors disappear.
+    @State private var collapsedCommentIDs: Set<String> = []
     @State private var commentLoadAttempt = 0
     @State private var showCommentSheet = false
     @State private var showSubreddit = false
@@ -383,6 +385,7 @@ struct PostDetailView: View {
                             CommentRowView(
                                 comment: comment,
                                 postPermalink: post.permalink,
+                                collapsedCommentIDs: $collapsedCommentIDs,
                                 onContinueThread: { url in
                                     if let continueThreadAction {
                                         continueThreadAction(url)
@@ -684,13 +687,15 @@ private struct PostImagePreviewView: View {
 struct CommentRowView: View {
     let comment: Comment
     let postPermalink: String
+    @Binding var collapsedCommentIDs: Set<String>
     let onContinueThread: (URL) -> Void
     var onPresentReply: () -> Void = {}
     var onDismissReply: () -> Void = {}
     @Environment(RedditSession.self) private var session
-    @State private var collapsed = false
     @State private var selecting = false
     @State private var showReplySheet = false
+
+    private var collapsed: Bool { collapsedCommentIDs.contains(comment.id) }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
@@ -754,6 +759,7 @@ struct CommentRowView: View {
                         CommentRowView(
                             comment: reply,
                             postPermalink: postPermalink,
+                            collapsedCommentIDs: $collapsedCommentIDs,
                             onContinueThread: onContinueThread,
                             onPresentReply: onPresentReply,
                             onDismissReply: onDismissReply
@@ -795,7 +801,13 @@ struct CommentRowView: View {
         if selecting {
             withAnimation(.easeInOut(duration: 0.2)) { selecting = false }
         } else {
-            withAnimation(.easeInOut(duration: 0.2)) { collapsed.toggle() }
+            withAnimation(.easeInOut(duration: 0.2)) {
+                if collapsed {
+                    collapsedCommentIDs.remove(comment.id)
+                } else {
+                    collapsedCommentIDs.insert(comment.id)
+                }
+            }
         }
     }
 

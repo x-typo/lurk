@@ -28,6 +28,7 @@ struct InboxContentView: View {
     let fetchPage: InboxStore.FetchPage
     let markRead: @MainActor (InboxReply) async throws -> Void
 
+    @Environment(UnreadRepliesStore.self) private var unreadReplies
     @Environment(\.dismiss) private var dismiss
     @Environment(InlineGIFPlaybackStore.self) private var playbackStore
     @State private var store = InboxStore()
@@ -92,7 +93,20 @@ struct InboxContentView: View {
                                 replyToComment: { presentReply(to: reply) },
                                 markRead: {
                                     Task {
-                                        await store.markRead(reply) { try await markRead(reply) }
+                                        let accountGeneration = unreadReplies.accountGeneration
+                                        var didRead = false
+                                        await store.markRead(reply) {
+                                            try await markRead(reply)
+                                            didRead = true
+                                            unreadReplies.didMarkRead(
+                                                reply.id, account: account,
+                                                accountGeneration: accountGeneration
+                                            )
+                                        }
+                                        if didRead, unreadReplies.account == account,
+                                           unreadReplies.accountGeneration == accountGeneration {
+                                            await unreadReplies.refresh(account: account, fetchPage: fetchPage)
+                                        }
                                     }
                                 }
                             )
@@ -105,7 +119,7 @@ struct InboxContentView: View {
                         }
                         if store.after != nil {
                             Button {
-                                Task { await store.loadMore(fetchPage: fetchPage) }
+                                Task { await loadMore() }
                             } label: {
                                 HStack {
                                     if store.isLoadingMore { ProgressView().tint(Theme.primary) }
@@ -184,7 +198,15 @@ struct InboxContentView: View {
     }
 
     private func reload() async {
+        let context = unreadReplies.snapshotContext
         await store.load(filter: filter, account: account, fetchPage: fetchPage)
+        unreadReplies.reconcile(store, account: account, context: context)
+    }
+
+    private func loadMore() async {
+        let context = unreadReplies.snapshotContext
+        await store.loadMore(fetchPage: fetchPage)
+        unreadReplies.reconcile(store, account: account, context: context)
     }
 
     private func presentSubreddit(_ reply: InboxReply) {

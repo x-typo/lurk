@@ -6,25 +6,23 @@ struct InboxSimulatorFixtureView: View {
     @State private var resetID = 0
     @State private var largeText = false
     @State private var failNextRead = false
-    @State private var session = RedditSession()
+    @State private var session = RedditSession(restoringSession: false)
     @State private var filters = PostFilterStore()
     @State private var blocks = BlockedSubredditStore()
     @State private var subscriptions = SubredditStore()
     @State private var playback = InlineGIFPlaybackStore()
     @State private var client = makeOfflineClient()
+    @State private var unreadReplies = UnreadRepliesStore()
 
     var body: some View {
-        InboxContentView(account: "sample_reader", fetchPage: { filter, _ in
-            try await Task.sleep(for: .milliseconds(250))
-            return try listing(filter: filter)
-        }, markRead: { reply in
-            try await Task.sleep(for: .milliseconds(300))
-            if failNextRead {
-                failNextRead = false
-                throw URLError(.notConnectedToInternet)
-            }
-            readIDs.insert(reply.id)
-        })
+        TabView {
+            SettingsView(inboxContent: { sampleInbox })
+                .tabItem { Label("Settings", systemImage: "gearshape") }
+                .modifier(UnreadRepliesTabBadge())
+        }
+        .task(id: resetID) {
+            await unreadReplies.refresh(account: "sample_reader", fetchPage: samplePage)
+        }
         .id(resetID)
         .dynamicTypeSize(largeText ? .accessibility1 : .large)
         .safeAreaInset(edge: .bottom) {
@@ -49,6 +47,7 @@ struct InboxSimulatorFixtureView: View {
             .background(Theme.background)
         }
         .environment(session)
+        .environment(unreadReplies)
         .environment(filters)
         .environment(blocks)
         .environment(subscriptions)
@@ -57,6 +56,22 @@ struct InboxSimulatorFixtureView: View {
         .environment(\.openURL, OpenURLAction { _ in .handled })
         .tint(Theme.primary)
         .preferredColorScheme(.dark)
+    }
+
+    private var sampleInbox: InboxContentView {
+        InboxContentView(account: "sample_reader", fetchPage: samplePage, markRead: { reply in
+            try await Task.sleep(for: .milliseconds(300))
+            if failNextRead {
+                failNextRead = false
+                throw URLError(.notConnectedToInternet)
+            }
+            readIDs.insert(reply.id)
+        })
+    }
+
+    private func samplePage(filter: InboxFilter, after: String?) async throws -> InboxListing {
+        try await Task.sleep(for: .milliseconds(250))
+        return try listing(filter: filter)
     }
 
     private func listing(filter: InboxFilter) throws -> InboxListing {
