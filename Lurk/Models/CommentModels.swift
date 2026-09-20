@@ -63,7 +63,9 @@ struct Comment: Identifiable {
         "post-explainer",
         "ClaudeAI-mod-bot",
         "WithoutReason1729",
-        "dexterthebot"
+        "dexterthebot",
+        "PCMRBot",
+        "BeAmazed-ModBot"
     ]
 }
 
