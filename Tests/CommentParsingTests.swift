@@ -82,10 +82,10 @@ struct CommentParsingTests {
         }
     }
 
-    @Test("Filtered bots and their replies are dropped")
-    func filteredBots() throws {
+    @Test("Parsing keeps every author, so muting can change without reloading")
+    func parsingKeepsAllAuthors() throws {
         let nodes = try parse([node("bot", author: "AutoModerator", children: [node("reply")]), node("human")])
-        #expect(CommentNode.rowIDs(in: nodes) == ["human"])
+        #expect(CommentNode.rowIDs(in: nodes) == ["bot", "reply", "human"])
     }
 
     @Test("The viewer's vote seeds the displayed score without double counting")
@@ -111,7 +111,7 @@ struct CommentParsingTests {
             thing("a", parent: "t1_root"), thing("b", parent: "t1_a"),
             ["kind": "more", "data": ["count": 4, "parent_id": "t1_b", "children": ["d"]]],
             ["kind": "t1", "data": ["id": "orphan", "author": "reader", "body": "body"]],
-            thing("bot", parent: "t1_root", author: "AutoModerator"),
+            ["kind": "t1", "data": ["id": "nobody", "parent_id": "t1_root", "body": "no author"]],
         ]))
         #expect(loaded.map(\.parentID) == ["t1_root", "t1_a", "t1_b"])
         guard case .more(let placeholder) = loaded[2].node else {

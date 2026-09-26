@@ -65,10 +65,6 @@ struct Post: Identifiable, Decodable {
     let galleryData: GalleryData?
     let mediaMetadata: [String: MediaMetadataItem]?
     var crosspost: CrosspostContent? = nil
-
-    static let filteredKeywords: Set<String> = [
-        "Artemis"
-    ]
 }
 
 extension Post {
@@ -532,10 +528,6 @@ extension Post {
     var externalLinkDomain: String? {
         guard let host = externalLinkURL?.host?.lowercased() else { return nil }
         return host.hasPrefix("www.") ? String(host.dropFirst(4)) : host
-    }
-
-    var matchesFilteredKeyword: Bool {
-        Post.filteredKeywords.contains { title.range(of: $0, options: .caseInsensitive) != nil }
     }
 
     private var decodedPostURL: URL? {

@@ -61,6 +61,7 @@ struct CommentThreadRowView: View {
     let onReply: () -> Void
     let onSelectText: () -> Void
     let onShare: (() -> Void)?
+    let onMute: (() -> Void)?
 
     @State private var offset: CGFloat = 0
     @State private var swipe = CommentSwipeState()
@@ -228,6 +229,11 @@ struct CommentThreadRowView: View {
         if let onShare {
             Button(action: onShare) {
                 Label("Share", systemImage: "square.and.arrow.up")
+            }
+        }
+        if let onMute {
+            Button(role: .destructive, action: onMute) {
+                Label("Mute u/\(comment.author)", systemImage: "speaker.slash")
             }
         }
     }

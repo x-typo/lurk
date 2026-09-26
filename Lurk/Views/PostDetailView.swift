@@ -13,6 +13,7 @@ struct PostDetailView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.openURL) private var openURL
     @Environment(InlineGIFPlaybackStore.self) private var playbackStore
+    @Environment(MuteStore.self) private var muteStore
     @State private var player: AVPlayer?
     @State private var playerPostID: String = ""
     @State private var playerObservers = PlayerObservers()
@@ -395,7 +396,11 @@ struct PostDetailView: View {
     }
 
     private var commentThread: some View {
-        let rows = CommentNode.rows(from: commentStore.nodes, collapsed: collapsedCommentIDs)
+        let rows = CommentNode.rows(
+            from: commentStore.nodes,
+            collapsed: collapsedCommentIDs,
+            mutedUsers: muteStore.mutedUserKeys
+        )
         let firstRowID = rows.first?.id
         return LazyVStack(alignment: .leading, spacing: 0) {
             ForEach(rows) { row in
@@ -414,7 +419,8 @@ struct PostDetailView: View {
                         onVote: { submitCommentVote($0, for: comment) },
                         onReply: { presentReply(to: comment) },
                         onSelectText: { selectingCommentID = comment.id },
-                        onShare: shareURL.map { url in { presentShare(of: comment, url: url) } }
+                        onShare: shareURL.map { url in { presentShare(of: comment, url: url) } },
+                        onMute: canMute(comment) ? { muteStore.muteUser(comment.author) } : nil
                     )
                 case .more(let more, let depth):
                     CommentMoreRowView(
@@ -494,6 +500,12 @@ struct PostDetailView: View {
                 commentActionError = error.localizedDescription
             }
         }
+    }
+
+    private func canMute(_ comment: Comment) -> Bool {
+        comment.author != "[deleted]"
+            && comment.author.lowercased() != session.username?.lowercased()
+            && MuteStore.normalizedUser(comment.author) != nil
     }
 
     private func presentShare(of comment: Comment, url: URL) {
