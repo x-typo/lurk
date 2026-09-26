@@ -21,6 +21,26 @@ struct RedditLoginView: View {
     }
 }
 
+// Presents the sign-in sheet from LurkRootView, above the feeds. Signing in bumps the session's
+// credentials version, which rebuilds the feeds before the login check finishes, so a sheet a feed
+// presented would close even when the sign-in then failed.
+struct PresentSignInAction {
+    let action: () -> Void
+
+    func callAsFunction() { action() }
+}
+
+private struct PresentSignInKey: EnvironmentKey {
+    static let defaultValue = PresentSignInAction {}
+}
+
+extension EnvironmentValues {
+    var presentSignIn: PresentSignInAction {
+        get { self[PresentSignInKey.self] }
+        set { self[PresentSignInKey.self] = newValue }
+    }
+}
+
 struct RedditWebView: UIViewRepresentable {
     let session: RedditSession
     let onLogin: () -> Void
