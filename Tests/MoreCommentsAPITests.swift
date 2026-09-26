@@ -14,8 +14,9 @@ struct MoreCommentsAPITests {
         ]]]]))
         let client = RedditClient(session: session)
 
-        let more = CommentMore(parentID: "t1_a", depth: 2, count: 2, childIDs: ["x", "y"])
-        let rows = CommentNode.rows(from: try await client.fetchMoreComments(postID: "post1", more: more), collapsed: [])
+        let more = CommentMore(parentID: "t1_a", count: 2, childIDs: ["x", "y"])
+        let loaded = try await client.fetchMoreComments(postID: "post1", more: more)
+        let rows = CommentNode.rows(from: CommentNode.merging(loaded, replacing: more, in: [comment("a", [.more(more)])]), collapsed: [])
 
         let url = try #require(MoreCommentsURLProtocol.requests.first?.url)
         #expect(MoreCommentsURLProtocol.requests.count == 1)
@@ -25,8 +26,8 @@ struct MoreCommentsAPITests {
         #expect(query(url, "link_id") == "t3_post1")
         #expect(query(url, "children") == "x,y")
         #expect(query(url, "raw_json") == "1")
-        #expect(rows.map(\.id) == ["x", "y"])
-        #expect(rows.map { depth($0) } == [2, 3])
+        #expect(rows.map(\.id) == ["a", "x", "y"])
+        #expect(rows.map { depth($0) } == [0, 1, 2])
     }
 
     @Test("Large placeholders load 100 replies and keep the rest for later")
@@ -37,18 +38,48 @@ struct MoreCommentsAPITests {
         let client = RedditClient(session: session)
         let childIDs = (0..<130).map { "c\($0)" }
 
-        let nodes = try await client.fetchMoreComments(
+        let loaded = try await client.fetchMoreComments(
             postID: "post1",
-            more: CommentMore(parentID: "t3_post1", depth: 0, count: 150, childIDs: childIDs)
+            more: CommentMore(parentID: "t3_post1", count: 150, childIDs: childIDs)
         )
 
         let url = try #require(MoreCommentsURLProtocol.requests.first?.url)
         #expect(query(url, "children")?.split(separator: ",").map(String.init) == Array(childIDs.prefix(100)))
-        guard case .more(let remaining)? = nodes.last else {
+        guard let entry = loaded.last, case .more(let remaining) = entry.node else {
             Issue.record("Expected a placeholder for the remaining replies")
             return
         }
-        #expect(remaining == CommentMore(parentID: "t3_post1", depth: 0, count: 50, childIDs: Array(childIDs.dropFirst(100))))
+        #expect(entry.parentID == "t3_post1")
+        #expect(remaining == CommentMore(parentID: "t3_post1", count: 50, childIDs: Array(childIDs.dropFirst(100))))
+    }
+
+    @Test("A child in the second batch stays under its parent from the first batch")
+    func batchedParentAndChild() async throws {
+        let session = makeSession()
+        defer { session.invalidateAndCancel() }
+        let client = RedditClient(session: session)
+        let childIDs = ["p"] + (0..<99).map { "f\($0)" } + ["c"]
+        let first = CommentMore(parentID: "t1_root", count: childIDs.count, childIDs: childIDs)
+        var nodes = [comment("root", [.more(first)])]
+
+        MoreCommentsURLProtocol.stub(data: try json(["json": ["errors": [], "data": ["things": [
+            thing("p", parent: "t1_root"),
+        ]]]]))
+        nodes = CommentNode.merging(try await client.fetchMoreComments(postID: "post1", more: first), replacing: first, in: nodes)
+        let second = try #require(CommentNode.rows(from: nodes, collapsed: []).compactMap { row -> CommentMore? in
+            guard case .more(let more, _) = row else { return nil }
+            return more
+        }.last)
+        #expect(second.childIDs == ["c"])
+
+        MoreCommentsURLProtocol.stub(data: try json(["json": ["errors": [], "data": ["things": [
+            thing("c", parent: "t1_p"),
+        ]]]]))
+        nodes = CommentNode.merging(try await client.fetchMoreComments(postID: "post1", more: second), replacing: second, in: nodes)
+
+        let rows = CommentNode.rows(from: nodes, collapsed: [])
+        #expect(rows.map(\.id) == ["root", "p", "c"])
+        #expect(rows.map { depth($0) } == [0, 1, 2])
     }
 
     @Test("Reddit errors in the morechildren envelope surface as failures")
@@ -63,7 +94,7 @@ struct MoreCommentsAPITests {
         await #expect(throws: RedditClientError.self) {
             try await client.fetchMoreComments(
                 postID: "post1",
-                more: CommentMore(parentID: "t1_a", depth: 1, count: 1, childIDs: ["x"])
+                more: CommentMore(parentID: "t1_a", count: 1, childIDs: ["x"])
             )
         }
     }
@@ -87,18 +118,17 @@ struct MoreCommentsAPITests {
         ]))
         let client = RedditClient(session: session)
 
-        let nodes = try await client.fetchMoreComments(
-            postID: "post1",
-            more: CommentMore(parentID: "t1_a", depth: 10, count: 0, childIDs: [])
-        )
+        let more = CommentMore(parentID: "t1_a", count: 0, childIDs: [])
+        let loaded = try await client.fetchMoreComments(postID: "post1", more: more)
 
         let url = try #require(MoreCommentsURLProtocol.requests.first?.url)
         #expect(url.path == "/comments/post1.json")
         #expect(query(url, "comment") == "a")
         #expect(query(url, "raw_json") == "1")
-        let rows = CommentNode.rows(from: nodes, collapsed: [])
-        #expect(rows.map(\.id) == ["x", "y"])
-        #expect(rows.map { depth($0) } == [10, 11])
+        #expect(loaded.map(\.parentID) == ["t1_a", "t1_x"])
+        let rows = CommentNode.rows(from: CommentNode.merging(loaded, replacing: more, in: [comment("a", [.more(more)])]), collapsed: [])
+        #expect(rows.map(\.id) == ["a", "x", "y"])
+        #expect(rows.map { depth($0) } == [0, 1, 2])
     }
 
     @Test("Invalid post or comment IDs never reach the network")
@@ -107,13 +137,13 @@ struct MoreCommentsAPITests {
         defer { session.invalidateAndCancel() }
         MoreCommentsURLProtocol.stub(data: Data())
         let client = RedditClient(session: session)
-        let valid = CommentMore(parentID: "t1_a", depth: 1, count: 1, childIDs: ["x"])
+        let valid = CommentMore(parentID: "t1_a", count: 1, childIDs: ["x"])
 
         for (postID, more) in [
             ("../evil", valid),
             ("POST1", valid),
-            ("post1", CommentMore(parentID: "t1_../x", depth: 1, count: 0, childIDs: [])),
-            ("post1", CommentMore(parentID: "t3_post1", depth: 0, count: 0, childIDs: [])),
+            ("post1", CommentMore(parentID: "t1_../x", count: 0, childIDs: [])),
+            ("post1", CommentMore(parentID: "t3_post1", count: 0, childIDs: [])),
         ] {
             await #expect(throws: URLError.self) {
                 try await client.fetchMoreComments(postID: postID, more: more)
@@ -144,9 +174,14 @@ struct MoreCommentsAPITests {
 
     private func depth(_ row: CommentRow) -> Int {
         switch row {
-        case .comment(let comment, _, _): comment.depth
-        case .more(let more): more.depth
+        case .comment(_, let depth, _, _): depth
+        case .more(_, let depth): depth
         }
+    }
+
+    private func comment(_ id: String, _ replies: [CommentNode] = []) -> CommentNode {
+        .comment(Lurk.Comment(id: id, author: "reader", body: "body", score: 1, createdUtc: 0,
+                              isSubmitter: false), replies: replies)
     }
 }
 

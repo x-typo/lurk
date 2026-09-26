@@ -50,16 +50,17 @@ struct CommentSwipeState: Equatable {
 
 struct CommentThreadRowView: View {
     let comment: Comment
+    let depth: Int
     let isCollapsed: Bool
     let hiddenReplyCount: Int
     let vote: Int
     let isSelecting: Bool
     let showsSeparator: Bool
-    let shareURL: URL?
     let onToggleCollapse: () -> Void
     let onVote: (Int) -> Void
     let onReply: () -> Void
     let onSelectText: () -> Void
+    let onShare: (() -> Void)?
 
     @State private var offset: CGFloat = 0
     @State private var swipe = CommentSwipeState()
@@ -115,11 +116,11 @@ struct CommentThreadRowView: View {
             }
         }
         .padding(.vertical, 6)
-        .padding(.leading, CommentRails.indent(for: comment.depth))
+        .padding(.leading, CommentRails.indent(for: depth))
         .padding(.trailing, 4)
         .frame(maxWidth: .infinity, alignment: .leading)
         .overlay(alignment: .leading) {
-            CommentRails(depth: comment.depth)
+            CommentRails(depth: depth)
         }
     }
 
@@ -224,8 +225,8 @@ struct CommentThreadRowView: View {
         Button(action: onSelectText) {
             Label("Select Text", systemImage: "text.cursor")
         }
-        if let shareURL {
-            ShareLink(item: shareURL) {
+        if let onShare {
+            Button(action: onShare) {
                 Label("Share", systemImage: "square.and.arrow.up")
             }
         }
@@ -252,6 +253,7 @@ struct CommentThreadRowView: View {
 
 struct CommentMoreRowView: View {
     let more: CommentMore
+    let depth: Int
     let isLoading: Bool
     let isWaiting: Bool
     let error: String?
@@ -289,9 +291,9 @@ struct CommentMoreRowView: View {
         // The store ignores overlapping loads; this only avoids dead taps and the dimmed disabled style.
         .allowsHitTesting(!isLoading && !isWaiting)
         .opacity(isWaiting ? 0.5 : 1)
-        .padding(.leading, CommentRails.indent(for: more.depth))
+        .padding(.leading, CommentRails.indent(for: depth))
         .overlay(alignment: .leading) {
-            CommentRails(depth: more.depth)
+            CommentRails(depth: depth)
         }
     }
 
@@ -299,8 +301,8 @@ struct CommentMoreRowView: View {
         if isLoading { return "Loading replies\u{2026}" }
         if error != nil { return "Couldn't load replies. Tap to retry." }
         if more.continuesThread { return "Continue thread" }
-        let noun = more.depth == 0 ? "comment" : "reply"
-        let plural = more.depth == 0 ? "comments" : "replies"
+        let noun = more.isTopLevel ? "comment" : "reply"
+        let plural = more.isTopLevel ? "comments" : "replies"
         return "Load \(Formatters.score(more.count)) more \(more.count == 1 ? noun : plural)"
     }
 }

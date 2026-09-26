@@ -11,13 +11,14 @@ final class CommentLoadStore {
     }
 
     typealias Fetch = @MainActor () async throws -> [CommentNode]
-    typealias FetchMore = @MainActor (CommentMore) async throws -> [CommentNode]
+    typealias FetchMore = @MainActor (CommentMore) async throws -> [LoadedCommentNode]
 
     private(set) var state: State = .idle
     private(set) var nodes: [CommentNode] = []
     private(set) var loadingMoreID: String?
     private(set) var moreErrors: [String: String] = [:]
     private var generation = 0
+    private var loadMoreTask: Task<[LoadedCommentNode], Error>?
 
     func load(fetch: Fetch) async {
         guard state != .loading, state != .loaded, !Task.isCancelled else { return }
@@ -42,27 +43,37 @@ final class CommentLoadStore {
     }
 
     // Reddit allows one morechildren request at a time, so overlapping requests are ignored.
-    func loadMore(_ more: CommentMore, fetch: FetchMore) async {
+    // The store owns the request so `cancel()` can stop it when the view goes away.
+    func loadMore(_ more: CommentMore, fetch: @escaping FetchMore) async {
         guard state == .loaded, loadingMoreID == nil else { return }
-        let requestGeneration = generation
+        let task = Task { try await fetch(more) }
+        loadMoreTask = task
         loadingMoreID = more.id
         moreErrors[more.id] = nil
-        defer {
-            if loadingMoreID == more.id { loadingMoreID = nil }
-        }
 
-        do {
-            let loaded = try await fetch(more)
-            guard generation == requestGeneration else { return }
-            let fresh = CommentNode.removingComments(CommentNode.commentIDs(in: nodes), from: loaded)
-            nodes = CommentNode.replacing(moreID: more.id, with: fresh, in: nodes)
-        } catch {
-            guard generation == requestGeneration, !Self.isCancellation(error) else { return }
+        let result = await withTaskCancellationHandler {
+            await task.result
+        } onCancel: {
+            task.cancel()
+        }
+        guard loadMoreTask == task else { return }
+        loadMoreTask = nil
+        loadingMoreID = nil
+
+        switch result {
+        case .success(let loaded):
+            guard !task.isCancelled else { return }
+            nodes = CommentNode.merging(loaded, replacing: more, in: nodes)
+        case .failure(let error):
+            guard !task.isCancelled, !Self.isCancellation(error) else { return }
             moreErrors[more.id] = Self.failureMessage(for: error)
         }
     }
 
     func cancel() {
+        loadMoreTask?.cancel()
+        loadMoreTask = nil
+        loadingMoreID = nil
         guard state == .loading else { return }
         // A disappearing view can reappear before a cancelled fetch finishes.
         generation += 1

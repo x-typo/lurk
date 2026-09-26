@@ -65,7 +65,6 @@ struct Comment: Identifiable {
     let body: String
     let score: Int
     let createdUtc: TimeInterval
-    let depth: Int
     let isSubmitter: Bool
     var likes: Bool? = nil
 
@@ -103,27 +102,34 @@ struct Comment: Identifiable {
 // `childIDs` is empty, a thread that continues below `parentID`.
 nonisolated struct CommentMore: Identifiable, Equatable {
     let parentID: String
-    let depth: Int
     let count: Int
     let childIDs: [String]
 
     var id: String { "more:\(parentID):\(childIDs.first ?? "continue")" }
     var continuesThread: Bool { childIDs.isEmpty }
+    var isTopLevel: Bool { parentID.hasPrefix("t3_") }
 }
 
+// Depth is never stored: it comes from tree position, so merged and re-rooted replies cannot misplace rows.
 nonisolated enum CommentNode {
     case comment(Comment, replies: [CommentNode])
     case more(CommentMore)
 }
 
+// A loaded comment (without replies) or placeholder, and the fullname of the parent it belongs under.
+nonisolated struct LoadedCommentNode {
+    let parentID: String
+    let node: CommentNode
+}
+
 enum CommentRow: Identifiable {
-    case comment(Comment, isCollapsed: Bool, hiddenReplyCount: Int)
-    case more(CommentMore)
+    case comment(Comment, depth: Int, isCollapsed: Bool, hiddenReplyCount: Int)
+    case more(CommentMore, depth: Int)
 
     var id: String {
         switch self {
-        case .comment(let comment, _, _): comment.id
-        case .more(let more): more.id
+        case .comment(let comment, _, _, _): comment.id
+        case .more(let more, _): more.id
         }
     }
 }
@@ -132,35 +138,33 @@ enum CommentRow: Identifiable {
 
 extension CommentNode {
     nonisolated static func parse(from listing: CommentListing) -> [CommentNode] {
-        parse(listing.data.children, parentID: nil, depth: 0)
+        parse(listing.data.children, parentID: nil)
     }
 
-    // Depth comes from tree position, so server depth values and re-rooted
-    // continuation responses cannot misplace rows.
-    nonisolated static func parse(_ children: [CommentWrapper], parentID: String?, depth: Int) -> [CommentNode] {
-        children.compactMap { node(from: $0, parentID: parentID, depth: depth) }
+    nonisolated static func parse(_ children: [CommentWrapper], parentID: String?) -> [CommentNode] {
+        children.compactMap { node(from: $0, parentID: parentID) }
     }
 
-    nonisolated static func tree(fromFlat things: [CommentWrapper], parentID: String, depth: Int) -> [CommentNode] {
-        var childrenByParent: [String: [CommentWrapper]] = [:]
-        for thing in things {
-            guard let parent = thing.data.parentId else { continue }
-            childrenByParent[parent, default: []].append(thing)
+    // `api/morechildren` returns comments flat, linked to their parents by `parent_id`.
+    nonisolated static func loaded(fromFlat things: [CommentWrapper]) -> [LoadedCommentNode] {
+        things.flatMap { thing -> [LoadedCommentNode] in
+            guard let parentID = thing.data.parentId,
+                  let node = node(from: thing, parentID: parentID) else { return [] }
+            return flatten([node], under: parentID)
         }
+    }
 
-        var visitedParents = Set<String>()
-        func build(under parent: String, depth: Int) -> [CommentNode] {
-            guard visitedParents.insert(parent).inserted else { return [] }
-            return (childrenByParent[parent] ?? []).compactMap { thing in
-                guard let node = node(from: thing, parentID: parent, depth: depth) else { return nil }
-                guard case .comment(let comment, let nested) = node else { return node }
-                return .comment(comment, replies: nested + build(under: "t1_\(comment.id)", depth: depth + 1))
+    nonisolated static func flatten(_ nodes: [CommentNode], under parentID: String) -> [LoadedCommentNode] {
+        nodes.flatMap { node -> [LoadedCommentNode] in
+            guard case .comment(let comment, let replies) = node else {
+                return [LoadedCommentNode(parentID: parentID, node: node)]
             }
+            return [LoadedCommentNode(parentID: parentID, node: .comment(comment, replies: []))]
+                + flatten(replies, under: "t1_\(comment.id)")
         }
-        return build(under: parentID, depth: depth)
     }
 
-    private nonisolated static func node(from wrapper: CommentWrapper, parentID: String?, depth: Int) -> CommentNode? {
+    private nonisolated static func node(from wrapper: CommentWrapper, parentID: String?) -> CommentNode? {
         let data = wrapper.data
         switch wrapper.kind {
         case "t1":
@@ -173,23 +177,21 @@ extension CommentNode {
                 body: body,
                 score: data.score ?? 0,
                 createdUtc: data.createdUtc ?? 0,
-                depth: depth,
                 isSubmitter: data.isSubmitter ?? false,
                 likes: data.likes
             )
             var replies: [CommentNode] = []
             if case .listing(let listing) = data.replies {
-                replies = parse(listing.data.children, parentID: "t1_\(id)", depth: depth + 1)
+                replies = parse(listing.data.children, parentID: "t1_\(id)")
             }
             return .comment(comment, replies: replies)
         case "more":
-            guard let parent = data.parentId ?? parentID else { return nil }
+            guard let parent = parentID ?? data.parentId else { return nil }
             let childIDs = (data.children ?? []).filter(Comment.isRedditID)
             // Only a comment can continue deeper; an empty post-level placeholder has nothing to load.
             guard !childIDs.isEmpty || parent.hasPrefix("t1_") else { return nil }
             return .more(CommentMore(
                 parentID: parent,
-                depth: depth,
                 count: max(data.count ?? 0, childIDs.count),
                 childIDs: childIDs
             ))
@@ -204,23 +206,24 @@ extension CommentNode {
 extension CommentNode {
     static func rows(from nodes: [CommentNode], collapsed: Set<String>) -> [CommentRow] {
         var rows: [CommentRow] = []
-        func append(_ nodes: [CommentNode]) {
+        func append(_ nodes: [CommentNode], depth: Int) {
             for node in nodes {
                 switch node {
                 case .comment(let comment, let replies):
                     let isCollapsed = collapsed.contains(comment.id)
                     rows.append(.comment(
                         comment,
+                        depth: depth,
                         isCollapsed: isCollapsed,
                         hiddenReplyCount: isCollapsed ? replyCount(in: replies) : 0
                     ))
-                    if !isCollapsed { append(replies) }
+                    if !isCollapsed { append(replies, depth: depth + 1) }
                 case .more(let more):
-                    rows.append(.more(more))
+                    rows.append(.more(more, depth: depth))
                 }
             }
         }
-        append(nodes)
+        append(nodes, depth: 0)
         return rows
     }
 
@@ -233,35 +236,60 @@ extension CommentNode {
         }
     }
 
-    static func replacing(moreID: String, with replacement: [CommentNode], in nodes: [CommentNode]) -> [CommentNode] {
-        nodes.flatMap { node -> [CommentNode] in
-            switch node {
-            case .more(let more):
-                more.id == moreID ? replacement : [node]
-            case .comment(let comment, let replies):
-                [.comment(comment, replies: replacing(moreID: moreID, with: replacement, in: replies))]
+    // Replaces `more` with the loaded nodes. A loaded node whose parent is anywhere in the
+    // tree attaches under that parent, so replies split across requests stay together.
+    // Comments and placeholders already in the tree are skipped, keeping their new replies.
+    static func merging(_ loaded: [LoadedCommentNode], replacing more: CommentMore, in nodes: [CommentNode]) -> [CommentNode] {
+        var seen = rowIDs(in: nodes)
+        var childrenByParent: [String: [CommentNode]] = [:]
+        for entry in loaded {
+            let id = switch entry.node {
+            case .comment(let comment, _): comment.id
+            case .more(let placeholder): placeholder.id
+            }
+            guard seen.insert(id).inserted else { continue }
+            childrenByParent[entry.parentID, default: []].append(entry.node)
+        }
+
+        var attachedParents = Set<String>()
+        func take(_ parentID: String) -> [CommentNode] {
+            guard attachedParents.insert(parentID).inserted else { return [] }
+            return (childrenByParent[parentID] ?? []).map { node in
+                guard case .comment(let comment, let replies) = node else { return node }
+                return .comment(comment, replies: replies + take("t1_\(comment.id)"))
             }
         }
+
+        func merge(_ nodes: [CommentNode], parentID: String?) -> [CommentNode] {
+            var merged = nodes.flatMap { node -> [CommentNode] in
+                switch node {
+                case .more(let placeholder):
+                    placeholder.id == more.id ? take(parentID ?? more.parentID) : [node]
+                case .comment(let comment, let replies):
+                    [.comment(comment, replies: merge(replies, parentID: "t1_\(comment.id)"))]
+                }
+            }
+            if let parentID { merged += take(parentID) }
+            return merged
+        }
+        return merge(nodes, parentID: nil)
     }
 
-    static func commentIDs(in nodes: [CommentNode]) -> Set<String> {
+    static func rowIDs(in nodes: [CommentNode]) -> Set<String> {
         var ids = Set<String>()
         func collect(_ nodes: [CommentNode]) {
-            for case .comment(let comment, let replies) in nodes {
-                ids.insert(comment.id)
-                collect(replies)
+            for node in nodes {
+                switch node {
+                case .comment(let comment, let replies):
+                    ids.insert(comment.id)
+                    collect(replies)
+                case .more(let more):
+                    ids.insert(more.id)
+                }
             }
         }
         collect(nodes)
         return ids
-    }
-
-    static func removingComments(_ ids: Set<String>, from nodes: [CommentNode]) -> [CommentNode] {
-        nodes.compactMap { node in
-            guard case .comment(let comment, let replies) = node else { return node }
-            guard !ids.contains(comment.id) else { return nil }
-            return .comment(comment, replies: removingComments(ids, from: replies))
-        }
     }
 }
 

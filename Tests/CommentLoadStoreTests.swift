@@ -57,7 +57,7 @@ struct CommentLoadStoreTests {
     @Test("Every top-level comment and reply is kept")
     func keepsAllComments() async {
         let store = CommentLoadStore()
-        await store.load { (0..<40).map { comment("\($0)", replies: [comment("r\($0)", depth: 1)]) } }
+        await store.load { (0..<40).map { comment("\($0)", replies: [comment("r\($0)")]) } }
         #expect(store.nodes.count == 40)
         #expect(ids(store).count == 80)
         #expect(ids(store).suffix(2) == ["39", "r39"])
@@ -66,11 +66,11 @@ struct CommentLoadStoreTests {
     @Test("Loaded replies replace their placeholder and skip comments already shown")
     func loadMoreSplices() async {
         let store = CommentLoadStore()
-        let placeholder = CommentMore(parentID: "t1_a", depth: 1, count: 2, childIDs: ["b", "c"])
-        await store.load { [comment("a", replies: [comment("b", depth: 1), .more(placeholder)])] }
+        let placeholder = CommentMore(parentID: "t1_a", count: 2, childIDs: ["b", "c"])
+        await store.load { [comment("a", replies: [comment("b"), .more(placeholder)])] }
         await store.loadMore(placeholder) { more in
             #expect(more == placeholder)
-            return [comment("b", depth: 1), comment("c", depth: 1)]
+            return [loaded("t1_a", comment("b")), loaded("t1_a", comment("c"))]
         }
         #expect(ids(store) == ["a", "b", "c"])
         #expect(store.loadingMoreID == nil)
@@ -80,14 +80,14 @@ struct CommentLoadStoreTests {
     @Test("A failed load keeps the placeholder with a message, and retry clears it")
     func loadMoreFailureAndRetry() async {
         let store = CommentLoadStore()
-        let placeholder = CommentMore(parentID: "t3_post", depth: 0, count: 1, childIDs: ["b"])
+        let placeholder = CommentMore(parentID: "t3_post", count: 1, childIDs: ["b"])
         await store.load { [comment("a"), .more(placeholder)] }
         await store.loadMore(placeholder) { _ in throw URLError(.notConnectedToInternet) }
         #expect(ids(store) == ["a", placeholder.id])
         #expect(store.moreErrors[placeholder.id] == "Check your internet connection and try again.")
         #expect(store.loadingMoreID == nil)
 
-        await store.loadMore(placeholder) { _ in [comment("b")] }
+        await store.loadMore(placeholder) { _ in [loaded("t3_post", comment("b"))] }
         #expect(ids(store) == ["a", "b"])
         #expect(store.moreErrors.isEmpty)
     }
@@ -95,7 +95,7 @@ struct CommentLoadStoreTests {
     @Test("Cancelled loads leave the placeholder without an error")
     func loadMoreCancellation() async {
         let store = CommentLoadStore()
-        let placeholder = CommentMore(parentID: "t3_post", depth: 0, count: 1, childIDs: ["b"])
+        let placeholder = CommentMore(parentID: "t3_post", count: 1, childIDs: ["b"])
         await store.load { [.more(placeholder)] }
         await store.loadMore(placeholder) { _ in throw CancellationError() }
         #expect(ids(store) == [placeholder.id])
@@ -105,8 +105,8 @@ struct CommentLoadStoreTests {
     @Test("Only one placeholder loads at a time, and none before comments load")
     func loadMoreIsExclusive() async {
         let store = CommentLoadStore()
-        let first = CommentMore(parentID: "t3_post", depth: 0, count: 1, childIDs: ["x"])
-        let second = CommentMore(parentID: "t1_a", depth: 1, count: 1, childIDs: ["y"])
+        let first = CommentMore(parentID: "t3_post", count: 1, childIDs: ["x"])
+        let second = CommentMore(parentID: "t1_a", count: 1, childIDs: ["y"])
         await store.loadMore(first) { _ in
             Issue.record("Placeholders should not load before comments")
             return []
@@ -114,7 +114,7 @@ struct CommentLoadStoreTests {
 
         await store.load { [comment("a", replies: [.more(second)]), .more(first)] }
         let gate = Gate()
-        let request = Task { await store.loadMore(first) { _ in await gate.wait(); return [comment("x")] } }
+        let request = Task { await store.loadMore(first) { _ in await gate.wait(); return [loaded("t3_post", comment("x"))] } }
         await gate.waitUntilStarted()
         #expect(store.loadingMoreID == first.id)
         await store.loadMore(second) { _ in
@@ -125,6 +125,28 @@ struct CommentLoadStoreTests {
         await request.value
         #expect(store.loadingMoreID == nil)
         #expect(ids(store) == ["a", second.id, "x"])
+    }
+
+    @Test("Cancelling a load-more discards its late result and lets a new one start")
+    func loadMoreCancelledByDismissal() async {
+        let store = CommentLoadStore()
+        let placeholder = CommentMore(parentID: "t3_post", count: 1, childIDs: ["x"])
+        await store.load { [comment("a"), .more(placeholder)] }
+        let gate = Gate()
+        let request = Task { await store.loadMore(placeholder) { _ in await gate.wait(); return [loaded("t3_post", comment("late"))] } }
+        await gate.waitUntilStarted()
+        #expect(store.loadingMoreID == placeholder.id)
+
+        store.cancel()
+        #expect(store.loadingMoreID == nil)
+        #expect(store.state == .loaded)
+        gate.open()
+        await request.value
+        #expect(ids(store) == ["a", placeholder.id])
+        #expect(store.moreErrors.isEmpty)
+
+        await store.loadMore(placeholder) { _ in [loaded("t3_post", comment("x"))] }
+        #expect(ids(store) == ["a", "x"])
     }
 
     @Test("Loading is visible, overlapping loads coalesce, obsolete completion is ignored")
@@ -173,9 +195,13 @@ struct CommentLoadStoreTests {
         #expect(store.state == .loaded)
     }
 
-    private func comment(_ id: String, depth: Int = 0, replies: [CommentNode] = []) -> CommentNode {
+    private func comment(_ id: String, replies: [CommentNode] = []) -> CommentNode {
         .comment(Lurk.Comment(id: id, author: "reader", body: "body", score: 1, createdUtc: 0,
-                              depth: depth, isSubmitter: false), replies: replies)
+                              isSubmitter: false), replies: replies)
+    }
+
+    private func loaded(_ parentID: String, _ node: CommentNode) -> LoadedCommentNode {
+        LoadedCommentNode(parentID: parentID, node: node)
     }
 
     private func ids(_ store: CommentLoadStore) -> [String] {

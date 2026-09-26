@@ -145,8 +145,8 @@ actor RedditClient {
         return CommentNode.parse(from: listings[1])
     }
 
-    // Returns the nodes that replace `more` in the tree.
-    func fetchMoreComments(postID: String, more: CommentMore) async throws -> [CommentNode] {
+    // Returns loaded nodes, each paired with its parent, for `CommentNode.merging`.
+    func fetchMoreComments(postID: String, more: CommentMore) async throws -> [LoadedCommentNode] {
         guard Comment.isRedditID(postID) else { throw URLError(.badURL) }
         if more.continuesThread {
             return try await fetchContinuedThread(postID: postID, more: more)
@@ -167,20 +167,19 @@ actor RedditClient {
         try validateRedditErrors(in: data)
 
         let things = try RedditAPI.decoder.decode(MoreChildrenResponse.self, from: data).json.data?.things ?? []
-        var nodes = CommentNode.tree(fromFlat: things, parentID: more.parentID, depth: more.depth)
+        var loaded = CommentNode.loaded(fromFlat: things)
         let remaining = Array(more.childIDs.dropFirst(batch.count))
         if !remaining.isEmpty {
-            nodes.append(.more(CommentMore(
+            loaded.append(LoadedCommentNode(parentID: more.parentID, node: .more(CommentMore(
                 parentID: more.parentID,
-                depth: more.depth,
                 count: max(more.count - batch.count, remaining.count),
                 childIDs: remaining
-            )))
+            ))))
         }
-        return nodes
+        return loaded
     }
 
-    private func fetchContinuedThread(postID: String, more: CommentMore) async throws -> [CommentNode] {
+    private func fetchContinuedThread(postID: String, more: CommentMore) async throws -> [LoadedCommentNode] {
         let commentID = String(more.parentID.dropFirst(3))
         guard more.parentID.hasPrefix("t1_"), Comment.isRedditID(commentID) else { throw URLError(.badURL) }
 
@@ -199,7 +198,10 @@ actor RedditClient {
               let parent = listings[1].data.children.first(where: { $0.kind == "t1" && $0.data.id == commentID }),
               case .listing(let replies) = parent.data.replies
         else { return [] }
-        return CommentNode.parse(replies.data.children, parentID: more.parentID, depth: more.depth)
+        return CommentNode.flatten(
+            CommentNode.parse(replies.data.children, parentID: more.parentID),
+            under: more.parentID
+        )
     }
 
     func execute(_ request: URLRequest) async throws {

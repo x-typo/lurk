@@ -17,12 +17,12 @@ struct CommentParsingTests {
             return
         }
         #expect(reply.id == "def")
-        #expect(reply.depth == 1)
-        #expect(placeholder == CommentMore(parentID: "t1_abc", depth: 1, count: 7, childIDs: ["ghi", "jkl"]))
+        #expect(placeholder == CommentMore(parentID: "t1_abc", count: 7, childIDs: ["ghi", "jkl"]))
         #expect(!placeholder.continuesThread)
+        #expect(CommentNode.rows(from: nodes, collapsed: []).map { depth($0) } == [0, 1, 1])
     }
 
-    @Test("A zero count still reports the listed replies, and Reddit's parent wins")
+    @Test("A zero count still reports the listed replies, and tree position sets the parent")
     func zeroCountPlaceholder() throws {
         let nodes = try parse([node("abc", children: [
             more(count: 0, children: ["omitted"], parentID: "t1_other"),
@@ -32,7 +32,7 @@ struct CommentParsingTests {
             return
         }
         #expect(placeholder.count == 1)
-        #expect(placeholder.parentID == "t1_other")
+        #expect(placeholder.parentID == "t1_abc")
     }
 
     @Test("Continuation placeholders under a comment load that comment's thread")
@@ -42,7 +42,7 @@ struct CommentParsingTests {
             Issue.record("Expected a continuation placeholder")
             return
         }
-        #expect(placeholder == CommentMore(parentID: "t1_abc", depth: 1, count: 0, childIDs: []))
+        #expect(placeholder == CommentMore(parentID: "t1_abc", count: 0, childIDs: []))
         #expect(placeholder.continuesThread)
     }
 
@@ -54,7 +54,8 @@ struct CommentParsingTests {
             Issue.record("Expected a post-level placeholder")
             return
         }
-        #expect(placeholder == CommentMore(parentID: "t3_post", depth: 0, count: 12, childIDs: ["abc"]))
+        #expect(placeholder == CommentMore(parentID: "t3_post", count: 12, childIDs: ["abc"]))
+        #expect(placeholder.isTopLevel)
     }
 
     @Test("Placeholder IDs that are not Reddit IDs are discarded")
@@ -76,21 +77,15 @@ struct CommentParsingTests {
             for index in (0..<11).reversed() {
                 tree = node("c\(index)", depth: serverDepth, children: [tree])
             }
-            var current = try parse([tree]).first
-            var depth = 0
-            while case .comment(let comment, let replies)? = current {
-                #expect(comment.depth == depth)
-                current = replies.first
-                depth += 1
-            }
-            #expect(depth == 12)
+            let rows = CommentNode.rows(from: try parse([tree]), collapsed: [])
+            #expect(rows.map { depth($0) } == Array(0..<12))
         }
     }
 
     @Test("Filtered bots and their replies are dropped")
     func filteredBots() throws {
         let nodes = try parse([node("bot", author: "AutoModerator", children: [node("reply")]), node("human")])
-        #expect(CommentNode.commentIDs(in: nodes) == ["human"])
+        #expect(CommentNode.rowIDs(in: nodes) == ["human"])
     }
 
     @Test("The viewer's vote seeds the displayed score without double counting")
@@ -110,23 +105,31 @@ struct CommentParsingTests {
         #expect(comments[2].displayScore(vote: 1) == 11)
     }
 
-    @Test("Flat morechildren results nest by parent and start at the placeholder depth")
+    @Test("Flat morechildren results keep their parents and skip malformed things")
     func flatThings() throws {
-        let things = try wrappers([
-            thing("a", parent: "t1_root"), thing("b", parent: "t1_a"), thing("c", parent: "t1_root"),
-            thing("stray", parent: "t1_elsewhere"),
+        let loaded = CommentNode.loaded(fromFlat: try wrappers([
+            thing("a", parent: "t1_root"), thing("b", parent: "t1_a"),
             ["kind": "more", "data": ["count": 4, "parent_id": "t1_b", "children": ["d"]]],
-        ])
-        let rows = CommentNode.rows(from: CommentNode.tree(fromFlat: things, parentID: "t1_root", depth: 3), collapsed: [])
-        #expect(rows.map(\.id) == ["a", "b", "more:t1_b:d", "c"])
-        #expect(rows.map { depth($0) } == [3, 4, 5, 3])
+            ["kind": "t1", "data": ["id": "orphan", "author": "reader", "body": "body"]],
+            thing("bot", parent: "t1_root", author: "AutoModerator"),
+        ]))
+        #expect(loaded.map(\.parentID) == ["t1_root", "t1_a", "t1_b"])
+        guard case .more(let placeholder) = loaded[2].node else {
+            Issue.record("Expected the nested placeholder")
+            return
+        }
+        #expect(placeholder == CommentMore(parentID: "t1_b", count: 4, childIDs: ["d"]))
     }
 
-    @Test("Flat results that loop back to an ancestor stop instead of recursing forever")
-    func flatThingsCycle() throws {
-        let things = try wrappers([thing("a", parent: "t1_root"), thing("root", parent: "t1_a")])
-        let nodes = CommentNode.tree(fromFlat: things, parentID: "t1_root", depth: 0)
-        #expect(CommentNode.rows(from: nodes, collapsed: []).map(\.id) == ["a", "root"])
+    @Test("Flattening a nested tree pairs every node with its tree parent")
+    func flattenTree() throws {
+        let nodes = try parse([node("a", children: [node("b", children: [more(count: 2, children: ["c"])])])])
+        let loaded = CommentNode.flatten(nodes, under: "t1_root")
+        #expect(loaded.map(\.parentID) == ["t1_root", "t1_a", "t1_b"])
+        #expect(loaded.allSatisfy { entry in
+            guard case .comment(_, let replies) = entry.node else { return true }
+            return replies.isEmpty
+        })
     }
 
     @Test("Canonical relative and official absolute post permalinks produce the exact comment URL")
@@ -196,8 +199,8 @@ struct CommentParsingTests {
 
     private func depth(_ row: CommentRow) -> Int {
         switch row {
-        case .comment(let comment, _, _): comment.depth
-        case .more(let more): more.depth
+        case .comment(_, let depth, _, _): depth
+        case .more(_, let depth): depth
         }
     }
 
@@ -223,8 +226,8 @@ struct CommentParsingTests {
         return ["kind": "more", "data": data]
     }
 
-    private func thing(_ id: String, parent: String) -> [String: Any] {
-        ["kind": "t1", "data": ["id": id, "author": "reader", "body": "body", "score": 1,
+    private func thing(_ id: String, parent: String, author: String = "reader") -> [String: Any] {
+        ["kind": "t1", "data": ["id": id, "author": author, "body": "body", "score": 1,
                                 "parent_id": parent, "replies": ""]]
     }
 }

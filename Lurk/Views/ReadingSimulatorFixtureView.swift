@@ -191,7 +191,6 @@ struct ReadingSimulatorFixtureView: View {
         _ id: String,
         _ author: String,
         _ body: String,
-        depth: Int,
         score: Int = 5,
         isSubmitter: Bool = false,
         likes: Bool? = nil,
@@ -199,43 +198,45 @@ struct ReadingSimulatorFixtureView: View {
     ) -> CommentNode {
         .comment(Comment(
             id: id, author: author, body: body, score: score,
-            createdUtc: Date().timeIntervalSince1970, depth: depth,
+            createdUtc: Date().timeIntervalSince1970,
             isSubmitter: isSubmitter, likes: likes
         ), replies: replies)
     }
 
     // Six levels deep, ending in a continuation, plus reply-level and top-level "more" placeholders.
     private static var comments: [CommentNode] {
-        var thread: [CommentNode] = [.more(CommentMore(parentID: "t1_deep5", depth: 6, count: 0, childIDs: []))]
-        for depth in (0...5).reversed() {
+        var thread: [CommentNode] = [.more(CommentMore(parentID: "t1_deep5", count: 0, childIDs: []))]
+        for level in (0...5).reversed() {
             thread = [comment(
-                "deep\(depth)", "reader_\(depth)",
-                depth == 0
+                "deep\(level)", "reader_\(level)",
+                level == 0
                     ? "The ending is >!a friendly dragon!<. The secret link is >![the map](https://example.com/secret)!<."
-                    : "Reply level \(depth). This sentence should have enough room to read comfortably.",
-                depth: depth, isSubmitter: depth == 0, likes: depth == 1 ? true : nil, replies: thread
+                    : "Reply level \(level). This sentence should have enough room to read comfortably.",
+                isSubmitter: level == 0, likes: level == 1 ? true : nil, replies: thread
             )]
         }
         return thread + [
             comment("second", "second_reader", "A second top-level comment with a short nested thread.",
-                    depth: 0, score: 42, likes: false, replies: [
-                        comment("secondreply", "nested_reader", "One loaded reply.", depth: 1),
-                        .more(CommentMore(parentID: "t1_second", depth: 1, count: 3, childIDs: ["morea", "moreb", "morec"])),
+                    score: 42, likes: false, replies: [
+                        comment("secondreply", "nested_reader", "One loaded reply."),
+                        .more(CommentMore(parentID: "t1_second", count: 3, childIDs: ["morea", "moreb", "morec"])),
                     ]),
-            comment("third", "third_reader", "A third top-level comment.", depth: 0, score: 7),
-            .more(CommentMore(parentID: "t3_\(firstID)", depth: 0, count: 12, childIDs: ["topa", "topb", "topc"])),
+            comment("third", "third_reader", "A third top-level comment.", score: 7),
+            .more(CommentMore(parentID: "t3_\(firstID)", count: 12, childIDs: ["topa", "topb", "topc"])),
         ]
     }
 
-    private static func loadedReplies(for more: CommentMore) -> [CommentNode] {
+    private static func loadedReplies(for more: CommentMore) -> [LoadedCommentNode] {
         if more.continuesThread {
-            return [comment("deep6", "deeper_reader", "Loaded in the app instead of Safari.", depth: more.depth, replies: [
-                comment("deep7", "deepest_reader", "Level \(more.depth + 1) still has room to read.", depth: more.depth + 1),
-            ])]
+            return CommentNode.flatten([
+                comment("deep6", "deeper_reader", "Loaded in the app instead of Safari.", replies: [
+                    comment("deep7", "deepest_reader", "Level 7 still has room to read."),
+                ]),
+            ], under: more.parentID)
         }
-        return more.childIDs.enumerated().map { index, id in
-            comment(id, "loaded_\(index + 1)", "Loaded reply \(index + 1).", depth: more.depth)
-        }
+        return CommentNode.flatten(more.childIDs.enumerated().map { index, id in
+            comment(id, "loaded_\(index + 1)", "Loaded reply \(index + 1).")
+        }, under: more.parentID)
     }
 
     private static let collapseScrollComments: [CommentNode] = (1...30).map { index in
@@ -243,17 +244,17 @@ struct ReadingSimulatorFixtureView: View {
             comment(
                 "collapsechild", "scroll_child",
                 "Collapse this nested reply, then collapse and expand its parent. This reply should stay collapsed.",
-                depth: 1, score: 3,
+                score: 3,
                 replies: [comment(
                     "collapsegrandchild", "scroll_grandchild",
-                    "This grandchild is hidden whenever its parent is collapsed.", depth: 2, score: 1
+                    "This grandchild is hidden whenever its parent is collapsed.", score: 1
                 )]
             )
         ] : []
         return comment(
             "collapse\(index)", "scroll_\(index)",
             "Comment \(index). Collapse the first five comments, scroll far down to later numbered comments, then return. Each collapsed comment should remain closed for this visit. Closing and reopening the post starts a fresh visit.",
-            depth: 0, score: index, replies: replies
+            score: index, replies: replies
         )
     }
 

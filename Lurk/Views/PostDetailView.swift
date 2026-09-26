@@ -39,6 +39,7 @@ struct PostDetailView: View {
     @State private var replyTarget: Comment?
     @State private var selectingCommentID: String?
     @State private var commentActionError: String?
+    @State private var commentShare: CommentShareTarget?
 
     var body: some View {
         NavigationStack {
@@ -324,6 +325,9 @@ struct PostDetailView: View {
         .sheet(item: $replyTarget, onDismiss: resumeAfterPresentation) { comment in
             ComposeReplySheet(thingID: "t1_\(comment.id)", isPresented: replySheetPresented)
         }
+        .sheet(item: $commentShare, onDismiss: resumeAfterPresentation) { share in
+            PostShareSheet(url: share.url, title: share.title, imageURL: nil)
+        }
         .fullScreenCover(isPresented: $showMediaViewer, onDismiss: mediaViewerDismissed) {
             if let videoURL = post.videoURL {
                 VideoViewerView(
@@ -396,23 +400,26 @@ struct PostDetailView: View {
         return LazyVStack(alignment: .leading, spacing: 0) {
             ForEach(rows) { row in
                 switch row {
-                case .comment(let comment, let isCollapsed, let hiddenReplyCount):
+                case .comment(let comment, let depth, let isCollapsed, let hiddenReplyCount):
+                    let shareURL = comment.permalinkURL(postPermalink: post.permalink)
                     CommentThreadRowView(
                         comment: comment,
+                        depth: depth,
                         isCollapsed: isCollapsed,
                         hiddenReplyCount: hiddenReplyCount,
                         vote: commentVotes[comment.id] ?? comment.initialVote,
                         isSelecting: selectingCommentID == comment.id,
-                        showsSeparator: comment.depth == 0 && row.id != firstRowID,
-                        shareURL: comment.permalinkURL(postPermalink: post.permalink),
+                        showsSeparator: depth == 0 && row.id != firstRowID,
                         onToggleCollapse: { toggleCollapse(comment) },
                         onVote: { submitCommentVote($0, for: comment) },
                         onReply: { presentReply(to: comment) },
-                        onSelectText: { selectingCommentID = comment.id }
+                        onSelectText: { selectingCommentID = comment.id },
+                        onShare: shareURL.map { url in { presentShare(of: comment, url: url) } }
                     )
-                case .more(let more):
+                case .more(let more, let depth):
                     CommentMoreRowView(
                         more: more,
+                        depth: depth,
                         isLoading: commentStore.loadingMoreID == more.id,
                         isWaiting: commentStore.loadingMoreID.map { $0 != more.id } ?? false,
                         error: commentStore.moreErrors[more.id]
@@ -487,6 +494,11 @@ struct PostDetailView: View {
                 commentActionError = error.localizedDescription
             }
         }
+    }
+
+    private func presentShare(of comment: Comment, url: URL) {
+        suspendDetailMedia()
+        commentShare = CommentShareTarget(url: url, title: "u/\(comment.author) on \(post.title)")
     }
 
     private func presentReply(to comment: Comment) {
@@ -627,6 +639,12 @@ struct PostDetailView: View {
             animatedMediaRefreshID = UUID()
         }
     }
+}
+
+private struct CommentShareTarget: Identifiable {
+    let url: URL
+    let title: String
+    var id: URL { url }
 }
 
 @Observable
