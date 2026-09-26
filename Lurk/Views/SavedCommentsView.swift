@@ -48,7 +48,7 @@ struct SavedCommentsView: View {
             .navigationTitle("Saved Comments")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
+                ToolbarItem(placement: .status) {
                     Button("Done") { dismiss() }
                         .font(.body.weight(.medium))
                 }

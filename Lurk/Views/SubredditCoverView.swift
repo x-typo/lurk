@@ -18,16 +18,27 @@ struct SubredditCoverView: View {
     }
 
     var body: some View {
+        // The stack only hosts the bottom toolbar, so Close sits where the other reading screens put it.
+        NavigationStack {
+            content
+                .toolbar(.hidden, for: .navigationBar)
+                .toolbar {
+                    ToolbarItem(placement: .status) {
+                        Button("Close") { onClose() }
+                            .foregroundStyle(Theme.primary)
+                    }
+                }
+        }
+        .preferredColorScheme(.dark)
+    }
+
+    private var content: some View {
         VStack(spacing: 0) {
             ZStack {
                 Text(title)
                     .font(.body.weight(.semibold))
                     .foregroundStyle(Theme.text)
                 HStack(spacing: 16) {
-                    Button { onClose() } label: {
-                        Text("Close")
-                            .foregroundStyle(Theme.primary)
-                    }
                     Spacer()
                     Button {
                         Task { await toggleSubscription() }
@@ -73,7 +84,6 @@ struct SubredditCoverView: View {
             SubredditFeedView(subreddit: subreddit)
         }
         .background(Theme.background)
-        .preferredColorScheme(.dark)
     }
 
     private func toggleSubscription() async {
