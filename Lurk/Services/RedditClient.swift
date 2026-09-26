@@ -146,6 +146,39 @@ actor RedditClient {
         return CommentNode.parse(from: listings[1])
     }
 
+    func fetchPost(id: String) async throws -> Post {
+        guard Comment.isRedditID(id) else { throw URLError(.badURL) }
+        var components = try buildComponents(path: "/by_id/t3_\(id).json")
+        components.queryItems = [URLQueryItem(name: "raw_json", value: "1")]
+        guard let url = components.url else { throw URLError(.badURL) }
+
+        let (data, response) = try await session.data(from: url)
+        try validateHTTPResponse(response, data: data)
+
+        let listing = try RedditAPI.decoder.decode(RedditListing.self, from: data)
+        guard let post = listing.data.children.first?.data else { throw URLError(.fileDoesNotExist) }
+        return post
+    }
+
+    // One comment with three levels of parents, the way Reddit's context links show it.
+    func fetchCommentContext(postID: String, commentID: String) async throws -> [CommentNode] {
+        guard Comment.isRedditID(postID), Comment.isRedditID(commentID) else { throw URLError(.badURL) }
+        var components = try buildComponents(path: "/comments/\(postID).json")
+        components.queryItems = [
+            URLQueryItem(name: "comment", value: commentID),
+            URLQueryItem(name: "context", value: "3"),
+            URLQueryItem(name: "raw_json", value: "1"),
+        ]
+        guard let url = components.url else { throw URLError(.badURL) }
+
+        let (data, response) = try await session.data(from: url)
+        try validateHTTPResponse(response, data: data)
+
+        let listings = try RedditAPI.decoder.decode([CommentListing].self, from: data)
+        guard listings.count >= 2 else { return [] }
+        return CommentNode.parse(from: listings[1])
+    }
+
     // Returns loaded nodes, each paired with its parent, for `CommentNode.merging`.
     func fetchMoreComments(postID: String, more: CommentMore) async throws -> [LoadedCommentNode] {
         guard Comment.isRedditID(postID) else { throw URLError(.badURL) }

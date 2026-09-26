@@ -131,6 +131,61 @@ struct MoreCommentsAPITests {
         #expect(rows.map { depth($0) } == [0, 1, 2])
     }
 
+    @Test("A comment's context loads through the thread endpoint with three parents")
+    func commentContextRequest() async throws {
+        let session = makeSession()
+        defer { session.invalidateAndCancel() }
+        MoreCommentsURLProtocol.stub(data: try json([
+            ["kind": "Listing", "data": ["children": []]],
+            ["kind": "Listing", "data": ["children": [
+                ["kind": "t1", "data": ["id": "top", "author": "reader", "body": "body", "score": 1,
+                                        "replies": ["data": ["children": [thing("focus", parent: "t1_top")]]]]],
+            ]]],
+        ]))
+        let client = RedditClient(session: session)
+
+        let nodes = try await client.fetchCommentContext(postID: "post1", commentID: "focus")
+
+        let url = try #require(MoreCommentsURLProtocol.requests.first?.url)
+        #expect(url.path == "/comments/post1.json")
+        #expect(query(url, "comment") == "focus")
+        #expect(query(url, "context") == "3")
+        #expect(query(url, "raw_json") == "1")
+        #expect(CommentNode.rows(from: nodes, collapsed: []).map(\.id) == ["top", "focus"])
+    }
+
+    @Test("A linked post loads by its ID")
+    func postByIDRequest() async throws {
+        let session = makeSession()
+        defer { session.invalidateAndCancel() }
+        MoreCommentsURLProtocol.stub(data: try json(["data": ["after": NSNull(), "children": [["data": [
+            "id": "post1", "title": "A post", "author": "reader", "subreddit": "swift",
+            "subreddit_name_prefixed": "r/swift", "score": 5, "num_comments": 2, "created_utc": 0,
+            "permalink": "/r/swift/comments/post1/a_post/", "url": "https://example.com", "selftext": "",
+            "is_self": true, "is_video": false, "stickied": false, "over_18": false,
+        ]]]]]))
+        let client = RedditClient(session: session)
+
+        let post = try await client.fetchPost(id: "post1")
+
+        let url = try #require(MoreCommentsURLProtocol.requests.first?.url)
+        #expect(url.path == "/by_id/t3_post1.json")
+        #expect(post.id == "post1")
+        #expect(post.permalink == "/r/swift/comments/post1/a_post/")
+    }
+
+    @Test("Thread links with invalid IDs never reach the network")
+    func threadRequestsRejectInvalidIDs() async throws {
+        let session = makeSession()
+        defer { session.invalidateAndCancel() }
+        MoreCommentsURLProtocol.stub(data: Data())
+        let client = RedditClient(session: session)
+
+        await #expect(throws: URLError.self) { try await client.fetchPost(id: "../evil") }
+        await #expect(throws: URLError.self) { try await client.fetchCommentContext(postID: "post1", commentID: "Bad") }
+        #expect(MoreCommentsURLProtocol.requests.isEmpty)
+    }
+
     @Test("Invalid post or comment IDs never reach the network")
     func rejectsInvalidIDs() async throws {
         let session = makeSession()

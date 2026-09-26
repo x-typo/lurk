@@ -54,6 +54,33 @@ struct CommentLoadStoreTests {
         }
     }
 
+    @Test("Reloading replaces a loaded thread, such as one comment's context with the whole thread")
+    func reloadReplacesLoadedThread() async {
+        let store = CommentLoadStore()
+        await store.load { [comment("parent", replies: [comment("focus")])] }
+        #expect(ids(store) == ["parent", "focus"])
+
+        await store.reload { [comment("parent", replies: [comment("focus")]), comment("other")] }
+        #expect(store.state == .loaded)
+        #expect(ids(store) == ["parent", "focus", "other"])
+    }
+
+    @Test("Reloading supersedes a load that's still running")
+    func reloadSupersedesPendingLoad() async {
+        let store = CommentLoadStore()
+        let gate = Gate()
+        let slow = Task { await store.load {
+            await gate.wait()
+            return [comment("context")]
+        } }
+        await gate.waitUntilStarted()
+
+        await store.reload { [comment("whole")] }
+        gate.open()
+        await slow.value
+        #expect(ids(store) == ["whole"])
+    }
+
     @Test("Every top-level comment and reply is kept")
     func keepsAllComments() async {
         let store = CommentLoadStore()

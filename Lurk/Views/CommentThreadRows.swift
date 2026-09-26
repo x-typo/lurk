@@ -62,6 +62,7 @@ struct CommentThreadRowView: View {
     let onSelectText: () -> Void
     let onShare: (() -> Void)?
     let onMute: (() -> Void)?
+    var isFocused = false
 
     @State private var offset: CGFloat = 0
     @State private var swipe = CommentSwipeState()
@@ -72,7 +73,7 @@ struct CommentThreadRowView: View {
                 swipeBackground
             }
             rowContent
-                .background(Theme.background)
+                .background(isFocused ? Theme.focusedComment : Theme.background)
                 .offset(x: offset)
         }
         .clipped()

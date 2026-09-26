@@ -6,6 +6,7 @@ struct UserCommentsView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(InlineGIFPlaybackStore.self) private var playbackStore
     @Environment(EngagementStore.self) private var engagement
+    @Environment(\.openURL) private var openURL
 
     @State private var comments: [UserComment] = []
     @State private var after: String?
@@ -14,6 +15,7 @@ struct UserCommentsView: View {
     @State private var error: String?
     @State private var subredditComment: UserComment?
     @State private var editingComment: UserComment?
+    @State private var thread: ThreadTarget?
     @State private var deletingComment: UserComment?
     @State private var deletingID: String?
     @State private var writeError: String?
@@ -36,6 +38,7 @@ struct UserCommentsView: View {
                                     comment: comment,
                                     deletingID: deletingID,
                                     showSubreddit: { presentSubreddit(comment) },
+                                    openThread: presentThread,
                                     editComment: { presentEditor(for: comment) },
                                     deleteComment: { deletingComment = comment }
                                 )
@@ -70,6 +73,9 @@ struct UserCommentsView: View {
         .onDisappear {
             guard !isPresentingContent else { return }
             resumeInlineGIFPlayback()
+        }
+        .sheet(item: $thread, onDismiss: resumeInlineGIFPlayback) { target in
+            ThreadView(target: target)
         }
         .sheet(item: $editingComment, onDismiss: resumeInlineGIFPlayback) { comment in
             EditUserCommentSheet(comment: comment) { updatedBody in
@@ -113,7 +119,17 @@ struct UserCommentsView: View {
     }
 
     private var isPresentingContent: Bool {
-        editingComment != nil || subredditComment != nil
+        editingComment != nil || subredditComment != nil || thread != nil
+    }
+
+    // Opens a Reddit thread link in Lurk; anything else still goes to the browser.
+    private func presentThread(_ url: URL) {
+        guard let target = ThreadTarget(url: url) else {
+            openURL(url)
+            return
+        }
+        suspendInlineGIFPlayback()
+        thread = target
     }
 
     private func presentEditor(for comment: UserComment) {
@@ -202,10 +218,9 @@ private struct UserCommentRow: View {
     let comment: UserComment
     let deletingID: String?
     let showSubreddit: () -> Void
+    let openThread: (URL) -> Void
     let editComment: () -> Void
     let deleteComment: () -> Void
-
-    @Environment(\.openURL) private var openURL
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -221,7 +236,7 @@ private struct UserCommentRow: View {
                     .foregroundStyle(Theme.textMuted)
                 if let postURL = comment.postURL {
                     Button {
-                        openURL(postURL)
+                        openThread(postURL)
                     } label: {
                         Text(comment.linkTitle)
                             .font(.subheadline)
@@ -253,10 +268,10 @@ private struct UserCommentRow: View {
                 content: comment.body,
                 textFont: .body,
                 nonInteractiveTapAction: CommentBodyTapAction(
-                    perform: { openURL(comment.redditURL) },
+                    perform: { openThread(comment.redditURL) },
                     mediaAccessibility: MediaActionAccessibility(
-                        label: "Open source comment",
-                        hint: "Double-tap to open this comment on Reddit."
+                        label: "Open comment thread",
+                        hint: "Double-tap to open this comment's thread."
                     )
                 )
             )
