@@ -2,6 +2,12 @@ import SwiftUI
 
 @main
 struct LurkApp: App {
+    init() {
+        // From iOS 27, AsyncImage caches image data through a default session, which uses this shared cache.
+        // The system default is too small to keep a feed's images. Apple documents no AsyncImage caching earlier.
+        URLCache.shared = URLCache(memoryCapacity: 64 * 1024 * 1024, diskCapacity: 256 * 1024 * 1024)
+    }
+
     var body: some Scene {
         WindowGroup {
 #if DEBUG

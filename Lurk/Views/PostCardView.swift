@@ -57,7 +57,6 @@ struct PostCardView: View {
                     Text(post.title)
                         .font(.body)
                         .foregroundStyle(Theme.text)
-                        .lineLimit(4)
                         .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
                         .contentShape(Rectangle())
                 }
@@ -101,18 +100,19 @@ struct PostCardView: View {
                         case .gif(let url):
                             AnimatedGIFView(
                                 url: url,
-                                posterURL: post.imageURL,
+                                posterURL: post.feedImageURL,
                                 onMediaTap: { performTap(.showMedia) }
                             )
-                                .aspectRatio(post.imageAspectRatio ?? 16 / 9, contentMode: .fit)
+                                .aspectRatio(Post.feedBoxAspectRatio(post.imageAspectRatio), contentMode: .fit)
+                                .background(Theme.background)
                         case .video(let url):
                             Button {
                                 performTap(.showMedia)
                             } label: {
                                 InlineLoopingVideoView(
                                     url: url,
-                                    posterURL: post.imageURL,
-                                    aspectRatio: post.videoAspectRatio ?? post.imageAspectRatio
+                                    posterURL: post.feedImageURL,
+                                    aspectRatio: Post.feedBoxAspectRatio(post.videoAspectRatio ?? post.imageAspectRatio)
                                 )
                                 .contentShape(Rectangle())
                             }
@@ -127,23 +127,24 @@ struct PostCardView: View {
                                 .allowsHitTesting(false)
                         }
                     }
-                } else if let imageURL = post.imageURL {
+                } else if let imageURL = post.feedImageURL {
                     Button {
                         performTap(.showMedia)
                     } label: {
                         AsyncImage(url: imageURL) { phase in
                             switch phase {
                             case .success(let image):
-                                image
-                                    .resizable()
-                                    .aspectRatio(post.imageAspectRatio, contentMode: .fit)
-                                    .clipShape(RoundedRectangle(cornerRadius: 8))
+                                FeedMediaHeightCap {
+                                    image.resizable().aspectRatio(contentMode: .fit)
+                                }
+                                .background(Theme.background)
+                                .clipShape(RoundedRectangle(cornerRadius: 8))
                             case .failure:
                                 EmptyView()
                             default:
                                 RoundedRectangle(cornerRadius: 8)
                                     .fill(Theme.surfaceElevated)
-                                    .aspectRatio(post.imageAspectRatio ?? 16/9, contentMode: .fit)
+                                    .aspectRatio(Post.feedBoxAspectRatio(post.imageAspectRatio), contentMode: .fit)
                                     .overlay { ProgressView().tint(Theme.textMuted) }
                             }
                         }
@@ -383,5 +384,24 @@ struct PostCardInteractionState: Equatable {
 
     private static func axis(for translation: CGSize) -> DragAxis {
         abs(translation.width) > abs(translation.height) ? .horizontal : .vertical
+    }
+}
+
+// Caps feed media at the tallest feed shape (4:5) for the width it's given; taller media fits inside.
+// It measures the laid-out media, so it works without Reddit's size metadata.
+struct FeedMediaHeightCap: Layout {
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        guard let media = subviews.first else { return .zero }
+        let natural = media.sizeThatFits(ProposedViewSize(width: proposal.width, height: nil))
+        let width = proposal.width ?? natural.width
+        return CGSize(width: width, height: min(natural.height, width / Post.tallestFeedAspectRatio))
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        subviews.first?.place(
+            at: CGPoint(x: bounds.midX, y: bounds.midY),
+            anchor: .center,
+            proposal: ProposedViewSize(bounds.size)
+        )
     }
 }
