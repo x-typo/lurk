@@ -30,6 +30,7 @@ private struct LurkRootView: View {
     @State private var blockStore = BlockedSubredditStore()
     @State private var muteStore = MuteStore()
     @State private var hideSync = PostHideSync()
+    @State private var engagement = EngagementStore()
     @State private var session = RedditSession()
     @State private var playbackStore = InlineGIFPlaybackStore()
     @State private var unreadReplies = UnreadRepliesStore()
@@ -47,11 +48,13 @@ private struct LurkRootView: View {
             .environment(blockStore)
             .environment(muteStore)
             .environment(hideSync)
+            .environment(engagement)
             .environment(playbackStore)
             .environment(unreadReplies)
             .environment(\.redditClient, client)
             .onChange(of: account, initial: true) { _, account in
                 unreadReplies.setAccount(account)
+                engagement.setAccount(account)
             }
             .task(id: account) { await refreshUnreadReplies() }
             .onChange(of: scenePhase) { _, phase in

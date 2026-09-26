@@ -250,7 +250,12 @@ private struct UserCommentRow: View {
             )
 
             HStack(spacing: 14) {
-                VoteControlsView(thingID: "t1_\(comment.id)", initialScore: comment.score, inactiveColor: Theme.textMuted)
+                VoteControlsView(
+                    thingID: "t1_\(comment.id)",
+                    score: comment.score,
+                    loadedVote: comment.initialVote,
+                    inactiveColor: Theme.textMuted
+                )
 
                 Button(action: editComment) {
                     Image(systemName: "pencil")

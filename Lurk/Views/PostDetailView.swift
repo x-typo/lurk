@@ -181,12 +181,17 @@ struct PostDetailView: View {
                     }
 
                     HStack(spacing: 16) {
-                        VoteControlsView(thingID: "t3_\(post.id)", initialScore: post.score)
+                        VoteControlsView(thingID: "t3_\(post.id)", score: post.score, loadedVote: post.initialVote)
 
                         Label(Formatters.score(post.numComments), systemImage: "bubble.right")
                             .foregroundStyle(Theme.textSecondary)
 
                         Spacer()
+
+                        if session.isLoggedIn {
+                            PostSaveButton(thingID: "t3_\(post.id)", loadedSaved: post.saved)
+                                .padding(.trailing, 8)
+                        }
 
                         if !post.downloadableVideoURLs.isEmpty
                             || ((post.animatedImageURL ?? post.imageURL) != nil && !post.isYouTubeVideo) {
@@ -1265,20 +1270,24 @@ struct SelectableTextView: UIViewRepresentable {
 
 struct VoteControlsView: View {
     let thingID: String
+    let score: Int
+    let loadedVote: Int
     var inactiveColor: Color = Theme.textSecondary
 
     @Environment(RedditSession.self) private var session
+    @Environment(EngagementStore.self) private var engagement
     @Environment(\.redditClient) private var client
 
-    @State private var voted: Int = 0
-    @State private var displayScore: Int
     @State private var voteError: String?
 
-    init(thingID: String, initialScore: Int, inactiveColor: Color = Theme.textSecondary) {
+    init(thingID: String, score: Int, loadedVote: Int, inactiveColor: Color = Theme.textSecondary) {
         self.thingID = thingID
+        self.score = score
+        self.loadedVote = loadedVote
         self.inactiveColor = inactiveColor
-        _displayScore = State(initialValue: initialScore)
     }
+
+    private var voted: Int { engagement.vote(for: thingID, loaded: loadedVote) }
 
     var body: some View {
         HStack(spacing: session.isLoggedIn ? 8 : 6) {
@@ -1295,7 +1304,8 @@ struct VoteControlsView: View {
                     .foregroundStyle(inactiveColor)
             }
 
-            Text(Formatters.score(displayScore))
+            // Reddit's score already includes the loaded vote.
+            Text(Formatters.score(score - loadedVote + voted))
                 .foregroundStyle(voted == 1 ? Theme.primary : voted == -1 ? Theme.downvote : Theme.textSecondary)
 
             if session.isLoggedIn {
@@ -1326,26 +1336,63 @@ struct VoteControlsView: View {
     }
 
     private func submitVote(_ newDir: Int) {
-        let previousVote = voted
-        let previousScore = displayScore
         voteError = nil
-        voted = newDir
-        displayScore += newDir - previousVote
+        engagement.submitVote(newDir, for: thingID, loaded: loadedVote, send: {
+            let request = session.authenticatedRequest(
+                url: RedditAPI.vote,
+                formData: ["id": thingID, "dir": "\(newDir)"]
+            )
+            try await client.execute(request)
+        }, onFailure: { error in
+            voteError = error.localizedDescription
+        })
+    }
+}
 
-        Task { @MainActor in
-            do {
-                let request = session.authenticatedRequest(
-                    url: RedditAPI.vote,
-                    formData: ["id": thingID, "dir": "\(newDir)"]
-                )
-                try await client.execute(request)
-            } catch {
-                guard voted == newDir else { return }
-                voted = previousVote
-                displayScore = previousScore
-                voteError = error.localizedDescription
-            }
+struct PostSaveButton: View {
+    let thingID: String
+    let loadedSaved: Bool
+
+    @Environment(RedditSession.self) private var session
+    @Environment(EngagementStore.self) private var engagement
+    @Environment(\.redditClient) private var client
+
+    @State private var saveError: String?
+
+    var body: some View {
+        let isSaved = engagement.isSaved(thingID, loaded: loadedSaved)
+        Button {
+            submitSave(!isSaved)
+        } label: {
+            Image(systemName: isSaved ? "bookmark.fill" : "bookmark")
+                .foregroundStyle(isSaved ? Theme.primary : Theme.textSecondary)
         }
+        .accessibilityLabel(isSaved ? "Unsave post" : "Save post")
+        .alert("Reddit action failed", isPresented: saveErrorPresented) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text(saveError ?? "")
+        }
+    }
+
+    private var saveErrorPresented: Binding<Bool> {
+        Binding(
+            get: { saveError != nil },
+            set: { if !$0 { saveError = nil } }
+        )
+    }
+
+    private func submitSave(_ saved: Bool) {
+        saveError = nil
+        engagement.submitSave(saved, for: thingID, loaded: loadedSaved, send: {
+            let request = session.authenticatedRequest(
+                url: saved ? RedditAPI.save : RedditAPI.unsave,
+                formData: ["id": thingID]
+            )
+            try await client.execute(request)
+        }, onFailure: { error in
+            saveError = error.localizedDescription
+        })
     }
 }
 

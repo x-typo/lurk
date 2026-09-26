@@ -14,6 +14,7 @@ struct PostCardView: View {
     @State private var tapSuppressionResetTask: Task<Void, Never>?
     @State private var collapsing = false
     @Environment(\.openURL) private var openURL
+    @Environment(EngagementStore.self) private var engagement
 
     private let swipeHideOffset: CGFloat = 500
 
@@ -167,13 +168,15 @@ struct PostCardView: View {
                 Button {
                     performTap(.showDetail)
                 } label: {
+                    let vote = engagement.vote(for: "t3_\(post.id)", loaded: post.initialVote)
+                    let voteColor = vote > 0 ? Theme.primary : vote < 0 ? Theme.downvote : Theme.textSecondary
                     HStack(spacing: 6) {
-                        Image(systemName: "arrow.up")
+                        Image(systemName: vote < 0 ? "arrow.down" : "arrow.up")
                             .font(.caption)
-                            .foregroundStyle(Theme.textSecondary)
-                        Text(Formatters.score(post.score))
+                            .foregroundStyle(voteColor)
+                        Text(Formatters.score(post.displayScore(vote: vote)))
                             .font(.subheadline)
-                            .foregroundStyle(Theme.textSecondary)
+                            .foregroundStyle(voteColor)
                         Text("\u{2022}")
                             .font(.caption)
                             .foregroundStyle(Theme.textMuted)

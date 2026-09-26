@@ -74,13 +74,7 @@ struct Comment: Identifiable {
     // Deeper replies still render; indentation and rails stop growing here.
     nonisolated static let maxIndentDepth = 10
 
-    var initialVote: Int {
-        switch likes {
-        case true?: 1
-        case false?: -1
-        case nil: 0
-        }
-    }
+    var initialVote: Int { likes.voteDirection }
 
     // Reddit's score already includes the viewer's original vote.
     func displayScore(vote: Int) -> Int {

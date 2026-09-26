@@ -4,6 +4,7 @@ enum RedditAPI {
     nonisolated static let userAgent = "ios:com.lurk.app:v1.0"
     static let hide = URL(string: "https://www.reddit.com/api/hide")!
     static let unhide = URL(string: "https://www.reddit.com/api/unhide")!
+    static let save = URL(string: "https://www.reddit.com/api/save")!
     static let unsave = URL(string: "https://www.reddit.com/api/unsave")!
     static let vote = URL(string: "https://www.reddit.com/api/vote")!
     static let comment = URL(string: "https://www.reddit.com/api/comment")!
