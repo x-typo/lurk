@@ -7,6 +7,8 @@ struct PostDetailView: View {
     var removeAction: PostRemoveAction? = nil
     var commentsFetch: CommentLoadStore.Fetch? = nil
     var commentsFetchMore: CommentLoadStore.FetchMore? = nil
+    // Set when opened for one comment: `commentsFetch` loads its context, and the comment is highlighted.
+    var focusedCommentID: String? = nil
 
     @Environment(RedditSession.self) private var session
     @Environment(\.redditClient) private var client
@@ -27,6 +29,7 @@ struct PostDetailView: View {
     // Keep collapse state for this post visit when lazy rows or their ancestors disappear.
     @State private var collapsedCommentIDs: Set<String> = []
     @State private var commentLoadAttempt = 0
+    @State private var showsFullThread = false
     @State private var showCommentSheet = false
     @State private var showSubreddit = false
     @State private var mediaSaved = false
@@ -282,20 +285,7 @@ struct PostDetailView: View {
             .background(Theme.background)
             .defaultScrollAnchor(.top)
             .task(id: commentLoadAttempt) {
-                await commentStore.load {
-                    let started = Date.now
-                    let nodes: [CommentNode]
-                    if let commentsFetch {
-                        nodes = try await commentsFetch()
-                    } else {
-                        nodes = try await client.fetchComments(permalink: post.permalink)
-                    }
-                    engagement.reconcile(
-                        fetchStartedAt: started,
-                        votes: CommentNode.comments(in: nodes).map { ("t1_\($0.id)", $0.initialVote) }
-                    )
-                    return nodes
-                }
+                await commentStore.load { try await fetchComments(wholeThread: showsFullThread) }
             }
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -384,6 +374,24 @@ struct PostDetailView: View {
                 .font(.headline)
                 .foregroundStyle(Theme.text)
 
+            if focusedCommentID != nil, !showsFullThread {
+                HStack {
+                    Text("Showing one comment's thread")
+                        .font(.caption)
+                        .foregroundStyle(Theme.textSecondary)
+                    Spacer()
+                    Button("Show full thread") {
+                        showsFullThread = true
+                        Task { await commentStore.reload { try await fetchComments(wholeThread: true) } }
+                    }
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(Theme.primary)
+                    .frame(minHeight: 44)
+                }
+                .padding(.horizontal, 12)
+                .background(Theme.surface, in: RoundedRectangle(cornerRadius: 8))
+            }
+
             switch commentStore.state {
             case .idle, .loading:
                 ProgressView("Loading comments…")
@@ -437,7 +445,8 @@ struct PostDetailView: View {
                         onReply: { presentReply(to: comment) },
                         onSelectText: { selectingCommentID = comment.id },
                         onShare: shareURL.map { url in { presentShare(of: comment, url: url) } },
-                        onMute: canMute(comment) ? { muteStore.muteUser(comment.author) } : nil
+                        onMute: canMute(comment) ? { muteStore.muteUser(comment.author) } : nil,
+                        isFocused: comment.id == focusedCommentID
                     )
                 case .more(let more, let depth):
                     CommentMoreRowView(
@@ -483,6 +492,22 @@ struct PostDetailView: View {
                 collapsedCommentIDs.insert(comment.id)
             }
         }
+    }
+
+    // `wholeThread` ignores `commentsFetch`. Reconciles this session's settled votes with what Reddit returned.
+    private func fetchComments(wholeThread: Bool) async throws -> [CommentNode] {
+        let started = Date.now
+        let nodes: [CommentNode]
+        if let commentsFetch, !wholeThread {
+            nodes = try await commentsFetch()
+        } else {
+            nodes = try await client.fetchComments(permalink: post.permalink)
+        }
+        engagement.reconcile(
+            fetchStartedAt: started,
+            votes: CommentNode.comments(in: nodes).map { ("t1_\($0.id)", $0.initialVote) }
+        )
+        return nodes
     }
 
     private func loadMoreComments(_ more: CommentMore) {

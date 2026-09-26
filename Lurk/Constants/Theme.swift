@@ -14,6 +14,8 @@ enum Theme {
     static let opBadge = Color(red: 0, green: 0.478, blue: 1) // #007AFF
     static let border = Color(red: 0.2, green: 0.2, blue: 0.2)
     static let swipeReply = Color(red: 0.114, green: 0.620, blue: 0.459) // #1D9E75
+    // A faint orange behind the comment a thread was opened for.
+    static let focusedComment = Color(red: 0.165, green: 0.102, blue: 0.071) // #2A1A12
     // One rail color per reply level, repeating past the last entry.
     static let commentRails = [
         primary,

@@ -30,11 +30,13 @@ struct InboxContentView: View {
 
     @Environment(UnreadRepliesStore.self) private var unreadReplies
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.openURL) private var openURL
     @Environment(InlineGIFPlaybackStore.self) private var playbackStore
     @State private var store = InboxStore()
     @State private var filter: InboxFilter = .unread
     @State private var subredditReply: InboxReply?
     @State private var replyingTo: InboxReply?
+    @State private var thread: ThreadTarget?
     @State private var playbackSuspension: InlineGIFPlaybackSuspension?
 
     private struct Selection: Equatable {
@@ -91,6 +93,7 @@ struct InboxContentView: View {
                                 isMarkingRead: store.markingReadIDs.contains(reply.id),
                                 showSubreddit: { presentSubreddit(reply) },
                                 replyToComment: { presentReply(to: reply) },
+                                openThread: presentThread,
                                 markRead: {
                                     Task {
                                         let accountGeneration = unreadReplies.accountGeneration
@@ -152,7 +155,7 @@ struct InboxContentView: View {
         .preferredColorScheme(.dark)
         .task(id: Selection(filter: filter, account: account)) { await reload() }
         .onDisappear {
-            guard subredditReply == nil, replyingTo == nil else { return }
+            guard subredditReply == nil, replyingTo == nil, thread == nil else { return }
             store.cancel()
             resumeInlineGIFPlayback()
         }
@@ -160,6 +163,9 @@ struct InboxContentView: View {
             SubredditCoverView(subreddit: reply.subreddit, title: reply.subredditNamePrefixed) {
                 subredditReply = nil
             }
+        }
+        .sheet(item: $thread, onDismiss: resumeInlineGIFPlayback) { target in
+            ThreadView(target: target)
         }
         .sheet(item: $replyingTo, onDismiss: resumeInlineGIFPlayback) { reply in
             ComposeReplySheet(
@@ -220,6 +226,16 @@ struct InboxContentView: View {
         replyingTo = reply
     }
 
+    // Opens a Reddit thread link in Lurk; anything else still goes to the browser.
+    private func presentThread(_ url: URL) {
+        guard let target = ThreadTarget(url: url) else {
+            openURL(url)
+            return
+        }
+        playbackSuspension = playbackStore.suspend()
+        thread = target
+    }
+
     private func resumeInlineGIFPlayback() {
         playbackSuspension?.invalidate()
         playbackSuspension = nil
@@ -231,9 +247,9 @@ private struct InboxReplyRow: View {
     let isMarkingRead: Bool
     let showSubreddit: () -> Void
     let replyToComment: () -> Void
+    let openThread: (URL) -> Void
     let markRead: () -> Void
 
-    @Environment(\.openURL) private var openURL
     @Environment(\.dynamicTypeSize) private var typeSize
 
     var body: some View {
@@ -259,7 +275,7 @@ private struct InboxReplyRow: View {
                     }
                 }
                 if let url = reply.fullCommentsURL {
-                    Button { openURL(url) } label: {
+                    Button { openThread(url) } label: {
                         Text(reply.linkTitle)
                             .multilineTextAlignment(.leading)
                             .font(.subheadline)
@@ -296,7 +312,7 @@ private struct InboxReplyRow: View {
     @ViewBuilder
     private var actions: some View {
         if let url = reply.contextURL {
-            Button { openURL(url) } label: {
+            Button { openThread(url) } label: {
                 Label("Context", systemImage: "arrow.up.right")
             }
             .foregroundStyle(Theme.textSecondary)

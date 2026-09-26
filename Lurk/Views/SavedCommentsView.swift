@@ -10,6 +10,7 @@ struct SavedCommentsView: View {
     @State private var loading = true
     @State private var loadingMore = false
     @State private var error: String?
+    @State private var thread: ThreadTarget?
 
     var body: some View {
         NavigationStack {
@@ -24,7 +25,7 @@ struct SavedCommentsView: View {
                     ScrollView {
                         LazyVStack(spacing: 12) {
                             ForEach(comments) { comment in
-                                SavedCommentCard(comment: comment) { id in
+                                SavedCommentCard(comment: comment, openThread: { thread = $0 }) { id in
                                     withAnimation { comments.removeAll { $0.id == id } }
                                 }
                                 .onAppear {
@@ -56,6 +57,9 @@ struct SavedCommentsView: View {
             .toolbarColorScheme(.dark, for: .navigationBar)
         }
         .preferredColorScheme(.dark)
+        .sheet(item: $thread) { target in
+            ThreadView(target: target)
+        }
     }
 
     private func loadComments() async {
@@ -85,19 +89,29 @@ struct SavedCommentsView: View {
 
 private struct SavedCommentCard: View {
     let comment: SavedComment
+    let openThread: (ThreadTarget) -> Void
     let onUnsave: (String) -> Void
 
     @Environment(RedditSession.self) private var session
     @Environment(\.redditClient) private var client
     @State private var isUnsaving = false
+
+    private var target: ThreadTarget? { ThreadTarget(permalink: comment.permalink) }
     @State private var unsaveError: String?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text(comment.linkTitle)
-                .font(.subheadline.weight(.medium))
-                .foregroundStyle(Theme.text)
-                .lineLimit(2)
+            Button {
+                if let target { openThread(target.wholePost) }
+            } label: {
+                Text(comment.linkTitle)
+                    .font(.subheadline.weight(.medium))
+                    .foregroundStyle(Theme.text)
+                    .lineLimit(2)
+                    .multilineTextAlignment(.leading)
+            }
+            .buttonStyle(.plain)
+            .disabled(target == nil)
 
             HStack(spacing: 6) {
                 Text(comment.subredditNamePrefixed)
@@ -117,7 +131,19 @@ private struct SavedCommentCard: View {
                     .foregroundStyle(Theme.textMuted)
             }
 
-            CommentBodyView(content: comment.body, textFont: .subheadline)
+            CommentBodyView(
+                content: comment.body,
+                textFont: .subheadline,
+                nonInteractiveTapAction: target.map { target in
+                    CommentBodyTapAction(
+                        perform: { openThread(target) },
+                        mediaAccessibility: MediaActionAccessibility(
+                            label: "Open comment thread",
+                            hint: "Double-tap to open this comment's thread."
+                        )
+                    )
+                }
+            )
 
             HStack {
                 Label(Formatters.score(comment.score), systemImage: "arrow.up")

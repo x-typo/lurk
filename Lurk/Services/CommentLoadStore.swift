@@ -70,6 +70,15 @@ final class CommentLoadStore {
         }
     }
 
+    // Replaces a loaded thread with another set of comments, such as the whole thread after one
+    // comment's context. It stops the old thread's load-more and supersedes a load still running.
+    func reload(fetch: Fetch) async {
+        cancel()
+        moreErrors = [:]
+        if state == .loaded { state = .idle }
+        await load(fetch: fetch)
+    }
+
     func cancel() {
         loadMoreTask?.cancel()
         loadMoreTask = nil
