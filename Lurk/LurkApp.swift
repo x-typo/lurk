@@ -68,7 +68,9 @@ private struct LurkRootView: View {
             }
             .task(id: account) { await refreshUnreadReplies() }
             .onChange(of: scenePhase) { _, phase in
-                if phase == .active { Task { await refreshUnreadReplies() } }
+                guard phase == .active else { return }
+                Task { await refreshUnreadReplies() }
+                if session.needsLoginCheck { Task { await session.checkLoginStatus() } }
             }
             .onChange(of: session.isLoggedIn) { _, loggedIn in
                 guard loggedIn else { return }
