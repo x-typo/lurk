@@ -327,7 +327,7 @@ struct PostDetailView: View {
             ComposeReplySheet(thingID: "t1_\(comment.id)", isPresented: replySheetPresented)
         }
         .sheet(item: $commentShare, onDismiss: resumeAfterPresentation) { share in
-            PostShareSheet(url: share.url, title: share.title, imageURL: nil)
+            PostShareSheet(url: share.url, title: share.title)
         }
         .fullScreenCover(isPresented: $showMediaViewer, onDismiss: mediaViewerDismissed) {
             if let videoURL = post.videoURL {
@@ -353,7 +353,7 @@ struct PostDetailView: View {
             }
         }
         .sheet(isPresented: $showShareSheet, onDismiss: resumeAfterPresentation) {
-            PostShareSheet(url: post.redditURL, title: post.title, imageURL: post.imageURL)
+            PostShareSheet(url: post.redditURL, title: post.title)
         }
         .alert("Reddit action failed", isPresented: removeErrorPresented) {
             Button("OK", role: .cancel) {}
