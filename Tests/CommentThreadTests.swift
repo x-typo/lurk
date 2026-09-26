@@ -36,6 +36,28 @@ struct CommentThreadTests {
         #expect(ids(nodes, collapsed: ["b"]) == ["a", "b"])
     }
 
+    @Test("Muted authors are hidden with their replies, ignoring case")
+    func mutedAuthorsHidden() {
+        let nodes = [
+            comment("a", [comment("b", [comment("c")], author: "Pest"), comment("d")]),
+            comment("e", author: "AutoModerator"),
+            comment("f"),
+        ]
+        #expect(ids(nodes, mutedUsers: ["pest", "automoderator"]) == ["a", "d", "f"])
+        #expect(ids(nodes, mutedUsers: []) == ["a", "b", "c", "d", "e", "f"])
+    }
+
+    @Test("A collapsed comment's hidden-reply count skips muted subtrees")
+    func collapsedCountSkipsMuted() {
+        let nodes = [comment("a", [comment("b", [comment("c")], author: "Pest"), comment("d")])]
+        let rows = CommentNode.rows(from: nodes, collapsed: ["a"], mutedUsers: ["pest"])
+        guard case .comment(_, _, _, let hiddenReplyCount)? = rows.first else {
+            Issue.record("Expected a comment row")
+            return
+        }
+        #expect(hiddenReplyCount == 1)
+    }
+
     @Test("Loaded replies replace their placeholder in place")
     func mergeReplacesPlaceholder() {
         let placeholder = CommentMore(parentID: "t1_a", count: 2, childIDs: ["x", "y"])
@@ -149,8 +171,8 @@ struct CommentThreadTests {
         #expect(state.endDrag(translation: CGSize(width: 300, height: 0)) == .reply)
     }
 
-    private func ids(_ nodes: [CommentNode], collapsed: Set<String> = []) -> [String] {
-        CommentNode.rows(from: nodes, collapsed: collapsed).map(\.id)
+    private func ids(_ nodes: [CommentNode], collapsed: Set<String> = [], mutedUsers: Set<String> = []) -> [String] {
+        CommentNode.rows(from: nodes, collapsed: collapsed, mutedUsers: mutedUsers).map(\.id)
     }
 
     private func depth(_ row: CommentRow) -> Int {
@@ -160,8 +182,8 @@ struct CommentThreadTests {
         }
     }
 
-    private func comment(_ id: String, _ replies: [CommentNode] = []) -> CommentNode {
-        .comment(Lurk.Comment(id: id, author: "reader", body: "body", score: 1, createdUtc: 0,
+    private func comment(_ id: String, _ replies: [CommentNode] = [], author: String = "reader") -> CommentNode {
+        .comment(Lurk.Comment(id: id, author: author, body: "body", score: 1, createdUtc: 0,
                               isSubmitter: false), replies: replies)
     }
 

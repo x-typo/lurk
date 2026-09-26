@@ -71,19 +71,6 @@ struct Comment: Identifiable {
     // Deeper replies still render; indentation and rails stop growing here.
     nonisolated static let maxIndentDepth = 10
 
-    nonisolated static let filteredBots: Set<String> = [
-        "AutoModerator",
-        "AnimeMod",
-        "flairassistant",
-        "trendingtattler",
-        "post-explainer",
-        "ClaudeAI-mod-bot",
-        "WithoutReason1729",
-        "dexterthebot",
-        "PCMRBot",
-        "BeAmazed-ModBot"
-    ]
-
     var initialVote: Int {
         switch likes {
         case true?: 1
@@ -168,8 +155,7 @@ extension CommentNode {
         let data = wrapper.data
         switch wrapper.kind {
         case "t1":
-            guard let author = data.author, let body = data.body,
-                  !Comment.filteredBots.contains(author) else { return nil }
+            guard let author = data.author, let body = data.body else { return nil }
             let id = data.id ?? UUID().uuidString
             let comment = Comment(
                 id: id,
@@ -204,18 +190,20 @@ extension CommentNode {
 // MARK: - Tree Operations
 
 extension CommentNode {
-    static func rows(from nodes: [CommentNode], collapsed: Set<String>) -> [CommentRow] {
+    // `mutedUsers` holds lowercased usernames; a muted comment hides with its replies.
+    static func rows(from nodes: [CommentNode], collapsed: Set<String>, mutedUsers: Set<String> = []) -> [CommentRow] {
         var rows: [CommentRow] = []
         func append(_ nodes: [CommentNode], depth: Int) {
             for node in nodes {
                 switch node {
                 case .comment(let comment, let replies):
+                    guard !mutedUsers.contains(comment.author.lowercased()) else { continue }
                     let isCollapsed = collapsed.contains(comment.id)
                     rows.append(.comment(
                         comment,
                         depth: depth,
                         isCollapsed: isCollapsed,
-                        hiddenReplyCount: isCollapsed ? replyCount(in: replies) : 0
+                        hiddenReplyCount: isCollapsed ? replyCount(in: replies, mutedUsers: mutedUsers) : 0
                     ))
                     if !isCollapsed { append(replies, depth: depth + 1) }
                 case .more(let more):
@@ -227,10 +215,13 @@ extension CommentNode {
         return rows
     }
 
-    static func replyCount(in nodes: [CommentNode]) -> Int {
+    static func replyCount(in nodes: [CommentNode], mutedUsers: Set<String> = []) -> Int {
         nodes.reduce(0) { total, node in
             switch node {
-            case .comment(_, let replies): total + 1 + replyCount(in: replies)
+            case .comment(let comment, let replies):
+                mutedUsers.contains(comment.author.lowercased())
+                    ? total
+                    : total + 1 + replyCount(in: replies, mutedUsers: mutedUsers)
             case .more(let more): total + more.count
             }
         }

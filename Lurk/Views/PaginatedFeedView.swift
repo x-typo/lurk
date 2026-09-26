@@ -22,6 +22,7 @@ struct PaginatedFeedView: View {
 
     @Environment(PostFilterStore.self) private var filterStore
     @Environment(BlockedSubredditStore.self) private var blockStore
+    @Environment(MuteStore.self) private var muteStore
     @Environment(RedditSession.self) private var session
     @Environment(\.redditClient) private var client
 
@@ -218,7 +219,8 @@ struct PaginatedFeedView: View {
     private func shouldInclude(_ post: Post) -> Bool {
         guard applyFilters else { return true }
         return !filterStore.isHidden(post.id)
-            && !post.matchesFilteredKeyword
+            && !muteStore.isMuted(user: post.author)
+            && !muteStore.matchesKeyword(in: post.title)
             && (!applyBlockFilter || !blockStore.isBlocked(post.subreddit))
     }
 

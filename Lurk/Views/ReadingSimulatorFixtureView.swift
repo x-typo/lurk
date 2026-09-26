@@ -10,6 +10,7 @@ struct ReadingSimulatorFixtureView: View {
     @State private var session = RedditSession(restoringSession: false)
     @State private var filters = PostFilterStore()
     @State private var blocks = BlockedSubredditStore()
+    @State private var mutes = MuteStore(defaults: freshMuteDefaults())
     @State private var subscriptions = SubredditStore()
     @State private var playback = InlineGIFPlaybackStore()
     @State private var client = makeOfflineClient()
@@ -139,6 +140,7 @@ struct ReadingSimulatorFixtureView: View {
         .environment(session)
         .environment(filters)
         .environment(blocks)
+        .environment(mutes)
         .environment(subscriptions)
         .environment(playback)
         .environment(\.redditClient, client)
@@ -159,6 +161,13 @@ struct ReadingSimulatorFixtureView: View {
             postHint: nil, media: nil, secureMedia: nil, preview: nil,
             galleryData: nil, mediaMetadata: nil
         )
+    }
+
+    // Each fixture launch starts with only the seeded bots muted.
+    private static func freshMuteDefaults() -> UserDefaults {
+        let suite = "com.xtypo.Lurk.readingQA.mutes"
+        UserDefaults().removePersistentDomain(forName: suite)
+        return UserDefaults(suiteName: suite)!
     }
 
     private static func makeOfflineClient() -> RedditClient {

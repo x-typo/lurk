@@ -5,11 +5,13 @@ struct SettingsView: View {
     @Environment(UnreadRepliesStore.self) private var unreadReplies
     @Environment(RedditSession.self) private var session
     @Environment(BlockedSubredditStore.self) private var blockStore
+    @Environment(MuteStore.self) private var muteStore
 
     @State private var showLogin = false
     @State private var hiddenExpanded = false
     @State private var showHidden = false
     @State private var showBlocked = false
+    @State private var mutedListKind: MuteListView.Kind?
     @State private var savedExpanded = false
     @State private var showSavedPosts = false
     @State private var showSavedComments = false
@@ -141,6 +143,14 @@ struct SettingsView: View {
                                 .padding(14)
                                 .background(Theme.surfaceElevated)
                                 .clipShape(RoundedRectangle(cornerRadius: 10))
+                            }
+
+                            mutedListRow("Muted Users", systemImage: "person.slash", count: muteStore.users.count) {
+                                mutedListKind = .users
+                            }
+
+                            mutedListRow("Muted Keywords", systemImage: "text.badge.xmark", count: muteStore.keywords.count) {
+                                mutedListKind = .keywords
                             }
                         }
                         .padding(.leading, 16)
@@ -308,6 +318,39 @@ struct SettingsView: View {
         }
         .fullScreenCover(isPresented: $showBlocked) {
             BlockedSubredditsView()
+        }
+        .fullScreenCover(item: $mutedListKind) { kind in
+            MuteListView(kind: kind)
+        }
+    }
+
+    private func mutedListRow(
+        _ title: String,
+        systemImage: String,
+        count: Int,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            HStack(spacing: 12) {
+                Image(systemName: systemImage)
+                    .font(.subheadline)
+                    .foregroundStyle(Theme.primary)
+                Text(title)
+                    .font(.subheadline.weight(.medium))
+                    .foregroundStyle(Theme.text)
+                Spacer()
+                if count > 0 {
+                    Text("\(count)")
+                        .font(.subheadline)
+                        .foregroundStyle(Theme.textMuted)
+                }
+                Image(systemName: "chevron.right")
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(Theme.textMuted)
+            }
+            .padding(14)
+            .background(Theme.surfaceElevated)
+            .clipShape(RoundedRectangle(cornerRadius: 10))
         }
     }
 }
