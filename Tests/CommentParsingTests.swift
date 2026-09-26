@@ -88,6 +88,18 @@ struct CommentParsingTests {
         #expect(CommentNode.rowIDs(in: nodes) == ["bot", "reply", "human"])
     }
 
+    @Test("Reddit's stickied flag marks a pinned comment")
+    func pinnedFlag() throws {
+        let nodes = try parse([
+            node("pinned", author: "AutoModerator", stickied: true), node("unpinned", stickied: false), node("absent"),
+        ])
+        let pinned = nodes.compactMap { node -> Bool? in
+            guard case .comment(let comment, _) = node else { return nil }
+            return comment.isPinned
+        }
+        #expect(pinned == [true, false, false])
+    }
+
     @Test("The viewer's vote seeds the displayed score without double counting")
     func viewerVote() throws {
         let nodes = try parse([
@@ -210,6 +222,7 @@ struct CommentParsingTests {
         depth: Int? = nil,
         score: Int = 1,
         likes: Bool? = nil,
+        stickied: Bool? = nil,
         children: [[String: Any]] = []
     ) -> [String: Any] {
         var data: [String: Any] = ["author": author, "body": "body", "score": score,
@@ -217,6 +230,7 @@ struct CommentParsingTests {
         if let id { data["id"] = id }
         if let depth { data["depth"] = depth }
         if let likes { data["likes"] = likes }
+        if let stickied { data["stickied"] = stickied }
         return ["kind": "t1", "data": data]
     }
 

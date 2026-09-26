@@ -152,6 +152,21 @@ struct SettingsView: View {
                             mutedListRow("Muted Keywords", systemImage: "text.badge.xmark", count: muteStore.keywords.count) {
                                 mutedListKind = .keywords
                             }
+
+                            Toggle(isOn: Bindable(muteStore).hidesPinnedModComments) {
+                                HStack(spacing: 12) {
+                                    Image(systemName: "pin.slash")
+                                        .font(.subheadline)
+                                        .foregroundStyle(Theme.primary)
+                                    Text("Hide Pinned Mod Comments")
+                                        .font(.subheadline.weight(.medium))
+                                        .foregroundStyle(Theme.text)
+                                }
+                            }
+                            .padding(.horizontal, 14)
+                            .padding(.vertical, 8)
+                            .background(Theme.surfaceElevated)
+                            .clipShape(RoundedRectangle(cornerRadius: 10))
                         }
                         .padding(.leading, 16)
                         .transition(.opacity.combined(with: .move(edge: .top)))

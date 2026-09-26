@@ -47,6 +47,16 @@ struct CommentThreadTests {
         #expect(ids(nodes, mutedUsers: []) == ["a", "b", "c", "d", "e", "f"])
     }
 
+    @Test("Pinned comments hide with their replies only while the setting is on")
+    func pinnedCommentsHidden() {
+        let nodes = [
+            comment("pin", [comment("reply")], author: "AutoModerator", pinned: true),
+            comment("a", [comment("b")]),
+        ]
+        #expect(ids(nodes, hidesPinned: true) == ["a", "b"])
+        #expect(ids(nodes, hidesPinned: false) == ["pin", "reply", "a", "b"])
+    }
+
     @Test("A collapsed comment's hidden-reply count skips muted subtrees")
     func collapsedCountSkipsMuted() {
         let nodes = [comment("a", [comment("b", [comment("c")], author: "Pest"), comment("d")])]
@@ -171,8 +181,13 @@ struct CommentThreadTests {
         #expect(state.endDrag(translation: CGSize(width: 300, height: 0)) == .reply)
     }
 
-    private func ids(_ nodes: [CommentNode], collapsed: Set<String> = [], mutedUsers: Set<String> = []) -> [String] {
-        CommentNode.rows(from: nodes, collapsed: collapsed, mutedUsers: mutedUsers).map(\.id)
+    private func ids(
+        _ nodes: [CommentNode],
+        collapsed: Set<String> = [],
+        mutedUsers: Set<String> = [],
+        hidesPinned: Bool = false
+    ) -> [String] {
+        CommentNode.rows(from: nodes, collapsed: collapsed, mutedUsers: mutedUsers, hidesPinned: hidesPinned).map(\.id)
     }
 
     private func depth(_ row: CommentRow) -> Int {
@@ -182,9 +197,14 @@ struct CommentThreadTests {
         }
     }
 
-    private func comment(_ id: String, _ replies: [CommentNode] = [], author: String = "reader") -> CommentNode {
+    private func comment(
+        _ id: String,
+        _ replies: [CommentNode] = [],
+        author: String = "reader",
+        pinned: Bool = false
+    ) -> CommentNode {
         .comment(Lurk.Comment(id: id, author: author, body: "body", score: 1, createdUtc: 0,
-                              isSubmitter: false), replies: replies)
+                              isSubmitter: false, isPinned: pinned), replies: replies)
     }
 
     private func more(_ parentID: String, _ childIDs: [String], count: Int? = nil) -> CommentNode {
