@@ -219,15 +219,16 @@ struct PaginatedFeedView: View {
         }
         if action.unsaves {
             let thingID = "t3_\(post.id)"
-            engagement.submitSave(false, for: thingID, loaded: post.saved, send: {
-                try await client.execute(request)
-            }, onFailure: { writeError = $0.localizedDescription })
-            // A newer Save, or failures Reddit never applied, can leave the post saved; the row follows that.
             Task { @MainActor in
-                if await engagement.settledSave(thingID, loaded: post.saved) {
-                    restoreRemovedPost(post, to: removedIndex)
-                } else {
+                let accepted = await engagement.submitSaveAndWait(false, for: thingID, loaded: post.saved, send: {
+                    try await client.execute(request)
+                }, onFailure: { writeError = $0.localizedDescription })
+                // The row stays removed only if Reddit accepted this Unsave and nothing saved the post again.
+                let savedAgain = await engagement.settledSave(thingID, loaded: post.saved)
+                if accepted && !savedAgain {
                     action.onComplete?(post.id)
+                } else {
+                    restoreRemovedPost(post, to: removedIndex)
                 }
             }
             return

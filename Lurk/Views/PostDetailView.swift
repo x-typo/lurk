@@ -585,13 +585,15 @@ struct PostDetailView: View {
         }
         if action.unsaves {
             let thingID = "t3_\(postId)"
-            engagement.submitSave(false, for: thingID, loaded: post.saved, send: {
+            let accepted = await engagement.submitSaveAndWait(false, for: thingID, loaded: post.saved, send: {
                 try await client.execute(request)
             }, onFailure: { error in
                 removeError = error.localizedDescription
             })
-            // A Save tapped meanwhile keeps the post in the list and the detail open.
-            if await !engagement.settledSave(thingID, loaded: post.saved) {
+            // Closes only if Reddit accepted this Unsave and nothing saved the post again; otherwise the
+            // detail stays open with its error.
+            let savedAgain = await engagement.settledSave(thingID, loaded: post.saved)
+            if accepted && !savedAgain {
                 finish()
             }
             return

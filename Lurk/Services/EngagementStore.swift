@@ -51,6 +51,22 @@ final class EngagementStore {
                 show: { [weak self] in self?.saves[thingID] = $0 }, send: send, onFailure: onFailure)
     }
 
+    // Submits a save write and waits for it; true when Reddit accepted this write.
+    func submitSaveAndWait(
+        _ saved: Bool,
+        for thingID: String,
+        loaded: Bool,
+        send: @escaping Send,
+        onFailure: @escaping @MainActor (Error) -> Void
+    ) async -> Bool {
+        let accepted = Flag()
+        await submitSave(saved, for: thingID, loaded: loaded, send: {
+            try await send()
+            accepted.isSet = true
+        }, onFailure: onFailure).value
+        return accepted.isSet
+    }
+
     // Waits until no save writes are queued for the thing, then returns the viewer's final choice.
     func settledSave(_ thingID: String, loaded: Bool) async -> Bool {
         while let tail = saveLanes.tails[thingID] {
@@ -76,6 +92,10 @@ final class EngagementStore {
         saves = [:]
         voteLanes = Lanes()
         saveLanes = Lanes()
+    }
+
+    private final class Flag {
+        var isSet = false
     }
 
     private final class Lanes<Value: Equatable> {

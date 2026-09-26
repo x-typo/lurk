@@ -173,6 +173,30 @@ struct EngagementStoreTests {
         #expect(log.failures == 1)
     }
 
+    @Test("Waiting for an Unsave reports whether Reddit accepted that write, even after an ambiguous Save")
+    func submitSaveAndWaitReportsThisWrite() async {
+        let store = EngagementStore()
+        let saveGate = Gate()
+        let log = Log()
+        #expect(await store.submitSaveAndWait(false, for: "t3_a", loaded: true, send: {}, onFailure: log.fail))
+
+        // A Save that Reddit applied but whose response timed out, then an Unsave that fails offline.
+        let save = store.submitSave(true, for: "t3_a", loaded: true, send: {
+            await saveGate.wait()
+            throw URLError(.timedOut)
+        }, onFailure: log.fail)
+        await saveGate.waitUntilStarted()
+        let unsave = Task {
+            await store.submitSaveAndWait(false, for: "t3_a", loaded: true, send: {
+                throw URLError(.notConnectedToInternet)
+            }, onFailure: log.fail)
+        }
+        saveGate.open()
+        await save.value
+        #expect(await unsave.value == false)
+        #expect(log.failures == 1)
+    }
+
     @Test("When an Unsave and a later Save both fail, the post settles as saved and the failure is reported")
     func bothFailSettlesSaved() async {
         let store = EngagementStore()
