@@ -463,7 +463,7 @@ struct PostDetailView: View {
                         onShare: shareURL.map { url in { presentShare(of: comment, url: url) } },
                         onMute: canMute(comment) ? { muteStore.muteUser(comment.author) } : nil,
                         isFocused: comment.id == focusedCommentID,
-                        isSaved: engagement.isSaved("t1_\(comment.id)", loaded: comment.saved),
+                        isSaved: engagement.isSaved("t1_\(comment.id)", loaded: comment.saved ?? false),
                         onSave: session.isLoggedIn ? { toggleCommentSave(comment) } : nil
                     )
                 case .more(let more, let depth):
@@ -525,7 +525,7 @@ struct PostDetailView: View {
         engagement.reconcile(
             fetchStartedAt: started,
             votes: comments.map { ("t1_\($0.id)", $0.initialVote) },
-            saves: comments.map { ("t1_\($0.id)", $0.saved) }
+            saves: comments.compactMap(\.savedEntry)
         )
         return nodes
     }
@@ -547,7 +547,7 @@ struct PostDetailView: View {
                 engagement.reconcile(
                     fetchStartedAt: started,
                     votes: comments.map { ("t1_\($0.id)", $0.initialVote) },
-                    saves: comments.map { ("t1_\($0.id)", $0.saved) }
+                    saves: comments.compactMap(\.savedEntry)
                 )
                 return loaded
             }
@@ -573,8 +573,9 @@ struct PostDetailView: View {
 
     private func toggleCommentSave(_ comment: Comment) {
         let thingID = "t1_\(comment.id)"
-        let saved = !engagement.isSaved(thingID, loaded: comment.saved)
-        engagement.submitSave(saved, for: thingID, loaded: comment.saved, send: {
+        let loaded = comment.saved ?? false
+        let saved = !engagement.isSaved(thingID, loaded: loaded)
+        engagement.submitSave(saved, for: thingID, loaded: loaded, send: {
             let request = session.authenticatedRequest(
                 url: saved ? RedditAPI.save : RedditAPI.unsave,
                 formData: ["id": thingID]

@@ -100,14 +100,14 @@ struct CommentParsingTests {
         #expect(pinned == [true, false, false])
     }
 
-    @Test("A comment carries Reddit's saved state, and a missing value means not saved")
+    @Test("A comment carries Reddit's saved state, and a missing value stays unknown")
     func viewerSave() throws {
         let nodes = try parse([node("saved", saved: true), node("unsaved", saved: false), node("unknown")])
         let comments = nodes.compactMap { node -> Lurk.Comment? in
             guard case .comment(let comment, _) = node else { return nil }
             return comment
         }
-        #expect(comments.map(\.saved) == [true, false, false])
+        #expect(comments.map(\.saved) == [true, false, nil])
     }
 
     @Test("The viewer's vote seeds the displayed score without double counting")

@@ -85,6 +85,23 @@ struct EngagementStoreTests {
         #expect(log.failures == 1)
     }
 
+    @Test("A response without a comment's saved state leaves a settled Save; an explicit value still corrects it")
+    func missingSavedStateKeepsSettledSave() async {
+        let store = EngagementStore()
+        let log = Log()
+        await store.submitSave(true, for: "t1_a", loaded: false, send: {}, onFailure: log.fail).value
+        let later = Date.now.addingTimeInterval(1)
+
+        var comment = Lurk.Comment(id: "a", author: "reader", body: "", score: 1, createdUtc: 0, isSubmitter: false)
+        store.reconcile(fetchStartedAt: later, saves: [comment].compactMap(\.savedEntry))
+        #expect(store.isSaved("t1_a", loaded: false))
+
+        comment.saved = false
+        store.reconcile(fetchStartedAt: later, saves: [comment].compactMap(\.savedEntry))
+        #expect(!store.isSaved("t1_a", loaded: false))
+        #expect(log.failures == 0)
+    }
+
     @Test("A failed save goes back to Reddit's state and reports the error")
     func failedSaveRollsBack() async {
         let store = EngagementStore()
