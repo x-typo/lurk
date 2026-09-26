@@ -32,6 +32,7 @@ struct PaginatedFeedView: View {
     @Environment(PostFilterStore.self) private var filterStore
     @Environment(BlockedSubredditStore.self) private var blockStore
     @Environment(MuteStore.self) private var muteStore
+    @Environment(PostHideSync.self) private var hideSync
     @Environment(RedditSession.self) private var session
     @Environment(\.redditClient) private var client
 
@@ -41,7 +42,6 @@ struct PaginatedFeedView: View {
     @State private var galleryPost: Post?
     @State private var writeError: String?
     @State private var hiddenUndo: HiddenPostUndo?
-    @State private var hideSync = PostHideSync()
     @State private var readRequest: ReadRequest?
     @State private var feedPlaybackStore = InlineGIFPlaybackStore()
     @State private var presentationPlaybackStore = InlineGIFPlaybackStore()
@@ -249,9 +249,13 @@ struct PaginatedFeedView: View {
 
     // Signed out, hiding and Undo stay local.
     private func syncHidden(_ hidden: Bool, post: Post, onFailure: @escaping @MainActor (Error) -> Void) {
-        guard session.isLoggedIn, let account = session.username else { return }
+        guard session.isLoggedIn, let account = session.username else {
+            hideSync.supersede(postID: post.id)
+            return
+        }
         hideSync.enqueue(
             postID: post.id,
+            hidden: hidden,
             account: account,
             currentAccount: { session.isLoggedIn ? session.username : nil },
             send: {

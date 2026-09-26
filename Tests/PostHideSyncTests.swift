@@ -10,16 +10,12 @@ struct PostHideSyncTests {
         let sync = PostHideSync()
         let gate = Gate()
         let log = Log()
-        let hide = sync.enqueue(postID: "a", account: "x", currentAccount: { log.account }, send: {
+        let hide = enqueue(sync, log, hidden: true) {
             await gate.wait()
             log.events.append("hide")
-        }, onFailure: log.unexpected)
-        let undo = sync.enqueue(postID: "a", account: "x", currentAccount: { log.account }, send: {
-            log.events.append("unhide")
-        }, onFailure: log.unexpected)
-        let rehide = sync.enqueue(postID: "a", account: "x", currentAccount: { log.account }, send: {
-            log.events.append("hide again")
-        }, onFailure: log.unexpected)
+        }
+        let undo = enqueue(sync, log, hidden: false) { log.events.append("unhide") }
+        let rehide = enqueue(sync, log, hidden: true) { log.events.append("hide again") }
 
         await gate.waitUntilStarted()
         #expect(log.events.isEmpty)
@@ -28,32 +24,62 @@ struct PostHideSyncTests {
         await undo.value
         await rehide.value
         #expect(log.events == ["hide", "unhide", "hide again"])
+        #expect(log.failures.isEmpty)
     }
 
-    @Test("A failure is reported only while it's still the post's latest action")
+    @Test("A superseded failure is ignored; a failed latest write rolls back")
     func staleFailureIsIgnored() async {
         let sync = PostHideSync()
         let gate = Gate()
         let log = Log()
-        let hide = sync.enqueue(postID: "a", account: "x", currentAccount: { log.account }, send: {
+        let hide = enqueue(sync, log, hidden: true) {
             await gate.wait()
             throw URLError(.badServerResponse)
-        }, onFailure: { _ in log.events.append("hide failed") })
-        let undo = sync.enqueue(postID: "a", account: "x", currentAccount: { log.account }, send: {
-            log.events.append("unhide")
-        }, onFailure: { _ in log.events.append("unhide failed") })
+        }
+        let undo = enqueue(sync, log, hidden: false) { log.events.append("unhide") }
 
         await gate.waitUntilStarted()
         gate.open()
         await hide.value
         await undo.value
         #expect(log.events == ["unhide"])
+        #expect(log.failures.isEmpty)
 
-        let lone = sync.enqueue(postID: "b", account: "x", currentAccount: { log.account }, send: {
-            throw URLError(.timedOut)
-        }, onFailure: { _ in log.events.append("b failed") })
-        await lone.value
-        #expect(log.events == ["unhide", "b failed"])
+        await enqueue(sync, log, postID: "b", hidden: true) { throw URLError(.timedOut) }.value
+        #expect(log.failures == ["b hidden=true"])
+    }
+
+    @Test("When the hide and its Undo both fail, the post stays visible")
+    func noRollbackWhenRedditNeverChanged() async {
+        let sync = PostHideSync()
+        let gate = Gate()
+        let log = Log()
+        let hide = enqueue(sync, log, hidden: true) {
+            await gate.wait()
+            throw URLError(.notConnectedToInternet)
+        }
+        let undo = enqueue(sync, log, hidden: false) { throw URLError(.notConnectedToInternet) }
+
+        await gate.waitUntilStarted()
+        gate.open()
+        await hide.value
+        await undo.value
+        #expect(log.failures.isEmpty)
+    }
+
+    @Test("When the hide succeeds but its Undo fails, the post goes back to hidden")
+    func rollbackWhenRedditKeptTheHide() async {
+        let sync = PostHideSync()
+        let gate = Gate()
+        let log = Log()
+        let hide = enqueue(sync, log, hidden: true) { await gate.wait() }
+        let undo = enqueue(sync, log, hidden: false) { throw URLError(.timedOut) }
+
+        await gate.waitUntilStarted()
+        gate.open()
+        await hide.value
+        await undo.value
+        #expect(log.failures == ["a hidden=false"])
     }
 
     @Test("A queued write is dropped if the account changed before it could be sent")
@@ -61,13 +87,11 @@ struct PostHideSyncTests {
         let sync = PostHideSync()
         let gate = Gate()
         let log = Log()
-        let hide = sync.enqueue(postID: "a", account: "x", currentAccount: { log.account }, send: {
+        let hide = enqueue(sync, log, hidden: true) {
             await gate.wait()
             log.events.append("hide")
-        }, onFailure: log.unexpected)
-        let undo = sync.enqueue(postID: "a", account: "x", currentAccount: { log.account }, send: {
-            log.events.append("unhide as the wrong account")
-        }, onFailure: log.unexpected)
+        }
+        let undo = enqueue(sync, log, hidden: false) { log.events.append("unhide as the wrong account") }
 
         await gate.waitUntilStarted()
         log.account = "y"
@@ -77,11 +101,37 @@ struct PostHideSyncTests {
         #expect(log.events == ["hide"])
 
         log.account = nil
-        let signedOut = sync.enqueue(postID: "c", account: "x", currentAccount: { log.account }, send: {
-            log.events.append("sent while signed out")
-        }, onFailure: log.unexpected)
-        await signedOut.value
+        await enqueue(sync, log, postID: "c", hidden: true) { log.events.append("sent while signed out") }.value
         #expect(log.events == ["hide"])
+        #expect(log.failures.isEmpty)
+    }
+
+    @Test("A failure after sign-out, or after a newer local-only action, is ignored")
+    func ignoresFailuresAfterSignOut() async {
+        let sync = PostHideSync()
+        let gate = Gate()
+        let log = Log()
+        let hide = enqueue(sync, log, hidden: true) {
+            await gate.wait()
+            throw URLError(.timedOut)
+        }
+        await gate.waitUntilStarted()
+        log.account = nil
+        gate.open()
+        await hide.value
+        #expect(log.failures.isEmpty)
+
+        log.account = "x"
+        let secondGate = Gate()
+        let second = enqueue(sync, log, postID: "d", hidden: true) {
+            await secondGate.wait()
+            throw URLError(.timedOut)
+        }
+        await secondGate.waitUntilStarted()
+        sync.supersede(postID: "d")
+        secondGate.open()
+        await second.value
+        #expect(log.failures.isEmpty)
     }
 
     @Test("Different posts don't wait on each other, and a finished post starts fresh")
@@ -89,33 +139,45 @@ struct PostHideSyncTests {
         let sync = PostHideSync()
         let gate = Gate()
         let log = Log()
-        let slow = sync.enqueue(postID: "a", account: "x", currentAccount: { log.account }, send: {
+        let slow = enqueue(sync, log, hidden: true) {
             await gate.wait()
             log.events.append("a")
-        }, onFailure: log.unexpected)
+        }
         await gate.waitUntilStarted()
 
-        await sync.enqueue(postID: "b", account: "x", currentAccount: { log.account }, send: {
-            log.events.append("b")
-        }, onFailure: log.unexpected).value
+        await enqueue(sync, log, postID: "b", hidden: true) { log.events.append("b") }.value
         #expect(log.events == ["b"])
 
         gate.open()
         await slow.value
-        await sync.enqueue(postID: "a", account: "x", currentAccount: { log.account }, send: {
-            log.events.append("a again")
-        }, onFailure: log.unexpected).value
+        await enqueue(sync, log, hidden: false) { log.events.append("a again") }.value
         #expect(log.events == ["b", "a", "a again"])
+        #expect(log.failures.isEmpty)
+    }
+
+    @discardableResult
+    private func enqueue(
+        _ sync: PostHideSync,
+        _ log: Log,
+        postID: String = "a",
+        hidden: Bool,
+        send: @escaping @MainActor () async throws -> Void
+    ) -> Task<Void, Never> {
+        sync.enqueue(
+            postID: postID,
+            hidden: hidden,
+            account: "x",
+            currentAccount: { log.account },
+            send: send,
+            onFailure: { _ in log.failures.append("\(postID) hidden=\(hidden)") }
+        )
     }
 
     @MainActor
     private final class Log {
         var events: [String] = []
+        var failures: [String] = []
         var account: String? = "x"
-
-        func unexpected(_ error: Error) {
-            Issue.record("Unexpected failure: \(error)")
-        }
     }
 
     @MainActor
