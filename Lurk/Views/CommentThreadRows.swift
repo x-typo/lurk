@@ -134,7 +134,7 @@ struct CommentThreadRowView: View {
             }
             Text(comment.author)
                 .font(.caption.weight(.semibold))
-                .foregroundStyle(Theme.text)
+                .foregroundStyle(authorColor)
                 .lineLimit(1)
             if comment.isSubmitter {
                 Text("OP")
@@ -163,6 +163,11 @@ struct CommentThreadRowView: View {
             Button(vote == -1 ? "Remove downvote" : "Downvote") { onVote(vote == -1 ? 0 : -1) }
             Button("Reply", action: onReply)
         }
+    }
+
+    // Matches the comment's innermost thread line, so each author reads with its reply level.
+    private var authorColor: Color {
+        CommentRails.innermostColor(depth: depth) ?? Theme.primary
     }
 
     private var scoreLabel: some View {
@@ -321,11 +326,21 @@ struct CommentRails: View {
         return levels == 0 ? 0 : CGFloat(levels) * 10 + 6
     }
 
+    static func color(level: Int) -> Color {
+        Theme.commentRails[level % Theme.commentRails.count]
+    }
+
+    // The innermost rail beside a comment at `depth`; top-level comments have none.
+    static func innermostColor(depth: Int) -> Color? {
+        let levels = min(depth, Comment.maxIndentDepth)
+        return levels == 0 ? nil : color(level: levels - 1)
+    }
+
     var body: some View {
         HStack(spacing: 8) {
             ForEach(0..<min(depth, Comment.maxIndentDepth), id: \.self) { level in
                 Rectangle()
-                    .fill(Theme.commentRails[level % Theme.commentRails.count])
+                    .fill(Self.color(level: level))
                     .frame(width: 2)
             }
         }

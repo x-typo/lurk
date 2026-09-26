@@ -5,6 +5,7 @@ struct UserCommentsView: View {
     @Environment(\.redditClient) private var client
     @Environment(\.dismiss) private var dismiss
     @Environment(InlineGIFPlaybackStore.self) private var playbackStore
+    @Environment(EngagementStore.self) private var engagement
 
     @State private var comments: [UserComment] = []
     @State private var after: String?
@@ -137,7 +138,9 @@ struct UserCommentsView: View {
     private func loadComments() async {
         do {
             guard let username = session.username else { throw URLError(.userAuthenticationRequired) }
+            let started = Date.now
             let listing = try await client.fetchUserComments(username: username)
+            reconcile(listing, fetchStartedAt: started)
             comments = listing.data.children.map(\.data)
             after = listing.data.after
             error = nil
@@ -152,10 +155,19 @@ struct UserCommentsView: View {
         loadingMore = true
         defer { loadingMore = false }
         do {
+            let started = Date.now
             let listing = try await client.fetchUserComments(username: username, after: after)
+            reconcile(listing, fetchStartedAt: started)
             comments.append(contentsOf: listing.data.children.map(\.data))
             self.after = listing.data.after
         } catch {}
+    }
+
+    private func reconcile(_ listing: UserCommentListing, fetchStartedAt started: Date) {
+        engagement.reconcile(
+            fetchStartedAt: started,
+            votes: listing.data.children.map { ("t1_\($0.data.id)", $0.data.initialVote) }
+        )
     }
 
     private func updateCommentBody(id: String, body: String) {
@@ -250,7 +262,12 @@ private struct UserCommentRow: View {
             )
 
             HStack(spacing: 14) {
-                VoteControlsView(thingID: "t1_\(comment.id)", initialScore: comment.score, inactiveColor: Theme.textMuted)
+                VoteControlsView(
+                    thingID: "t1_\(comment.id)",
+                    score: comment.score,
+                    loadedVote: comment.initialVote,
+                    inactiveColor: Theme.textMuted
+                )
 
                 Button(action: editComment) {
                     Image(systemName: "pencil")

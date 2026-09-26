@@ -179,28 +179,4 @@ struct PostHideSyncTests {
         var failures: [String] = []
         var account: String? = "x"
     }
-
-    @MainActor
-    private final class Gate {
-        private var continuation: CheckedContinuation<Void, Never>?
-        private var started: CheckedContinuation<Void, Never>?
-
-        func wait() async {
-            await withCheckedContinuation { continuation in
-                self.continuation = continuation
-                started?.resume()
-                started = nil
-            }
-        }
-
-        func waitUntilStarted() async {
-            guard continuation == nil else { return }
-            await withCheckedContinuation { started = $0 }
-        }
-
-        func open() {
-            continuation?.resume()
-            continuation = nil
-        }
-    }
 }

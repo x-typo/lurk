@@ -65,6 +65,26 @@ struct Post: Identifiable, Decodable {
     let galleryData: GalleryData?
     let mediaMetadata: [String: MediaMetadataItem]?
     var crosspost: CrosspostContent? = nil
+    var likes: Bool? = nil
+    var saved = false
+
+    var initialVote: Int { likes.voteDirection }
+
+    // Reddit's score already includes the viewer's loaded vote.
+    func displayScore(vote: Int) -> Int {
+        score - initialVote + vote
+    }
+}
+
+extension Optional where Wrapped == Bool {
+    // Reddit's `likes`: true is the viewer's upvote, false a downvote, nil no vote.
+    nonisolated var voteDirection: Int {
+        switch self {
+        case true?: 1
+        case false?: -1
+        case nil: 0
+        }
+    }
 }
 
 extension Post {
@@ -72,6 +92,7 @@ extension Post {
         case id, title, author, subreddit, subredditNamePrefixed, score, numComments
         case createdUtc, permalink, url, selftext, isSelf, isVideo, stickied, over18
         case postHint, media, secureMedia, preview, galleryData, mediaMetadata, crosspostParentList
+        case likes, saved
     }
 
     init(from decoder: Decoder) throws {
@@ -97,6 +118,8 @@ extension Post {
         preview = try values.decodeIfPresent(Preview.self, forKey: .preview)
         galleryData = try values.decodeIfPresent(GalleryData.self, forKey: .galleryData)
         mediaMetadata = try values.decodeIfPresent([String: MediaMetadataItem].self, forKey: .mediaMetadata)
+        likes = try values.decodeIfPresent(Bool.self, forKey: .likes)
+        saved = try values.decodeIfPresent(Bool.self, forKey: .saved) ?? false
         if var parents = try? values.nestedUnkeyedContainer(forKey: .crosspostParentList),
            !parents.isAtEnd,
            let parentDecoder = try? parents.superDecoder() {

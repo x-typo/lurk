@@ -19,6 +19,24 @@ struct RedditListingDecodingTests {
         #expect(post.over18 == false)
     }
 
+    @MainActor
+    @Test("The viewer's vote and saved state decode, and the score counts the vote once")
+    func viewerStateDecodes() throws {
+        let upvoted = try post(extraFields: #""likes": true, "saved": true,"#)
+        #expect(upvoted.initialVote == 1)
+        #expect(upvoted.saved)
+        #expect(upvoted.displayScore(vote: 1) == 42)
+        #expect(upvoted.displayScore(vote: 0) == 41)
+        #expect(upvoted.displayScore(vote: -1) == 40)
+
+        let downvoted = try post(extraFields: #""likes": false,"#)
+        #expect(downvoted.initialVote == -1)
+
+        let anonymous = try post(extraFields: #""likes": null,"#)
+        #expect(anonymous.initialVote == 0)
+        #expect(!anonymous.saved)
+    }
+
     @Test("A nonempty page where every child is malformed is rejected")
     func rejectsAllMalformedChildren() {
         #expect(throws: DecodingError.self) {
@@ -62,6 +80,22 @@ struct RedditListingDecodingTests {
             }
             """#.utf8
         )
+    }
+
+    private func post(extraFields: String) throws -> Post {
+        let data = Data(
+            """
+            {"data": {"after": null, "children": [{"data": {
+              \(extraFields)
+              "id": "voted", "title": "A post", "author": "reader", "subreddit": "swift",
+              "subreddit_name_prefixed": "r/swift", "score": 42, "num_comments": 1,
+              "created_utc": 1700000000, "permalink": "/r/swift/comments/voted/a_post/",
+              "url": "https://example.com", "selftext": "", "is_self": false, "is_video": false,
+              "stickied": false, "over_18": false
+            }}]}}
+            """.utf8
+        )
+        return try #require(RedditAPI.decoder.decode(RedditListing.self, from: data).data.children.first?.data)
     }
 
     private var invalidListingData: Data {

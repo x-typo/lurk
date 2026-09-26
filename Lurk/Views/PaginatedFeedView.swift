@@ -4,6 +4,8 @@ struct PostRemoveAction {
     let label: String
     let apiURL: URL
     var systemImage = "minus.circle"
+    // Unsave shares the bookmark's ordered save writes for the post.
+    var unsaves = false
     var onComplete: ((String) -> Void)? = nil
 }
 
@@ -33,6 +35,7 @@ struct PaginatedFeedView: View {
     @Environment(BlockedSubredditStore.self) private var blockStore
     @Environment(MuteStore.self) private var muteStore
     @Environment(PostHideSync.self) private var hideSync
+    @Environment(EngagementStore.self) private var engagement
     @Environment(RedditSession.self) private var session
     @Environment(\.redditClient) private var client
 
@@ -147,7 +150,9 @@ struct PaginatedFeedView: View {
             PostDetailView(
                 post: post,
                 removeAction: removeAction.map { action in
-                    PostRemoveAction(label: action.label, apiURL: action.apiURL, systemImage: action.systemImage) { id in
+                    PostRemoveAction(
+                        label: action.label, apiURL: action.apiURL, systemImage: action.systemImage, unsaves: action.unsaves
+                    ) { id in
                         action.onComplete?(id)
                         pager.removePost(id: id)
                     }
@@ -204,17 +209,36 @@ struct PaginatedFeedView: View {
             return
         }
 
+        let request = session.authenticatedRequest(
+            url: action.apiURL,
+            formData: ["id": "t3_\(post.id)"]
+        )
+        let fail: @MainActor (Error) -> Void = { error in
+            restoreRemovedPost(post, to: removedIndex)
+            writeError = error.localizedDescription
+        }
+        if action.unsaves {
+            let thingID = "t3_\(post.id)"
+            Task { @MainActor in
+                let accepted = await engagement.submitSaveAndWait(false, for: thingID, loaded: post.saved, send: {
+                    try await client.execute(request)
+                }, onFailure: { writeError = $0.localizedDescription })
+                // The row stays removed only if Reddit accepted this Unsave and nothing saved the post again.
+                let savedAgain = await engagement.settledSave(thingID, loaded: post.saved)
+                if accepted && !savedAgain {
+                    action.onComplete?(post.id)
+                } else {
+                    restoreRemovedPost(post, to: removedIndex)
+                }
+            }
+            return
+        }
         Task { @MainActor in
             do {
-                let request = session.authenticatedRequest(
-                    url: action.apiURL,
-                    formData: ["id": "t3_\(post.id)"]
-                )
                 try await client.execute(request)
                 action.onComplete?(post.id)
             } catch {
-                restoreRemovedPost(post, to: removedIndex)
-                writeError = error.localizedDescription
+                fail(error)
             }
         }
     }
@@ -286,24 +310,39 @@ struct PaginatedFeedView: View {
             && (!applyBlockFilter || !blockStore.isBlocked(post.subreddit))
     }
 
+    // A page carries Reddit's state for its posts, which reconciles this session's settled choices.
+    private var reconcilingFetchPage: FeedPager.FetchPage {
+        { [fetchPage, engagement] after in
+            let started = Date.now
+            let listing = try await fetchPage(after)
+            let posts = listing.data.children.map(\.data)
+            engagement.reconcile(
+                fetchStartedAt: started,
+                votes: posts.map { ("t3_\($0.id)", $0.initialVote) },
+                saves: posts.map { ("t3_\($0.id)", $0.saved) }
+            )
+            return listing
+        }
+    }
+
     private func loadInitialIfNeeded() async {
-        await pager.loadIfNeeded(fetchPage: fetchPage, include: shouldInclude)
+        await pager.loadIfNeeded(fetchPage: reconcilingFetchPage, include: shouldInclude)
     }
 
     private func retryInitialLoad() async {
-        await pager.retryInitial(fetchPage: fetchPage, include: shouldInclude)
+        await pager.retryInitial(fetchPage: reconcilingFetchPage, include: shouldInclude)
     }
 
     private func refresh() async {
-        await pager.refresh(fetchPage: fetchPage, include: shouldInclude)
+        await pager.refresh(fetchPage: reconcilingFetchPage, include: shouldInclude)
     }
 
     private func loadMore() async {
-        await pager.loadMore(fetchPage: fetchPage, include: shouldInclude)
+        await pager.loadMore(fetchPage: reconcilingFetchPage, include: shouldInclude)
     }
 
     private func retryLoadMore() async {
-        await pager.retryLoadMore(fetchPage: fetchPage, include: shouldInclude)
+        await pager.retryLoadMore(fetchPage: reconcilingFetchPage, include: shouldInclude)
     }
 
     private func requestLoadMoreIfNeeded(for post: Post) {

@@ -6,6 +6,9 @@ import WebKit
 final class RedditSession {
     private(set) var isLoggedIn = false
     private(set) var username: String?
+    // Bumped when the request cookies change (sign-in, sign-out), so views holding account-specific
+    // data reload. The restore at launch reuses the cookies requests already send, so it doesn't bump.
+    private(set) var credentialsVersion = 0
     private var modhash: String?
     private var cookies: [HTTPCookie] = []
 
@@ -24,6 +27,7 @@ final class RedditSession {
         for cookie in redditCookies {
             HTTPCookieStorage.shared.setCookie(cookie)
         }
+        credentialsVersion += 1
 
         await checkLoginStatus()
     }
@@ -101,15 +105,17 @@ final class RedditSession {
     }
 
     func logout() async {
+        // Before publishing the signed-out state, so feeds that reload for it can't send these cookies.
+        HTTPCookieStorage.shared.cookies?.filter { $0.domain.contains("reddit.com") }.forEach {
+            HTTPCookieStorage.shared.deleteCookie($0)
+        }
+        credentialsVersion += 1
         clearSession()
         let store = WKWebsiteDataStore.default()
         let records = await store.dataRecords(ofTypes: WKWebsiteDataStore.allWebsiteDataTypes())
         let redditRecords = records.filter { $0.displayName.contains("reddit") }
         if !redditRecords.isEmpty {
             await store.removeData(ofTypes: WKWebsiteDataStore.allWebsiteDataTypes(), for: redditRecords)
-        }
-        HTTPCookieStorage.shared.cookies?.filter { $0.domain.contains("reddit.com") }.forEach {
-            HTTPCookieStorage.shared.deleteCookie($0)
         }
     }
 

@@ -74,13 +74,7 @@ struct Comment: Identifiable {
     // Deeper replies still render; indentation and rails stop growing here.
     nonisolated static let maxIndentDepth = 10
 
-    var initialVote: Int {
-        switch likes {
-        case true?: 1
-        case false?: -1
-        case nil: 0
-        }
-    }
+    var initialVote: Int { likes.voteDirection }
 
     // Reddit's score already includes the viewer's original vote.
     func displayScore(vote: Int) -> Int {
@@ -194,6 +188,13 @@ extension CommentNode {
 // MARK: - Tree Operations
 
 extension CommentNode {
+    static func comments(in nodes: [CommentNode]) -> [Comment] {
+        nodes.flatMap { node -> [Comment] in
+            guard case .comment(let comment, let replies) = node else { return [] }
+            return [comment] + comments(in: replies)
+        }
+    }
+
     // `mutedUsers` holds lowercased usernames. A muted comment, or a pinned one when
     // `hidesPinned` is on, hides with its replies.
     static func rows(

@@ -26,6 +26,9 @@ struct UserComment: Identifiable, Decodable {
     let linkPermalink: String?
     let parentId: String?
     let parentAuthor: String?
+    var likes: Bool? = nil
+
+    var initialVote: Int { likes.voteDirection }
 
     var actionLine: String {
         if parentId?.hasPrefix("t1_") == true, let parentAuthor, !parentAuthor.isEmpty {

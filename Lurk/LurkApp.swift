@@ -30,6 +30,7 @@ private struct LurkRootView: View {
     @State private var blockStore = BlockedSubredditStore()
     @State private var muteStore = MuteStore()
     @State private var hideSync = PostHideSync()
+    @State private var engagement = EngagementStore()
     @State private var session = RedditSession()
     @State private var playbackStore = InlineGIFPlaybackStore()
     @State private var unreadReplies = UnreadRepliesStore()
@@ -47,11 +48,13 @@ private struct LurkRootView: View {
             .environment(blockStore)
             .environment(muteStore)
             .environment(hideSync)
+            .environment(engagement)
             .environment(playbackStore)
             .environment(unreadReplies)
             .environment(\.redditClient, client)
             .onChange(of: account, initial: true) { _, account in
                 unreadReplies.setAccount(account)
+                engagement.setAccount(account)
             }
             .task(id: account) { await refreshUnreadReplies() }
             .onChange(of: scenePhase) { _, phase in
@@ -69,13 +72,17 @@ private struct LurkRootView: View {
 
     private var mainTabView: some View {
         TabView(selection: tabSelection) {
+            // Loaded posts carry the viewer's votes and saves, so feeds reload when the cookies change.
             PopularFeedView()
+                .id(session.credentialsVersion)
                 .tabItem { Label("Popular", systemImage: "flame") }
                 .tag(0)
             HomeFeedView()
+                .id(session.credentialsVersion)
                 .tabItem { Label("Home", systemImage: "house") }
                 .tag(1)
             SubredditsView(resetKey: subredditResetKey)
+                .id(session.credentialsVersion)
                 .tabItem { Label("Subreddits", systemImage: "list.bullet") }
                 .tag(2)
             SettingsView()
