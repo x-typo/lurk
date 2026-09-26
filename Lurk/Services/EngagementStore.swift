@@ -60,10 +60,10 @@ final class EngagementStore {
     }
 
     func reconcile(fetchStartedAt started: Date, votes fresh: [(String, Int)] = [], saves freshSaves: [(String, Bool)] = []) {
-        for (thingID, vote) in fresh where voteLanes.isSettled(thingID, before: started) {
+        for (thingID, vote) in fresh where voteLanes.accepts(thingID, fetchStartedAt: started) {
             votes[thingID] = vote
         }
-        for (thingID, saved) in freshSaves where saveLanes.isSettled(thingID, before: started) {
+        for (thingID, saved) in freshSaves where saveLanes.accepts(thingID, fetchStartedAt: started) {
             saves[thingID] = saved
         }
     }
@@ -85,10 +85,15 @@ final class EngagementStore {
         var confirmed: [String: Value] = [:]
         // When each thing's writes last all finished.
         var settledAt: [String: Date] = [:]
+        // Start of the newest fetch accepted for each thing, so an older response that lands later can't win.
+        var acceptedFetch: [String: Date] = [:]
 
-        func isSettled(_ thingID: String, before date: Date) -> Bool {
-            guard tails[thingID] == nil, let settled = settledAt[thingID] else { return false }
-            return settled <= date
+        // Accepts a fetch only while no write is pending, after the writes settled, and newer than the last one.
+        func accepts(_ thingID: String, fetchStartedAt started: Date) -> Bool {
+            guard tails[thingID] == nil, let settled = settledAt[thingID], settled <= started,
+                  acceptedFetch[thingID].map({ $0 <= started }) ?? true else { return false }
+            acceptedFetch[thingID] = started
+            return true
         }
     }
 

@@ -207,6 +207,21 @@ struct EngagementStoreTests {
         #expect(store.vote(for: "t3_b", loaded: 0) == 0)
     }
 
+    @Test("An older fetch that lands after a newer one doesn't undo it")
+    func olderFetchLoses() async {
+        let store = EngagementStore()
+        let log = Log()
+        await store.submitVote(1, for: "t3_a", loaded: 0, send: {}, onFailure: log.fail).value
+        await store.submitSave(true, for: "t3_a", loaded: false, send: {}, onFailure: log.fail).value
+        let older = Date.now
+        let newer = older.addingTimeInterval(1)
+
+        store.reconcile(fetchStartedAt: newer, votes: [("t3_a", -1)], saves: [("t3_a", false)])
+        store.reconcile(fetchStartedAt: older, votes: [("t3_a", 1)], saves: [("t3_a", true)])
+        #expect(store.vote(for: "t3_a", loaded: 0) == -1)
+        #expect(!store.isSaved("t3_a", loaded: false))
+    }
+
     @Test("A fetch while a write is pending doesn't override it")
     func pendingWriteIgnoresFetch() async {
         let store = EngagementStore()
