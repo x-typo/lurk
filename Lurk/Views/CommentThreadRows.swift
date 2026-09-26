@@ -63,6 +63,9 @@ struct CommentThreadRowView: View {
     let onShare: (() -> Void)?
     let onMute: (() -> Void)?
     var isFocused = false
+    var isSaved = false
+    // Nil when signed out.
+    var onSave: (() -> Void)? = nil
 
     @State private var offset: CGFloat = 0
     @State private var swipe = CommentSwipeState()
@@ -149,6 +152,12 @@ struct CommentThreadRowView: View {
                 .foregroundStyle(Theme.textMuted)
             Text(Formatters.timeAgo(comment.createdUtc))
                 .foregroundStyle(Theme.textMuted)
+            if isSaved {
+                Image(systemName: "bookmark.fill")
+                    .font(.caption2)
+                    .foregroundStyle(Theme.primary)
+                    .accessibilityLabel("Saved")
+            }
             Spacer(minLength: 0)
         }
         .font(.caption)
@@ -163,6 +172,9 @@ struct CommentThreadRowView: View {
             Button(vote == 1 ? "Remove upvote" : "Upvote") { onVote(vote == 1 ? 0 : 1) }
             Button(vote == -1 ? "Remove downvote" : "Downvote") { onVote(vote == -1 ? 0 : -1) }
             Button("Reply", action: onReply)
+            if let onSave {
+                Button(isSaved ? "Unsave" : "Save", action: onSave)
+            }
         }
     }
 
@@ -235,6 +247,11 @@ struct CommentThreadRowView: View {
         if let onShare {
             Button(action: onShare) {
                 Label("Share", systemImage: "square.and.arrow.up")
+            }
+        }
+        if let onSave {
+            Button(action: onSave) {
+                Label(isSaved ? "Unsave" : "Save", systemImage: isSaved ? "bookmark.slash" : "bookmark")
             }
         }
         if let onMute {

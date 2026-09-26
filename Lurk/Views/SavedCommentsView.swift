@@ -107,6 +107,7 @@ private struct SavedCommentCard: View {
 
     @Environment(RedditSession.self) private var session
     @Environment(\.redditClient) private var client
+    @Environment(EngagementStore.self) private var engagement
     @State private var isUnsaving = false
 
     private var target: ThreadTarget? { ThreadTarget(permalink: comment.permalink) }
@@ -198,15 +199,16 @@ private struct SavedCommentCard: View {
         isUnsaving = true
         defer { isUnsaving = false }
 
-        do {
-            let request = session.authenticatedRequest(
-                url: RedditAPI.unsave,
-                formData: ["id": "t1_\(comment.id)"]
-            )
+        // Through the store, so an open thread shows the change; like a saved post's Unsave.
+        let thingID = "t1_\(comment.id)"
+        let request = session.authenticatedRequest(url: RedditAPI.unsave, formData: ["id": thingID])
+        let accepted = await engagement.submitSaveAndWait(false, for: thingID, loaded: true, send: {
             try await client.execute(request)
+        }, onFailure: { unsaveError = $0.localizedDescription })
+        // The card leaves only if Reddit accepted this Unsave and nothing saved the comment again.
+        let savedAgain = await engagement.settledSave(thingID, loaded: true)
+        if accepted && !savedAgain {
             onUnsave(comment.id)
-        } catch {
-            unsaveError = error.localizedDescription
         }
     }
 }

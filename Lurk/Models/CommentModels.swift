@@ -25,6 +25,7 @@ struct CommentData: Decodable {
     let depth: Int?
     let isSubmitter: Bool?
     let likes: Bool?
+    let saved: Bool?
     let parentId: String?
     let count: Int?
     let children: [String]?
@@ -68,6 +69,7 @@ struct Comment: Identifiable {
     let createdUtc: TimeInterval
     let isSubmitter: Bool
     var likes: Bool? = nil
+    var saved = false
     // Reddit's `stickied`: a moderator pinned it to the top of the thread.
     var isPinned = false
 
@@ -162,6 +164,7 @@ extension CommentNode {
                 createdUtc: data.createdUtc ?? 0,
                 isSubmitter: data.isSubmitter ?? false,
                 likes: data.likes,
+                saved: data.saved ?? false,
                 isPinned: data.stickied ?? false
             )
             var replies: [CommentNode] = []
