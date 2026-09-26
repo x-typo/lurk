@@ -58,6 +58,7 @@ Flag violations of these conventions during review.
 - Reads use the `.json` endpoints with the web session's cookies. Reddit refuses signed-out reads (403), so a signed-out feed shows a sign-in prompt instead of an error. Reddit's external rate limit is ~100 requests/minute (not enforced in-app).
 - `after` parameter for pagination. Flag any offset-based pagination.
 - Video playback prefers `RedditVideo.hlsUrl` (HLS playlist, includes audio) and falls back to `RedditVideo.fallbackUrl` (CMAF MP4, video-only) when HLS is unavailable. Flag assumptions that `Post.url` is directly playable for video posts.
+- Animated gallery items play Reddit's `media_metadata` MP4 (`GalleryMedia.videoURL`, `Post.galleryVideoURL`) through AVPlayer, which has no GIF size limits; the GIF decoder handles only GIFs without an MP4. Flag new GIF-decoding paths for Reddit-hosted animations.
 - Comment trees are parsed into `CommentNode` values and rendered as flat, lazily loaded `CommentRow`s. Reddit's "more" placeholders load in-app through `fetchMoreComments`, one request at a time. Tree recursion is bounded by the loaded thread's depth; `maxIndentDepth` caps indentation, not content.
 
 ## Error Handling

@@ -4,6 +4,17 @@ import Testing
 
 @Suite("GIF download validation")
 struct MediaSaverTests {
+    @Test("A downloaded video is named by its type, since Reddit's MP4 of a GIF keeps the GIF's path")
+    func namesDownloadedVideoByType() throws {
+        let redditMP4 = try #require(URL(string: "https://preview.redd.it/abc.gif?format=mp4&s=sig"))
+        #expect(MediaSaver.videoFileExtension(for: redditMP4, mimeType: "video/mp4") == "mp4")
+        let movie = try #require(URL(string: "https://example.com/clip.mov"))
+        #expect(MediaSaver.videoFileExtension(for: movie, mimeType: "video/quicktime") == "mov")
+        #expect(MediaSaver.videoFileExtension(for: movie, mimeType: nil) == "mov")
+        let bare = try #require(URL(string: "https://v.redd.it/abc/DASH_720"))
+        #expect(MediaSaver.videoFileExtension(for: bare, mimeType: "application/octet-stream") == "mp4")
+    }
+
     @Test("GIF downloads require a successful HTTP response within the encoded-byte budget")
     func acceptsSuccessfulDownloadWithinLimit() throws {
         let response = try #require(httpResponse(statusCode: 200))

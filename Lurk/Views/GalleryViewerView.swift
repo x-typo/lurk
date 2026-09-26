@@ -65,6 +65,7 @@ struct GalleryViewerView: View {
                         isAnimated: item.isAnimated,
                         isActive: item.id == currentPage,
                         posterURL: item.posterURL,
+                        videoURL: item.videoURL,
                         onLoadStateChange: { state in
                             guard item.id == currentPage else { return }
                             currentPageLoadState = state
@@ -142,7 +143,7 @@ struct GalleryViewerView: View {
                                 return
                             }
                             let result = item.isAnimated
-                                ? await MediaSaver.saveImageData(from: item.url)
+                                ? await MediaSaver.saveAnimatedImage(from: item.url, video: item.videoURL)
                                 : await MediaSaver.saveImage(from: item.url)
                             guard saveTaskID == operationID, !Task.isCancelled else { return }
                             saveState = result == .saved ? .saved : .failed
@@ -188,21 +189,23 @@ struct GalleryViewerView: View {
 
                             if item.isAnimated {
                                 do {
-                                    let temporaryGIFURL = try await MediaSaver.temporaryGIFFile(from: item.url)
+                                    let temporaryFileURL = try await MediaSaver.temporaryAnimatedFile(
+                                        from: item.url, video: item.videoURL
+                                    )
                                     var shouldCleanUp = true
                                     defer {
                                         if shouldCleanUp {
-                                            try? FileManager.default.removeItem(at: temporaryGIFURL)
+                                            try? FileManager.default.removeItem(at: temporaryFileURL)
                                         }
                                     }
                                     try Task.checkCancellation()
 
                                     let activityController = UIActivityViewController(
-                                        activityItems: [temporaryGIFURL],
+                                        activityItems: [temporaryFileURL],
                                         applicationActivities: nil
                                     )
                                     activityController.completionWithItemsHandler = { _, _, _, _ in
-                                        try? FileManager.default.removeItem(at: temporaryGIFURL)
+                                        try? FileManager.default.removeItem(at: temporaryFileURL)
                                     }
                                     guard let presenter = topPresenter() else { return }
                                     activityController.popoverPresentationController?.sourceView = presenter.view

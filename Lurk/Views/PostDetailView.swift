@@ -133,6 +133,19 @@ struct PostDetailView: View {
                         YouTubePlayerView(videoID: youtubeVideoID)
                             .aspectRatio(post.imageAspectRatio ?? 16/9, contentMode: .fit)
                             .clipShape(RoundedRectangle(cornerRadius: 8))
+                    } else if let galleryVideoURL = post.galleryVideoURL {
+                        Button(action: presentMediaViewer) {
+                            InlineLoopingVideoView(
+                                url: galleryVideoURL,
+                                posterURL: post.feedImageURL,
+                                aspectRatio: post.imageAspectRatio,
+                                activation: .whenVisible
+                            )
+                            .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        .clipShape(RoundedRectangle(cornerRadius: 8))
+                        .accessibilityLabel(post.isGallery ? "Open gallery" : "Open GIF")
                     } else if let animatedImageURL = post.animatedImageURL {
                         AnimatedGIFView(
                             url: animatedImageURL,
@@ -219,7 +232,9 @@ struct PostDetailView: View {
                                     if !videoURLs.isEmpty {
                                         result = await MediaSaver.saveVideo(from: videoURLs)
                                     } else if let animatedImageURL = post.animatedImageURL {
-                                        result = await MediaSaver.saveImageData(from: animatedImageURL)
+                                        result = await MediaSaver.saveAnimatedImage(
+                                            from: animatedImageURL, video: post.galleryVideoURL
+                                        )
                                     } else if let imageURL = post.imageURL {
                                         result = await MediaSaver.saveImage(from: imageURL)
                                     } else {
@@ -343,7 +358,8 @@ struct PostDetailView: View {
                     downloadURLs: post.downloadableVideoURLs,
                     loops: post.loopsVideo
                 )
-            } else if post.isGallery && !post.galleryItems.isEmpty {
+            } else if !post.galleryItems.isEmpty {
+                // Includes one-item galleries, so an animated item keeps its MP4.
                 GalleryViewerView(items: post.galleryItems)
             } else if let animatedImageURL = post.animatedImageURL {
                 GalleryViewerView(items: [

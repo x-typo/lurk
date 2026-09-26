@@ -117,7 +117,7 @@ struct PostCardView: View {
                                 .contentShape(Rectangle())
                             }
                             .buttonStyle(.plain)
-                            .accessibilityLabel("Open video")
+                            .accessibilityLabel(post.isGallery ? "Open gallery" : "Open video")
                         }
                     }
                     .clipShape(RoundedRectangle(cornerRadius: 8))
