@@ -1,6 +1,7 @@
 import AVFoundation
 import Photos
 import UIKit
+import UniformTypeIdentifiers
 
 enum MediaSaver {
     enum SaveResult {
@@ -30,6 +31,24 @@ enum MediaSaver {
             return result
         } catch {
             return .failed
+        }
+    }
+
+    // Saves the GIF when it fits the download limit, otherwise Reddit's MP4 of it as a video.
+    static func saveAnimatedImage(from url: URL, video videoURL: URL?) async -> SaveResult {
+        let result = await saveImageData(from: url)
+        guard result == .failed, let videoURL, !Task.isCancelled else { return result }
+        return await saveVideo(from: videoURL)
+    }
+
+    // The GIF to share when it fits the download limit, otherwise Reddit's MP4 of it.
+    static func temporaryAnimatedFile(from url: URL, video videoURL: URL?) async throws -> URL {
+        do {
+            return try await temporaryGIFFile(from: url)
+        } catch {
+            try Task.checkCancellation()
+            guard let videoURL else { throw error }
+            return try await temporaryVideoFile(from: videoURL)
         }
     }
 
@@ -197,7 +216,7 @@ enum MediaSaver {
         do {
             try Task.checkCancellation()
             try validateDownloadResponse(response)
-            let ext = url.pathExtension.isEmpty ? "mp4" : url.pathExtension
+            let ext = videoFileExtension(for: url, mimeType: response.mimeType)
             let fileURL = FileManager.default.temporaryDirectory.appendingPathComponent("\(UUID().uuidString).\(ext)")
             try FileManager.default.moveItem(at: tempURL, to: fileURL)
             return fileURL
@@ -205,6 +224,16 @@ enum MediaSaver {
             try? FileManager.default.removeItem(at: tempURL)
             throw error
         }
+    }
+
+    // Reddit's MP4 of a GIF keeps the GIF's path (`…/id.gif?format=mp4`), so a movie response type
+    // names the file; otherwise the path does.
+    nonisolated static func videoFileExtension(for url: URL, mimeType: String?) -> String {
+        if let mimeType, let type = UTType(mimeType: mimeType), type.conforms(to: .movie),
+           let ext = type.preferredFilenameExtension {
+            return ext
+        }
+        return url.pathExtension.isEmpty ? "mp4" : url.pathExtension
     }
 
     private static func exportVideo(from url: URL) async throws -> URL {

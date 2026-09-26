@@ -1,3 +1,4 @@
+import AVFoundation
 import SwiftUI
 import UIKit
 
@@ -6,6 +7,8 @@ struct ZoomableImageView: View {
     let isAnimated: Bool
     let isActive: Bool
     var posterURL: URL? = nil
+    // An animated item's MP4, played with a photo's zoom instead of decoding the GIF at `url`.
+    var videoURL: URL? = nil
     var onLoadStateChange: ((LoadState) -> Void)? = nil
     @State private var loadState: LoadState = .loading
     @State private var requestID = UUID()
@@ -32,6 +35,7 @@ struct ZoomableImageView: View {
             ZoomableImageRepresentable(
                 url: url,
                 isAnimated: isAnimated,
+                videoURL: videoURL,
                 requestID: requestID,
                 isActive: isActive,
                 loadState: $loadState
@@ -47,7 +51,7 @@ struct ZoomableImageView: View {
                     Image(systemName: "photo")
                         .font(.largeTitle)
                         .foregroundStyle(Theme.textMuted)
-                    Text("Couldn't load image")
+                    Text(videoURL == nil ? "Couldn't load image" : "Couldn't load GIF")
                         .font(.caption)
                         .foregroundStyle(Theme.textMuted)
                     Button("Retry") {
@@ -71,6 +75,7 @@ struct ZoomableImageView: View {
 private struct ZoomableImageRepresentable: UIViewRepresentable {
     let url: URL
     let isAnimated: Bool
+    let videoURL: URL?
     let requestID: UUID
     let isActive: Bool
     @Binding var loadState: ZoomableImageView.LoadState
@@ -105,17 +110,32 @@ private struct ZoomableImageRepresentable: UIViewRepresentable {
             imageView.heightAnchor.constraint(equalTo: scrollView.frameLayoutGuide.heightAnchor),
         ])
 
+        let playerView = PlayerLayerView()
+        playerView.translatesAutoresizingMaskIntoConstraints = false
+        playerView.isHidden = true
+        scrollView.addSubview(playerView)
+
+        NSLayoutConstraint.activate([
+            playerView.leadingAnchor.constraint(equalTo: scrollView.contentLayoutGuide.leadingAnchor),
+            playerView.trailingAnchor.constraint(equalTo: scrollView.contentLayoutGuide.trailingAnchor),
+            playerView.topAnchor.constraint(equalTo: scrollView.contentLayoutGuide.topAnchor),
+            playerView.bottomAnchor.constraint(equalTo: scrollView.contentLayoutGuide.bottomAnchor),
+            playerView.widthAnchor.constraint(equalTo: scrollView.frameLayoutGuide.widthAnchor),
+            playerView.heightAnchor.constraint(equalTo: scrollView.frameLayoutGuide.heightAnchor),
+        ])
+
         let doubleTap = UITapGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.doubleTap(_:)))
         doubleTap.numberOfTapsRequired = 2
         scrollView.addGestureRecognizer(doubleTap)
 
         context.coordinator.imageView = imageView
+        context.coordinator.playerView = playerView
         context.coordinator.scrollView = scrollView
         context.coordinator.onStateChange = { state in
             loadState = state
         }
         if isActive {
-            context.coordinator.load(url: url, isAnimated: isAnimated, requestID: requestID)
+            context.coordinator.load(url: url, isAnimated: isAnimated, videoURL: videoURL, requestID: requestID)
         }
 
         return scrollView
@@ -131,8 +151,9 @@ private struct ZoomableImageRepresentable: UIViewRepresentable {
         }
         if context.coordinator.currentURL != url
             || context.coordinator.currentIsAnimated != isAnimated
+            || context.coordinator.currentVideoURL != videoURL
             || context.coordinator.currentRequestID != requestID {
-            context.coordinator.load(url: url, isAnimated: isAnimated, requestID: requestID)
+            context.coordinator.load(url: url, isAnimated: isAnimated, videoURL: videoURL, requestID: requestID)
         }
     }
 
@@ -143,30 +164,47 @@ private struct ZoomableImageRepresentable: UIViewRepresentable {
     @MainActor
     final class Coordinator: NSObject, UIScrollViewDelegate {
         weak var imageView: UIImageView?
+        weak var playerView: PlayerLayerView?
         weak var scrollView: UIScrollView?
         var currentURL: URL?
         var currentIsAnimated: Bool = false
+        var currentVideoURL: URL?
         var currentRequestID: UUID?
         var onStateChange: ((ZoomableImageView.LoadState) -> Void)?
         private var loadTask: Task<Void, Never>?
+        private var player: AVQueuePlayer?
+        private var looper: AVPlayerLooper?
+        private var playerObservations: [NSKeyValueObservation] = []
 
-        deinit { loadTask?.cancel() }
+        deinit {
+            loadTask?.cancel()
+            looper?.disableLooping()
+            player?.pause()
+        }
 
         func viewForZooming(in scrollView: UIScrollView) -> UIView? {
-            imageView
+            currentVideoURL == nil ? imageView : playerView
         }
 
         func scrollViewDidZoom(_ scrollView: UIScrollView) {
             scrollView.isScrollEnabled = scrollView.zoomScale > scrollView.minimumZoomScale
         }
 
-        func load(url: URL, isAnimated: Bool, requestID: UUID) {
+        func load(url: URL, isAnimated: Bool, videoURL: URL?, requestID: UUID) {
             loadTask?.cancel()
+            stopVideo()
             imageView?.image = nil
             scrollView?.setZoomScale(scrollView?.minimumZoomScale ?? 1, animated: false)
             currentURL = url
             currentIsAnimated = isAnimated
+            currentVideoURL = videoURL
             currentRequestID = requestID
+            imageView?.isHidden = videoURL != nil
+            playerView?.isHidden = videoURL == nil
+            if let videoURL {
+                playVideo(videoURL, requestID: requestID)
+                return
+            }
             loadTask = Task { [weak self] in
                 guard let self,
                       self.currentURL == url,
@@ -208,10 +246,50 @@ private struct ZoomableImageRepresentable: UIViewRepresentable {
             }
         }
 
+        private func playVideo(_ videoURL: URL, requestID: UUID) {
+            onStateChange?(.loading)
+            let player = AVQueuePlayer()
+            player.isMuted = true
+            let looper = AVPlayerLooper(player: player, templateItem: AVPlayerItem(url: videoURL))
+            self.player = player
+            self.looper = looper
+            playerView?.playerLayer.player = player
+            // The page shows once the first frame is ready; the poster covers it until then.
+            if let playerLayer = playerView?.playerLayer {
+                playerObservations.append(playerLayer.observe(\.isReadyForDisplay, options: [.initial, .new]) { [weak self] layer, _ in
+                    guard layer.isReadyForDisplay else { return }
+                    Task { @MainActor [weak self] in self?.finishVideo(.loaded, requestID: requestID) }
+                })
+            }
+            playerObservations.append(looper.observe(\.status, options: [.new]) { [weak self] looper, _ in
+                guard looper.status == .failed else { return }
+                Task { @MainActor [weak self] in self?.finishVideo(.failed, requestID: requestID) }
+            })
+            player.play()
+        }
+
+        private func finishVideo(_ state: ZoomableImageView.LoadState, requestID: UUID) {
+            guard currentRequestID == requestID, player != nil else { return }
+            onStateChange?(state)
+        }
+
+        private func stopVideo() {
+            playerObservations.forEach { $0.invalidate() }
+            playerObservations = []
+            looper?.disableLooping()
+            looper = nil
+            player?.pause()
+            player?.removeAllItems()
+            player = nil
+            playerView?.playerLayer.player = nil
+        }
+
         func cancel() {
             loadTask?.cancel()
             loadTask = nil
+            stopVideo()
             currentURL = nil
+            currentVideoURL = nil
             currentRequestID = nil
             onStateChange = nil
             imageView?.image = nil
@@ -222,7 +300,7 @@ private struct ZoomableImageRepresentable: UIViewRepresentable {
             if scrollView.zoomScale > scrollView.minimumZoomScale {
                 scrollView.setZoomScale(scrollView.minimumZoomScale, animated: true)
             } else {
-                let point = gesture.location(in: imageView)
+                let point = gesture.location(in: viewForZooming(in: scrollView))
                 let targetScale: CGFloat = 2.0
                 let size = CGSize(
                     width: scrollView.bounds.width / targetScale,

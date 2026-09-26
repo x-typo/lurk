@@ -293,6 +293,8 @@ struct MediaMetadataItem: Decodable {
 struct MediaMetadataSource: Decodable {
     let u: String?
     let gif: String?
+    // Reddit's MP4 of an animated item; it plays through the video decoder, which has no GIF size limits.
+    var mp4: String? = nil
     let x: Int?
     let y: Int?
 
@@ -307,6 +309,10 @@ struct MediaMetadataSource: Decodable {
     var decodedUrl: String? {
         decodedStaticUrl ?? decodedAnimatedUrl
     }
+
+    var decodedVideoUrl: String? {
+        mp4?.replacingOccurrences(of: "&amp;", with: "&")
+    }
 }
 
 struct GalleryMedia: Identifiable {
@@ -314,12 +320,15 @@ struct GalleryMedia: Identifiable {
     let url: URL
     let isAnimated: Bool
     let posterURL: URL?
+    // Plays in place of the GIF at `url` when Reddit supplies it.
+    let videoURL: URL?
 
-    init(id: Int, url: URL, isAnimated: Bool, posterURL: URL? = nil) {
+    init(id: Int, url: URL, isAnimated: Bool, posterURL: URL? = nil, videoURL: URL? = nil) {
         self.id = id
         self.url = url
         self.isAnimated = isAnimated
         self.posterURL = posterURL
+        self.videoURL = videoURL
     }
 }
 
@@ -529,6 +538,9 @@ extension Post {
         if loopsVideo, let videoURL {
             return .video(videoURL)
         }
+        if let galleryVideoURL {
+            return .video(galleryVideoURL)
+        }
         if let animatedImageURL {
             return .gif(animatedImageURL)
         }
@@ -541,6 +553,19 @@ extension Post {
 
     var galleryCount: Int {
         contentGalleryData?.items?.count ?? 0
+    }
+
+    // A gallery that opens on an animated item plays that item's MP4, like a GIF post's video preview.
+    var galleryVideoURL: URL? {
+        guard let firstItem = contentGalleryData?.items?.first,
+              let meta = contentMediaMetadata?[firstItem.mediaId],
+              meta.isAnimated else { return nil }
+        return Self.httpMediaURL(meta.s?.decodedVideoUrl)
+    }
+
+    private static func httpMediaURL(_ string: String?) -> URL? {
+        guard let string, let url = URL(string: string), url.isHTTPMediaURL else { return nil }
+        return url
     }
 
     var galleryItems: [GalleryMedia] {
@@ -558,12 +583,17 @@ extension Post {
                 ? (animatedURL ?? staticURL)
                 : (staticURL ?? animatedURL) else { continue }
             let isAnimated = meta.isAnimated && (animatedURL != nil || url.isGIFURL)
+            // Animated items often have no still in `s`; the largest preview copy stands in.
+            let posterURL = staticURL ?? meta.p?.last?.decodedStaticUrl
+                .flatMap(URL.init(string:))
+                .flatMap { $0.isHTTPMediaURL ? $0 : nil }
             result.append(
                 GalleryMedia(
                     id: result.count,
                     url: url,
                     isAnimated: isAnimated,
-                    posterURL: staticURL
+                    posterURL: posterURL,
+                    videoURL: isAnimated ? Self.httpMediaURL(meta.s?.decodedVideoUrl) : nil
                 )
             )
         }

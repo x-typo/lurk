@@ -95,6 +95,62 @@ struct PostMediaTests {
         #expect(post.galleryItems.first?.posterURL == URL(string: "https://preview.example.com/gallery-poster.jpg"))
     }
 
+    @Test("An animated gallery item plays Reddit's MP4, with its largest preview copy as the poster")
+    func playsAnimatedGalleryMP4() throws {
+        let post = try makePost(
+            url: "https://www.reddit.com/gallery/fixture",
+            galleryData: [
+                "items": [["media_id": "animated-item"], ["media_id": "still-item"]],
+            ],
+            mediaMetadata: [
+                "animated-item": [
+                    "e": "AnimatedImage",
+                    "s": [
+                        "gif": "https://i.redd.it/animated.gif",
+                        "mp4": "https://preview.redd.it/animated.gif?format=mp4&amp;s=sig",
+                        "x": 800,
+                        "y": 600,
+                    ],
+                    "p": [
+                        ["u": "https://preview.redd.it/animated.gif?width=108&amp;format=png8", "x": 108, "y": 81],
+                        ["u": "https://preview.redd.it/animated.gif?width=640&amp;format=png8", "x": 640, "y": 480],
+                    ],
+                ],
+                "still-item": [
+                    "e": "Image",
+                    "s": ["u": "https://preview.redd.it/still.jpg", "x": 800, "y": 600],
+                ],
+            ]
+        )
+
+        let mp4 = try #require(URL(string: "https://preview.redd.it/animated.gif?format=mp4&s=sig"))
+        #expect(post.galleryVideoURL == mp4)
+        #expect(post.animatedMedia == .video(mp4))
+        let first = try #require(post.galleryItems.first)
+        #expect(first.url == URL(string: "https://i.redd.it/animated.gif"))
+        #expect(first.isAnimated)
+        #expect(first.videoURL == mp4)
+        #expect(first.posterURL == URL(string: "https://preview.redd.it/animated.gif?width=640&format=png8"))
+        #expect(post.galleryItems.last?.videoURL == nil)
+    }
+
+    @Test("An animated gallery item without a usable MP4 keeps its GIF")
+    func animatedGalleryWithoutMP4KeepsGIF() throws {
+        let gif = try #require(URL(string: "https://i.redd.it/animated.gif"))
+        for mp4 in [nil, "file:///private/tmp/animated.mp4", "not a URL"] as [String?] {
+            var source: [String: Any] = ["gif": gif.absoluteString, "x": 800, "y": 600]
+            source["mp4"] = mp4
+            let post = try makePost(
+                url: "https://www.reddit.com/gallery/fixture",
+                galleryData: ["items": [["media_id": "animated-item"]]],
+                mediaMetadata: ["animated-item": ["e": "AnimatedImage", "s": source]]
+            )
+            #expect(post.galleryVideoURL == nil, "\(mp4 ?? "nil")")
+            #expect(post.animatedMedia == .gif(gif), "\(mp4 ?? "nil")")
+            #expect(post.galleryItems.first?.videoURL == nil, "\(mp4 ?? "nil")")
+        }
+    }
+
     @Test("Incomplete animated gallery metadata falls back to a static poster")
     func fallsBackIncompleteAnimatedGalleryItem() throws {
         let post = try makePost(

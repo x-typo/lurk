@@ -134,7 +134,7 @@ private struct InlineLoopingVideoRepresentable: UIViewRepresentable {
     }
 }
 
-private final class PlayerLayerView: UIView {
+final class PlayerLayerView: UIView {
     override class var layerClass: AnyClass { AVPlayerLayer.self }
 
     var playerLayer: AVPlayerLayer {
