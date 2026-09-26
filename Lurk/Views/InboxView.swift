@@ -140,8 +140,9 @@ struct InboxContentView: View {
             .navigationTitle("Inbox")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
+                ToolbarItem(placement: .status) {
                     Button("Done") { dismiss() }
+                        .foregroundStyle(Theme.primary)
                 }
             }
             .toolbarColorScheme(.dark, for: .navigationBar)

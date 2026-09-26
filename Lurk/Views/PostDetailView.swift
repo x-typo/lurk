@@ -284,7 +284,8 @@ struct PostDetailView: View {
             }
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
+                // Bottom center, within thumb reach.
+                ToolbarItem(placement: .status) {
                     Button("Close") {
                         commentStore.cancel()
                         cancelMediaSaveTask()

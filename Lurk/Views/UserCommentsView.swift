@@ -58,7 +58,7 @@ struct UserCommentsView: View {
             .navigationTitle("Comments")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
+                ToolbarItem(placement: .status) {
                     Button("Done") { dismiss() }
                         .font(.body.weight(.medium))
                 }
