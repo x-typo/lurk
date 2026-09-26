@@ -17,7 +17,7 @@ Lurk uses Reddit's web session cookies for a personal signed-in browsing workflo
 - **Muting** - Mute users and title keywords from Settings, or mute someone from a comment's long-press menu. Comments moderators pin to the top of a thread are hidden too, unless you turn that off in Settings
 - **Dark Mode** - Native dark theme, no toggle
 - **Pull-to-Refresh** - Refresh any feed
-- **Optional Account Actions** - Sign in to vote, comment, sync subscribed subreddits, and manage saved/hidden posts
+- **Reddit Sign-In** - Required to load posts, since Reddit refuses signed-out requests. Signed in, you can also vote, comment, sync subscribed subreddits, and manage saved/hidden posts
 
 ## Tech Stack
 
@@ -52,7 +52,7 @@ Lurk/
 1. Clone the repository
 2. Open `Lurk.xcodeproj` in Xcode 26+
 3. Build and run on a simulator or device (iOS 18+)
-4. Sign in from the app's Settings tab using the embedded Reddit web login
+4. Sign in with the embedded Reddit web login, from any feed's sign-in prompt or the Settings tab
 
 ### Deploy to Physical Device
 
@@ -71,4 +71,4 @@ No Reddit app client ID, server, or client secret is needed.
 
 ## Design Philosophy
 
-Reading stays native and low-distraction. Account actions are available only after your personal Reddit web sign-in.
+Reading stays native and low-distraction. Posts and account actions both need your personal Reddit web sign-in.

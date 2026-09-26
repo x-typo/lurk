@@ -62,7 +62,7 @@ struct SettingsView: View {
                             .clipShape(RoundedRectangle(cornerRadius: 12))
                         }
 
-                        Text("Sign in to sync hidden posts to your Reddit account")
+                        Text("Reddit won't load posts in Lurk until you sign in.")
                             .font(.caption)
                             .foregroundStyle(Theme.textMuted)
                     }

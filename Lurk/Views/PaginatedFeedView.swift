@@ -46,6 +46,7 @@ struct PaginatedFeedView: View {
     @State private var writeError: String?
     @State private var hiddenUndo: HiddenPostUndo?
     @State private var readRequest: ReadRequest?
+    @State private var showsSignIn = false
     @State private var feedPlaybackStore = InlineGIFPlaybackStore()
     @State private var presentationPlaybackStore = InlineGIFPlaybackStore()
     @State private var feedSuspensionID = UUID()
@@ -59,8 +60,20 @@ struct PaginatedFeedView: View {
                     .frame(maxHeight: .infinity)
                     .accessibilityLabel("Loading posts")
             } else if let error = pager.initialError {
-                FeedInitialErrorView(message: error) {
-                    readRequest = .retryInitial(UUID())
+                if pager.initialLoadDenied && !session.isLoggedIn {
+                    // Reddit refuses every signed-out read, so Retry can't help here.
+                    FeedInitialErrorView(
+                        systemImage: "person.circle",
+                        title: "Sign in to browse",
+                        message: "Reddit won't load posts in Lurk until you sign in.",
+                        actionTitle: "Sign in to Reddit"
+                    ) {
+                        showsSignIn = true
+                    }
+                } else {
+                    FeedInitialErrorView(message: error) {
+                        readRequest = .retryInitial(UUID())
+                    }
                 }
             } else {
                 ScrollView {
@@ -168,6 +181,10 @@ struct PaginatedFeedView: View {
         .fullScreenCover(item: $galleryPost) { post in
             GalleryViewerView(items: post.galleryItems)
                 .environment(presentationPlaybackStore)
+        }
+        // Signing in bumps the session's credentials version, which rebuilds this feed with the new cookies.
+        .sheet(isPresented: $showsSignIn) {
+            RedditLoginView()
         }
         .alert("Reddit action failed", isPresented: writeErrorPresented) {
             Button("OK", role: .cancel) {}
@@ -403,17 +420,20 @@ private struct HideUndoToast: View {
 }
 
 private struct FeedInitialErrorView: View {
+    var systemImage = "wifi.exclamationmark"
+    var title = "Couldn't load posts"
     let message: String
-    let retry: () -> Void
+    var actionTitle = "Retry"
+    let action: () -> Void
 
     var body: some View {
         VStack(spacing: 12) {
-            Image(systemName: "wifi.exclamationmark")
+            Image(systemName: systemImage)
                 .font(.title2)
                 .foregroundStyle(Theme.textSecondary)
                 .accessibilityHidden(true)
 
-            Text("Couldn't load posts")
+            Text(title)
                 .font(.headline)
                 .foregroundStyle(Theme.text)
 
@@ -422,7 +442,7 @@ private struct FeedInitialErrorView: View {
                 .foregroundStyle(Theme.textSecondary)
                 .multilineTextAlignment(.center)
 
-            Button("Retry", action: retry)
+            Button(actionTitle, action: action)
                 .buttonStyle(.borderedProminent)
                 .tint(Theme.primary)
         }

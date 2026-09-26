@@ -70,6 +70,12 @@ enum RedditClientError: LocalizedError {
             return "Reddit returned an invalid response."
         }
     }
+
+    // Reddit refuses signed-out reads with 403 ("blocked by network security"); some endpoints use 401.
+    var deniesAccess: Bool {
+        guard case .httpStatus(let status, _) = self else { return false }
+        return status == 401 || status == 403
+    }
 }
 
 actor RedditClient {
