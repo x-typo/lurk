@@ -232,7 +232,9 @@ struct PostDetailView: View {
                                     if !videoURLs.isEmpty {
                                         result = await MediaSaver.saveVideo(from: videoURLs)
                                     } else if let animatedImageURL = post.animatedImageURL {
-                                        result = await MediaSaver.saveImageData(from: animatedImageURL)
+                                        result = await MediaSaver.saveAnimatedImage(
+                                            from: animatedImageURL, video: post.galleryVideoURL
+                                        )
                                     } else if let imageURL = post.imageURL {
                                         result = await MediaSaver.saveImage(from: imageURL)
                                     } else {
