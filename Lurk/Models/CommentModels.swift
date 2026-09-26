@@ -188,6 +188,13 @@ extension CommentNode {
 // MARK: - Tree Operations
 
 extension CommentNode {
+    static func comments(in nodes: [CommentNode]) -> [Comment] {
+        nodes.flatMap { node -> [Comment] in
+            guard case .comment(let comment, let replies) = node else { return [] }
+            return [comment] + comments(in: replies)
+        }
+    }
+
     // `mutedUsers` holds lowercased usernames. A muted comment, or a pinned one when
     // `hidesPinned` is on, hides with its replies.
     static func rows(

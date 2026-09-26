@@ -309,24 +309,39 @@ struct PaginatedFeedView: View {
             && (!applyBlockFilter || !blockStore.isBlocked(post.subreddit))
     }
 
+    // A page carries Reddit's state for its posts, which reconciles this session's settled choices.
+    private var reconcilingFetchPage: FeedPager.FetchPage {
+        { [fetchPage, engagement] after in
+            let started = Date.now
+            let listing = try await fetchPage(after)
+            let posts = listing.data.children.map(\.data)
+            engagement.reconcile(
+                fetchStartedAt: started,
+                votes: posts.map { ("t3_\($0.id)", $0.initialVote) },
+                saves: posts.map { ("t3_\($0.id)", $0.saved) }
+            )
+            return listing
+        }
+    }
+
     private func loadInitialIfNeeded() async {
-        await pager.loadIfNeeded(fetchPage: fetchPage, include: shouldInclude)
+        await pager.loadIfNeeded(fetchPage: reconcilingFetchPage, include: shouldInclude)
     }
 
     private func retryInitialLoad() async {
-        await pager.retryInitial(fetchPage: fetchPage, include: shouldInclude)
+        await pager.retryInitial(fetchPage: reconcilingFetchPage, include: shouldInclude)
     }
 
     private func refresh() async {
-        await pager.refresh(fetchPage: fetchPage, include: shouldInclude)
+        await pager.refresh(fetchPage: reconcilingFetchPage, include: shouldInclude)
     }
 
     private func loadMore() async {
-        await pager.loadMore(fetchPage: fetchPage, include: shouldInclude)
+        await pager.loadMore(fetchPage: reconcilingFetchPage, include: shouldInclude)
     }
 
     private func retryLoadMore() async {
-        await pager.retryLoadMore(fetchPage: fetchPage, include: shouldInclude)
+        await pager.retryLoadMore(fetchPage: reconcilingFetchPage, include: shouldInclude)
     }
 
     private func requestLoadMoreIfNeeded(for post: Post) {

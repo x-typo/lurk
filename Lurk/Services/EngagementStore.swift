@@ -3,8 +3,10 @@ import Foundation
 // The viewer's votes and saves from this session, keyed by fullname (`t3_…`, `t1_…`). Loaded posts
 // keep Reddit's state from their last fetch, so views read through here to show newer choices.
 // Like PostHideSync, each thing's writes reach Reddit in the order they were made; when the latest
-// fails, the shown value goes back to Reddit's confirmed one. An account change clears everything, and
-// work started before it (even for the same account, signed out and back in) can't send or roll back.
+// fails, its error is reported and the shown value goes back to Reddit's confirmed one. A fetch that
+// started after a thing's writes settled replaces the choice with Reddit's state, since a failed
+// request may still have been applied. An account change clears everything, and work started before
+// it (even for the same account, signed out and back in) can't send or roll back.
 @MainActor
 @Observable
 final class EngagementStore {
@@ -57,6 +59,15 @@ final class EngagementStore {
         return isSaved(thingID, loaded: loaded)
     }
 
+    func reconcile(fetchStartedAt started: Date, votes fresh: [(String, Int)] = [], saves freshSaves: [(String, Bool)] = []) {
+        for (thingID, vote) in fresh where voteLanes.isSettled(thingID, before: started) {
+            votes[thingID] = vote
+        }
+        for (thingID, saved) in freshSaves where saveLanes.isSettled(thingID, before: started) {
+            saves[thingID] = saved
+        }
+    }
+
     func setAccount(_ account: String?) {
         guard account != self.account else { return }
         self.account = account
@@ -72,6 +83,13 @@ final class EngagementStore {
         var sequences: [String: Int] = [:]
         // Reddit's value for a thing after its last completed write.
         var confirmed: [String: Value] = [:]
+        // When each thing's writes last all finished.
+        var settledAt: [String: Date] = [:]
+
+        func isSettled(_ thingID: String, before date: Date) -> Bool {
+            guard tails[thingID] == nil, let settled = settledAt[thingID] else { return false }
+            return settled <= date
+        }
     }
 
     private func enqueue<Value: Equatable>(
@@ -101,9 +119,10 @@ final class EngagementStore {
                 try await send()
                 lanes.confirmed[thingID] = value
             } catch {
-                guard lanes.sequences[thingID] == sequence, self.generation == generation,
-                      let confirmed = lanes.confirmed[thingID], confirmed != value else { return }
-                show(confirmed)
+                guard lanes.sequences[thingID] == sequence, self.generation == generation else { return }
+                if let confirmed = lanes.confirmed[thingID], confirmed != value {
+                    show(confirmed)
+                }
                 onFailure(error)
             }
         }
@@ -116,5 +135,6 @@ final class EngagementStore {
         lanes.tails[thingID] = nil
         lanes.sequences[thingID] = nil
         lanes.confirmed[thingID] = nil
+        lanes.settledAt[thingID] = .now
     }
 }

@@ -64,7 +64,7 @@ struct EngagementStoreTests {
         #expect(log.failures == 1)
     }
 
-    @Test("When a vote and its undo both fail, nothing rolls back past Reddit's state")
+    @Test("When a vote and its undo both fail, the display stays at Reddit's state and the failure is reported")
     func noRollbackWhenRedditNeverChanged() async {
         let store = EngagementStore()
         let gate = Gate()
@@ -82,7 +82,7 @@ struct EngagementStoreTests {
         await up.value
         await clear.value
         #expect(store.vote(for: "t3_a", loaded: 0) == 0)
-        #expect(log.failures == 0)
+        #expect(log.failures == 1)
     }
 
     @Test("A failed save goes back to Reddit's state and reports the error")
@@ -173,7 +173,7 @@ struct EngagementStoreTests {
         #expect(log.failures == 1)
     }
 
-    @Test("When an Unsave and a later Save both fail, the post settles as saved")
+    @Test("When an Unsave and a later Save both fail, the post settles as saved and the failure is reported")
     func bothFailSettlesSaved() async {
         let store = EngagementStore()
         let gate = Gate()
@@ -187,7 +187,63 @@ struct EngagementStoreTests {
         await gate.waitUntilStarted()
         gate.open()
         #expect(await store.settledSave("t3_a", loaded: true))
-        #expect(log.failures == 0)
+        #expect(log.failures == 1)
+    }
+
+    @Test("Only a fetch that started after a thing's writes settled replaces the session choice")
+    func laterFetchReconciles() async {
+        let store = EngagementStore()
+        let log = Log()
+        await store.submitVote(1, for: "t3_a", loaded: 0, send: {}, onFailure: log.fail).value
+        await store.submitSave(true, for: "t3_a", loaded: false, send: {}, onFailure: log.fail).value
+
+        store.reconcile(fetchStartedAt: .distantPast, votes: [("t3_a", 0)], saves: [("t3_a", false)])
+        #expect(store.vote(for: "t3_a", loaded: 0) == 1)
+        #expect(store.isSaved("t3_a", loaded: false))
+
+        store.reconcile(fetchStartedAt: .now, votes: [("t3_a", -1), ("t3_b", 1)], saves: [("t3_a", false)])
+        #expect(store.vote(for: "t3_a", loaded: 0) == -1)
+        #expect(!store.isSaved("t3_a", loaded: false))
+        #expect(store.vote(for: "t3_b", loaded: 0) == 0)
+    }
+
+    @Test("A fetch while a write is pending doesn't override it")
+    func pendingWriteIgnoresFetch() async {
+        let store = EngagementStore()
+        let gate = Gate()
+        let log = Log()
+        await store.submitVote(1, for: "t3_a", loaded: 0, send: {}, onFailure: log.fail).value
+        let down = store.submitVote(-1, for: "t3_a", loaded: 0, send: { await gate.wait() }, onFailure: log.fail)
+
+        await gate.waitUntilStarted()
+        store.reconcile(fetchStartedAt: .now, votes: [("t3_a", 1)])
+        #expect(store.vote(for: "t3_a", loaded: 0) == -1)
+        gate.open()
+        await down.value
+    }
+
+    @Test("An ambiguous Unsave then a failed Save reports the failure, and a later fetch corrects the bookmark")
+    func ambiguousFailureIsReportedAndReconciled() async {
+        let store = EngagementStore()
+        let gate = Gate()
+        let log = Log()
+        // Reddit applied this Unsave, but its response timed out.
+        let unsave = store.submitSave(false, for: "t3_a", loaded: true, send: {
+            await gate.wait()
+            throw URLError(.timedOut)
+        }, onFailure: log.fail)
+        let save = store.submitSave(true, for: "t3_a", loaded: true, send: {
+            throw URLError(.notConnectedToInternet)
+        }, onFailure: log.fail)
+
+        await gate.waitUntilStarted()
+        gate.open()
+        await unsave.value
+        await save.value
+        #expect(log.failures == 1)
+
+        store.reconcile(fetchStartedAt: .now, saves: [("t3_a", false)])
+        #expect(!store.isSaved("t3_a", loaded: true))
     }
 
     @MainActor

@@ -283,10 +283,18 @@ struct PostDetailView: View {
             .defaultScrollAnchor(.top)
             .task(id: commentLoadAttempt) {
                 await commentStore.load {
+                    let started = Date.now
+                    let nodes: [CommentNode]
                     if let commentsFetch {
-                        return try await commentsFetch()
+                        nodes = try await commentsFetch()
+                    } else {
+                        nodes = try await client.fetchComments(permalink: post.permalink)
                     }
-                    return try await client.fetchComments(permalink: post.permalink)
+                    engagement.reconcile(
+                        fetchStartedAt: started,
+                        votes: CommentNode.comments(in: nodes).map { ("t1_\($0.id)", $0.initialVote) }
+                    )
+                    return nodes
                 }
             }
             .navigationBarTitleDisplayMode(.inline)
@@ -480,10 +488,18 @@ struct PostDetailView: View {
     private func loadMoreComments(_ more: CommentMore) {
         Task { @MainActor in
             await commentStore.loadMore(more) { more in
+                let started = Date.now
+                let loaded: [LoadedCommentNode]
                 if let commentsFetchMore {
-                    return try await commentsFetchMore(more)
+                    loaded = try await commentsFetchMore(more)
+                } else {
+                    loaded = try await client.fetchMoreComments(postID: post.id, more: more)
                 }
-                return try await client.fetchMoreComments(postID: post.id, more: more)
+                engagement.reconcile(fetchStartedAt: started, votes: loaded.compactMap { entry in
+                    guard case .comment(let comment, _) = entry.node else { return nil }
+                    return ("t1_\(comment.id)", comment.initialVote)
+                })
+                return loaded
             }
         }
     }
