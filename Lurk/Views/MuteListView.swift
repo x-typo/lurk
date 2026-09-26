@@ -57,10 +57,13 @@ struct MuteListView: View {
                                     Text("Unmute")
                                         .font(.subheadline.weight(.medium))
                                         .foregroundStyle(Theme.primary)
+                                        .frame(minWidth: 44, minHeight: 44)
+                                        .contentShape(Rectangle())
                                 }
                                 .accessibilityLabel("Unmute \(label(for: item))")
                             }
-                            .padding(16)
+                            .padding(.horizontal, 16)
+                            .padding(.vertical, 6)
                             .background(Theme.surface)
                             .clipShape(RoundedRectangle(cornerRadius: 12))
                         }
@@ -131,9 +134,9 @@ struct MuteListView: View {
     private var footnote: String {
         switch kind {
         case .users:
-            "Hides their posts and comments, including replies to their comments. You can also mute someone by long-pressing their comment."
+            "Hides their posts and comments, including replies to their comments. You can also mute someone by long-pressing their comment. Unmuted posts come back when you refresh a feed."
         case .keywords:
-            "Hides posts whose titles contain these words or phrases. Matches whole words and ignores case."
+            "Hides posts whose titles contain these words or phrases. Matches whole words and ignores case. Unmuted posts come back when you refresh a feed."
         }
     }
 

@@ -3,7 +3,7 @@ import Testing
 @testable import Lurk
 
 @MainActor
-@Suite("Mute store")
+@Suite("Mute store", .serialized)
 struct MuteStoreTests {
     @Test("A fresh install mutes the old hard-coded bots and no keywords")
     func seedsOnFirstRun() {
@@ -86,9 +86,33 @@ struct MuteStoreTests {
         }
     }
 
+    @Test("Mute checks are observed, so feeds re-filter when mutes change")
+    func checksAreObserved() {
+        withDefaults { defaults in
+            let store = MuteStore(defaults: defaults)
+            #expect(changes(of: { _ = store.matchesKeyword(in: "A snail story") }, when: { store.muteKeyword("snail") }))
+            #expect(changes(of: { _ = store.matchesKeyword(in: "A snail story") }, when: { store.unmuteKeyword("snail") }))
+            #expect(changes(of: { _ = store.isMuted(user: "Someone") }, when: { store.muteUser("someone") }))
+            #expect(changes(of: { _ = store.isMuted(user: "Someone") }, when: { store.unmuteUser("SOMEONE") }))
+        }
+    }
+
+    private func changes(of read: () -> Void, when mutate: () -> Void) -> Bool {
+        let flag = ChangeFlag()
+        withObservationTracking(read) { flag.fired = true }
+        mutate()
+        return flag.fired
+    }
+
+    private final class ChangeFlag: @unchecked Sendable {
+        var fired = false
+    }
+
+    // One reused suite, so test runs don't leave a preferences file per test in the host app.
     private func withDefaults(_ body: (UserDefaults) -> Void) {
-        let suite = "MuteStoreTests.\(UUID().uuidString)"
+        let suite = "MuteStoreTests"
         let defaults = UserDefaults(suiteName: suite)!
+        defaults.removePersistentDomain(forName: suite)
         defer { defaults.removePersistentDomain(forName: suite) }
         body(defaults)
     }

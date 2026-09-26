@@ -23,7 +23,8 @@ final class MuteStore {
     // Lowercased, for case-insensitive lookups.
     private(set) var mutedUserKeys: Set<String> = []
 
-    @ObservationIgnored private var keywordPattern: NSRegularExpression?
+    // Observed, so feeds re-filter when keywords change.
+    private var keywordPattern: NSRegularExpression?
     @ObservationIgnored private let defaults: UserDefaults
 
     init(defaults: UserDefaults = .standard) {
