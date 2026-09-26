@@ -3,7 +3,8 @@ import Foundation
 // The viewer's votes and saves from this session, keyed by fullname (`t3_…`, `t1_…`). Loaded posts
 // keep Reddit's state from their last fetch, so views read through here to show newer choices.
 // Like PostHideSync, each thing's writes reach Reddit in the order they were made; when the latest
-// fails, the shown value goes back to Reddit's confirmed one. An account change clears everything.
+// fails, the shown value goes back to Reddit's confirmed one. An account change clears everything, and
+// work started before it (even for the same account, signed out and back in) can't send or roll back.
 @MainActor
 @Observable
 final class EngagementStore {
@@ -12,6 +13,7 @@ final class EngagementStore {
     private var votes: [String: Int] = [:]
     private var saves: [String: Bool] = [:]
     @ObservationIgnored private var account: String?
+    @ObservationIgnored private var generation = 0
     @ObservationIgnored private var voteLanes = Lanes<Int>()
     @ObservationIgnored private var saveLanes = Lanes<Bool>()
 
@@ -47,14 +49,10 @@ final class EngagementStore {
                 show: { [weak self] in self?.saves[thingID] = $0 }, send: send, onFailure: onFailure)
     }
 
-    // For a change Reddit already confirmed elsewhere, such as Unsave in the Saved list.
-    func recordSaved(_ saved: Bool, for thingID: String) {
-        saves[thingID] = saved
-    }
-
     func setAccount(_ account: String?) {
         guard account != self.account else { return }
         self.account = account
+        generation += 1
         votes = [:]
         saves = [:]
         voteLanes = Lanes()
@@ -77,7 +75,7 @@ final class EngagementStore {
         send: @escaping Send,
         onFailure: @escaping @MainActor (Error) -> Void
     ) -> Task<Void, Never> {
-        let account = self.account
+        let generation = self.generation
         let sequence = (lanes.sequences[thingID] ?? 0) + 1
         lanes.sequences[thingID] = sequence
         let previous = lanes.tails[thingID]
@@ -90,12 +88,12 @@ final class EngagementStore {
         let task = Task { @MainActor [weak self] in
             await previous?.value
             defer { Self.finish(thingID, sequence: sequence, in: lanes) }
-            guard let self, self.account == account else { return }
+            guard let self, self.generation == generation else { return }
             do {
                 try await send()
                 lanes.confirmed[thingID] = value
             } catch {
-                guard lanes.sequences[thingID] == sequence, self.account == account,
+                guard lanes.sequences[thingID] == sequence, self.generation == generation,
                       let confirmed = lanes.confirmed[thingID], confirmed != value else { return }
                 show(confirmed)
                 onFailure(error)

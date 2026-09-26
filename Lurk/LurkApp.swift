@@ -37,6 +37,10 @@ private struct LurkRootView: View {
     @Environment(\.scenePhase) private var scenePhase
     @State private var selectedTab = 0
     @State private var subredditResetKey = 0
+    // Bumped on sign-out or an account switch: loaded posts carry that account's votes and saves, so
+    // the feeds reload. Signing in, including the restore at launch, keeps them: they're anonymous
+    // or already this account's.
+    @State private var feedGeneration = 0
 
     var body: some View {
         mainTabView
@@ -56,6 +60,9 @@ private struct LurkRootView: View {
                 unreadReplies.setAccount(account)
                 engagement.setAccount(account)
             }
+            .onChange(of: account) { previous, _ in
+                if previous != nil { feedGeneration += 1 }
+            }
             .task(id: account) { await refreshUnreadReplies() }
             .onChange(of: scenePhase) { _, phase in
                 if phase == .active { Task { await refreshUnreadReplies() } }
@@ -73,12 +80,15 @@ private struct LurkRootView: View {
     private var mainTabView: some View {
         TabView(selection: tabSelection) {
             PopularFeedView()
+                .id(feedGeneration)
                 .tabItem { Label("Popular", systemImage: "flame") }
                 .tag(0)
             HomeFeedView()
+                .id(feedGeneration)
                 .tabItem { Label("Home", systemImage: "house") }
                 .tag(1)
             SubredditsView(resetKey: subredditResetKey)
+                .id(feedGeneration)
                 .tabItem { Label("Subreddits", systemImage: "list.bullet") }
                 .tag(2)
             SettingsView()

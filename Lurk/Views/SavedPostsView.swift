@@ -3,16 +3,15 @@ import SwiftUI
 struct SavedPostsView: View {
     @Environment(RedditSession.self) private var session
     @Environment(\.redditClient) private var client
-    @Environment(EngagementStore.self) private var engagement
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
         NavigationStack {
             PaginatedFeedView(
                 applyFilters: false,
-                removeAction: PostRemoveAction(label: "Unsave", apiURL: RedditAPI.unsave, systemImage: "bookmark.slash") { id in
-                    engagement.recordSaved(false, for: "t3_\(id)")
-                }
+                removeAction: PostRemoveAction(
+                    label: "Unsave", apiURL: RedditAPI.unsave, systemImage: "bookmark.slash", unsaves: true
+                )
             ) { after in
                 guard let username = session.username else { throw URLError(.userAuthenticationRequired) }
                 return try await client.fetchSavedPosts(username: username, after: after)

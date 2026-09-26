@@ -14,6 +14,7 @@ struct PostDetailView: View {
     @Environment(\.openURL) private var openURL
     @Environment(InlineGIFPlaybackStore.self) private var playbackStore
     @Environment(MuteStore.self) private var muteStore
+    @Environment(EngagementStore.self) private var engagement
     @State private var player: AVPlayer?
     @State private var playerPostID: String = ""
     @State private var playerObservers = PlayerObservers()
@@ -36,7 +37,6 @@ struct PostDetailView: View {
     @State private var showShareSheet = false
     @State private var removingPost = false
     @State private var removeError: String?
-    @State private var commentVotes: [String: Int] = [:]
     @State private var replyTarget: Comment?
     @State private var selectingCommentID: String?
     @State private var commentActionError: String?
@@ -419,7 +419,7 @@ struct PostDetailView: View {
                         depth: depth,
                         isCollapsed: isCollapsed,
                         hiddenReplyCount: hiddenReplyCount,
-                        vote: commentVotes[comment.id] ?? comment.initialVote,
+                        vote: engagement.vote(for: "t1_\(comment.id)", loaded: comment.initialVote),
                         isSelecting: selectingCommentID == comment.id,
                         showsSeparator: depth == 0 && row.id != firstRowID,
                         onToggleCollapse: { toggleCollapse(comment) },
@@ -491,22 +491,16 @@ struct PostDetailView: View {
             commentActionError = "Log in to Reddit to vote."
             return
         }
-        let previousVote = commentVotes[comment.id] ?? comment.initialVote
-        commentVotes[comment.id] = newVote
-
-        Task { @MainActor in
-            do {
-                let request = session.authenticatedRequest(
-                    url: RedditAPI.vote,
-                    formData: ["id": "t1_\(comment.id)", "dir": "\(newVote)"]
-                )
-                try await client.execute(request)
-            } catch {
-                guard commentVotes[comment.id] == newVote else { return }
-                commentVotes[comment.id] = previousVote
-                commentActionError = error.localizedDescription
-            }
-        }
+        let thingID = "t1_\(comment.id)"
+        engagement.submitVote(newVote, for: thingID, loaded: comment.initialVote, send: {
+            let request = session.authenticatedRequest(
+                url: RedditAPI.vote,
+                formData: ["id": thingID, "dir": "\(newVote)"]
+            )
+            try await client.execute(request)
+        }, onFailure: { error in
+            commentActionError = error.localizedDescription
+        })
     }
 
     private func canMute(_ comment: Comment) -> Bool {
@@ -559,18 +553,30 @@ struct PostDetailView: View {
         removingPost = true
         defer { removingPost = false }
 
-        do {
-            let postId = post.id
-            let request = session.authenticatedRequest(
-                url: action.apiURL,
-                formData: ["id": "t3_\(postId)"]
-            )
-            try await client.execute(request)
+        let postId = post.id
+        let request = session.authenticatedRequest(
+            url: action.apiURL,
+            formData: ["id": "t3_\(postId)"]
+        )
+        let finish: @MainActor () -> Void = {
             action.onComplete?(postId)
             commentStore.cancel()
             cancelMediaSaveTask()
             teardownPlayer()
             dismiss()
+        }
+        if action.unsaves {
+            await engagement.submitSave(false, for: "t3_\(postId)", loaded: post.saved, send: {
+                try await client.execute(request)
+                finish()
+            }, onFailure: { error in
+                removeError = error.localizedDescription
+            }).value
+            return
+        }
+        do {
+            try await client.execute(request)
+            finish()
         } catch {
             removeError = error.localizedDescription
         }

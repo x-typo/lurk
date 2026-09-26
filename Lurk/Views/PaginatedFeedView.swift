@@ -4,6 +4,8 @@ struct PostRemoveAction {
     let label: String
     let apiURL: URL
     var systemImage = "minus.circle"
+    // Unsave shares the bookmark's ordered save writes for the post.
+    var unsaves = false
     var onComplete: ((String) -> Void)? = nil
 }
 
@@ -33,6 +35,7 @@ struct PaginatedFeedView: View {
     @Environment(BlockedSubredditStore.self) private var blockStore
     @Environment(MuteStore.self) private var muteStore
     @Environment(PostHideSync.self) private var hideSync
+    @Environment(EngagementStore.self) private var engagement
     @Environment(RedditSession.self) private var session
     @Environment(\.redditClient) private var client
 
@@ -147,7 +150,9 @@ struct PaginatedFeedView: View {
             PostDetailView(
                 post: post,
                 removeAction: removeAction.map { action in
-                    PostRemoveAction(label: action.label, apiURL: action.apiURL, systemImage: action.systemImage) { id in
+                    PostRemoveAction(
+                        label: action.label, apiURL: action.apiURL, systemImage: action.systemImage, unsaves: action.unsaves
+                    ) { id in
                         action.onComplete?(id)
                         pager.removePost(id: id)
                     }
@@ -204,17 +209,27 @@ struct PaginatedFeedView: View {
             return
         }
 
+        let request = session.authenticatedRequest(
+            url: action.apiURL,
+            formData: ["id": "t3_\(post.id)"]
+        )
+        let fail: @MainActor (Error) -> Void = { error in
+            restoreRemovedPost(post, to: removedIndex)
+            writeError = error.localizedDescription
+        }
+        if action.unsaves {
+            engagement.submitSave(false, for: "t3_\(post.id)", loaded: post.saved, send: {
+                try await client.execute(request)
+                action.onComplete?(post.id)
+            }, onFailure: fail)
+            return
+        }
         Task { @MainActor in
             do {
-                let request = session.authenticatedRequest(
-                    url: action.apiURL,
-                    formData: ["id": "t3_\(post.id)"]
-                )
                 try await client.execute(request)
                 action.onComplete?(post.id)
             } catch {
-                restoreRemovedPost(post, to: removedIndex)
-                writeError = error.localizedDescription
+                fail(error)
             }
         }
     }

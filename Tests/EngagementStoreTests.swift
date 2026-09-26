@@ -13,7 +13,7 @@ struct EngagementStoreTests {
 
         await store.submitVote(0, for: "t3_a", loaded: 1, send: {}, onFailure: log.fail).value
         await store.submitSave(true, for: "t3_a", loaded: false, send: {}, onFailure: log.fail).value
-        store.recordSaved(false, for: "t3_b")
+        await store.submitSave(false, for: "t3_b", loaded: true, send: {}, onFailure: log.fail).value
 
         #expect(store.vote(for: "t3_a", loaded: 1) == 0)
         #expect(store.isSaved("t3_a", loaded: false))
@@ -117,6 +117,39 @@ struct EngagementStoreTests {
         #expect(log.events.isEmpty)
         #expect(log.failures == 0)
         #expect(store.vote(for: "t3_a", loaded: 0) == 0)
+    }
+
+    @Test("Work from before signing out and back in to the same account can't send or roll back")
+    func sameAccountAgainRejectsOldWork() async {
+        let store = EngagementStore()
+        store.setAccount("reader")
+        let gate = Gate()
+        let queuedGate = Gate()
+        let log = Log()
+        // "a": the old write is its lane's latest, so only the account check stops its rollback.
+        let oldLatest = store.submitVote(1, for: "t3_a", loaded: 0, send: {
+            await gate.wait()
+            throw URLError(.timedOut)
+        }, onFailure: log.fail)
+        // "b": an old write is still queued behind another.
+        let oldFirst = store.submitVote(1, for: "t3_b", loaded: 0, send: { await queuedGate.wait() }, onFailure: log.fail)
+        let oldQueued = store.submitVote(0, for: "t3_b", loaded: 0, send: {
+            log.events.append("old queued write sent")
+        }, onFailure: log.fail)
+
+        await gate.waitUntilStarted()
+        await queuedGate.waitUntilStarted()
+        store.setAccount(nil)
+        store.setAccount("reader")
+        await store.submitVote(-1, for: "t3_a", loaded: 0, send: { log.events.append("new write") }, onFailure: log.fail).value
+        gate.open()
+        queuedGate.open()
+        await oldLatest.value
+        await oldFirst.value
+        await oldQueued.value
+        #expect(log.events == ["new write"])
+        #expect(log.failures == 0)
+        #expect(store.vote(for: "t3_a", loaded: 0) == -1)
     }
 
     @MainActor
