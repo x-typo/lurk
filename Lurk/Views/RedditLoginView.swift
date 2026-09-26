@@ -18,6 +18,11 @@ struct RedditLoginView: View {
                 }
         }
         .preferredColorScheme(.dark)
+        // A retry can finish the sign-in after this sheet's own check came back undetermined,
+        // for example when the app returns to the foreground.
+        .onChange(of: session.isLoggedIn) { _, isLoggedIn in
+            if isLoggedIn { dismiss() }
+        }
     }
 }
 
