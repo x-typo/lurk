@@ -3,7 +3,16 @@ import SwiftUI
 struct PostRemoveAction {
     let label: String
     let apiURL: URL
+    var systemImage = "minus.circle"
     var onComplete: ((String) -> Void)? = nil
+}
+
+private struct HiddenPostUndo: Identifiable {
+    let id = UUID()
+    let post: Post
+    let index: Int?
+    // Nil when signed out: the hide was local only.
+    let hideRequest: Task<Bool, Never>?
 }
 
 struct PaginatedFeedView: View {
@@ -31,6 +40,7 @@ struct PaginatedFeedView: View {
     @State private var subredditPost: Post?
     @State private var galleryPost: Post?
     @State private var writeError: String?
+    @State private var hiddenUndo: HiddenPostUndo?
     @State private var readRequest: ReadRequest?
     @State private var feedPlaybackStore = InlineGIFPlaybackStore()
     @State private var presentationPlaybackStore = InlineGIFPlaybackStore()
@@ -73,7 +83,9 @@ struct PaginatedFeedView: View {
                                 onHide: { _ in removePost(post) },
                                 onShowDetail: { selectedPost = post },
                                 onShowSubreddit: showSubredditNav ? { subredditPost = post } : nil,
-                                onShowGallery: { galleryPost = post }
+                                onShowGallery: { galleryPost = post },
+                                hideLabel: removeAction?.label ?? "Hide",
+                                hideSystemImage: removeAction?.systemImage ?? "eye.slash"
                             )
                             .task(id: post.id == posts.last?.id) {
                                 requestLoadMoreIfNeeded(for: post)
@@ -100,6 +112,23 @@ struct PaginatedFeedView: View {
             }
         }
         .background(Theme.background)
+        .overlay(alignment: .bottom) {
+            if let hiddenUndo {
+                HideUndoToast { undoHide(hiddenUndo) }
+                    .padding(.horizontal, 12)
+                    .padding(.bottom, 8)
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
+            }
+        }
+        .task(id: hiddenUndo?.id) {
+            guard hiddenUndo != nil else { return }
+            do {
+                try await Task.sleep(for: .seconds(4))
+            } catch {
+                return
+            }
+            withAnimation(.easeOut(duration: 0.2)) { hiddenUndo = nil }
+        }
         .environment(feedPlaybackStore)
         .onChange(of: isPresentingContent) { _, isPresenting in
             if isPresenting {
@@ -114,7 +143,7 @@ struct PaginatedFeedView: View {
             PostDetailView(
                 post: post,
                 removeAction: removeAction.map { action in
-                    PostRemoveAction(label: action.label, apiURL: action.apiURL) { id in
+                    PostRemoveAction(label: action.label, apiURL: action.apiURL, systemImage: action.systemImage) { id in
                         action.onComplete?(id)
                         pager.removePost(id: id)
                     }
@@ -191,17 +220,51 @@ struct PaginatedFeedView: View {
         filterStore.hidePost(post.id)
         pager.removeFilteredPost(id: post.id)
 
-        guard session.isLoggedIn else { return }
+        var hideRequest: Task<Bool, Never>?
+        if session.isLoggedIn {
+            hideRequest = Task { @MainActor in
+                do {
+                    let request = session.authenticatedRequest(
+                        url: RedditAPI.hide,
+                        formData: ["id": "t3_\(post.id)"]
+                    )
+                    try await client.execute(request)
+                    return true
+                } catch {
+                    // Undo already restored the post; there's nothing to report.
+                    guard filterStore.isHidden(post.id) else { return false }
+                    if hiddenUndo?.post.id == post.id { hiddenUndo = nil }
+                    restoreHiddenPost(post, to: removedIndex)
+                    writeError = error.localizedDescription
+                    return false
+                }
+            }
+        }
+        withAnimation(.easeOut(duration: 0.2)) {
+            hiddenUndo = HiddenPostUndo(post: post, index: removedIndex, hideRequest: hideRequest)
+        }
+    }
+
+    private func undoHide(_ undo: HiddenPostUndo) {
+        withAnimation(.easeOut(duration: 0.2)) {
+            hiddenUndo = nil
+            restoreHiddenPost(undo.post, to: undo.index)
+        }
+        guard let hideRequest = undo.hideRequest else { return }
 
         Task { @MainActor in
+            // An unhide sent before the hide finishes could reach Reddit first and leave the post hidden.
+            // A failed hide has already restored the post.
+            guard await hideRequest.value else { return }
             do {
                 let request = session.authenticatedRequest(
-                    url: RedditAPI.hide,
-                    formData: ["id": "t3_\(post.id)"]
+                    url: RedditAPI.unhide,
+                    formData: ["id": "t3_\(undo.post.id)"]
                 )
                 try await client.execute(request)
             } catch {
-                restoreHiddenPost(post, to: removedIndex)
+                filterStore.hidePost(undo.post.id)
+                pager.removeFilteredPost(id: undo.post.id)
                 writeError = error.localizedDescription
             }
         }
@@ -271,6 +334,33 @@ struct PaginatedFeedView: View {
         case .retryLoadMore:
             await retryLoadMore()
         }
+    }
+}
+
+private struct HideUndoToast: View {
+    let undo: () -> Void
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "eye.slash")
+                .foregroundStyle(Theme.textSecondary)
+                .accessibilityHidden(true)
+            Text("Post hidden")
+                .foregroundStyle(Theme.text)
+            Spacer()
+            Button(action: undo) {
+                Text("Undo")
+                    .fontWeight(.semibold)
+                    .foregroundStyle(Theme.primary)
+                    .frame(minWidth: 44, minHeight: 44)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+        }
+        .font(.subheadline)
+        .padding(.leading, 16)
+        .padding(.trailing, 8)
+        .background(Theme.surfaceElevated, in: RoundedRectangle(cornerRadius: 14))
     }
 }
 

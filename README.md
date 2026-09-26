@@ -11,7 +11,7 @@ Lurk uses Reddit's web session cookies for a personal signed-in browsing workflo
 - **Home Feed** - Front-page top posts for the day
 - **Popular Feed** - r/popular top posts for the day
 - **Subreddit Management** - Follow/unfollow subreddits, browse individual feeds
-- **Swipe Gestures** - Swipe left to hide a post, swipe right to open in Safari
+- **Swipe Gestures** - Swipe left to hide a post (with a few seconds to Undo), swipe right to open in Safari
 - **Comment Threads** - Full threads with colored depth lines and in-app "load more"; swipe a comment left to vote (short = up, long = down), right to reply
 - **Post Hiding** - Hidden posts persist across sessions (UserDefaults, capped at 5,000)
 - **Muting** - Mute users and title keywords from Settings, or mute someone from a comment's long-press menu
