@@ -43,9 +43,13 @@ private struct LurkRootView: View {
     @Environment(\.scenePhase) private var scenePhase
     @State private var selectedTab = 0
     @State private var subredditResetKey = 0
+    @State private var showsSignIn = false
 
     var body: some View {
         mainTabView
+            .sheet(isPresented: $showsSignIn) {
+                RedditLoginView()
+            }
             .tint(Theme.primary)
             .preferredColorScheme(.dark)
             .environment(session)
@@ -58,6 +62,7 @@ private struct LurkRootView: View {
             .environment(playbackStore)
             .environment(unreadReplies)
             .environment(\.redditClient, client)
+            .environment(\.presentSignIn, PresentSignInAction { showsSignIn = true })
             .onChange(of: account, initial: true) { _, account in
                 unreadReplies.setAccount(account)
                 engagement.setAccount(account)

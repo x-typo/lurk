@@ -29,6 +29,36 @@ struct FeedPagerTests {
         #expect(spy.requestedCursors.map(cursorLabel) == ["nil", "nil"])
     }
 
+    @Test("A first page Reddit refuses is marked denied, unlike other failures")
+    func marksDeniedInitialFailure() async throws {
+        let page = try listing(postIDs: ["first"], after: nil)
+        let spy = PageSpy(responses: [
+            .failure(RedditClientError.httpStatus(403, "You've been blocked by Reddit network security.")),
+            .failure(RedditClientError.httpStatus(401, nil)),
+            .failure(RedditClientError.httpStatus(500, nil)),
+            .failure(TestFailure.offline),
+            .success(page),
+        ])
+        let pager = FeedPager()
+
+        await pager.loadIfNeeded(fetchPage: spy.fetch, include: { _ in true })
+        #expect(pager.initialLoadDenied)
+
+        await pager.retryInitial(fetchPage: spy.fetch, include: { _ in true })
+        #expect(pager.initialLoadDenied)
+
+        for _ in 0..<2 {
+            await pager.retryInitial(fetchPage: spy.fetch, include: { _ in true })
+            #expect(pager.initialError != nil)
+            #expect(!pager.initialLoadDenied)
+        }
+
+        await pager.retryInitial(fetchPage: spy.fetch, include: { _ in true })
+        #expect(pager.initialError == nil)
+        #expect(!pager.initialLoadDenied)
+        #expect(spy.requestedCursors.count == 5)
+    }
+
     @Test("Refresh during initial loading is coalesced")
     func coalescesRefreshDuringInitialLoad() async throws {
         let firstPage = try listing(postIDs: ["first"], after: "cursor-1")

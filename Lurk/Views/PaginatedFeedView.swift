@@ -38,6 +38,7 @@ struct PaginatedFeedView: View {
     @Environment(EngagementStore.self) private var engagement
     @Environment(RedditSession.self) private var session
     @Environment(\.redditClient) private var client
+    @Environment(\.presentSignIn) private var presentSignIn
 
     @State private var pager = FeedPager()
     @State private var selectedPost: Post?
@@ -59,8 +60,20 @@ struct PaginatedFeedView: View {
                     .frame(maxHeight: .infinity)
                     .accessibilityLabel("Loading posts")
             } else if let error = pager.initialError {
-                FeedInitialErrorView(message: error) {
-                    readRequest = .retryInitial(UUID())
+                if pager.initialLoadDenied && !session.isLoggedIn {
+                    // Reddit refuses every signed-out read, so Retry can't help here.
+                    FeedInitialErrorView(
+                        systemImage: "person.circle",
+                        title: "Sign in to browse",
+                        message: "Reddit won't load posts in Lurk until you sign in.",
+                        actionTitle: "Sign in to Reddit"
+                    ) {
+                        presentSignIn()
+                    }
+                } else {
+                    FeedInitialErrorView(message: error) {
+                        readRequest = .retryInitial(UUID())
+                    }
                 }
             } else {
                 ScrollView {
@@ -403,17 +416,20 @@ private struct HideUndoToast: View {
 }
 
 private struct FeedInitialErrorView: View {
+    var systemImage = "wifi.exclamationmark"
+    var title = "Couldn't load posts"
     let message: String
-    let retry: () -> Void
+    var actionTitle = "Retry"
+    let action: () -> Void
 
     var body: some View {
         VStack(spacing: 12) {
-            Image(systemName: "wifi.exclamationmark")
+            Image(systemName: systemImage)
                 .font(.title2)
                 .foregroundStyle(Theme.textSecondary)
                 .accessibilityHidden(true)
 
-            Text("Couldn't load posts")
+            Text(title)
                 .font(.headline)
                 .foregroundStyle(Theme.text)
 
@@ -422,7 +438,7 @@ private struct FeedInitialErrorView: View {
                 .foregroundStyle(Theme.textSecondary)
                 .multilineTextAlignment(.center)
 
-            Button("Retry", action: retry)
+            Button(actionTitle, action: action)
                 .buttonStyle(.borderedProminent)
                 .tint(Theme.primary)
         }

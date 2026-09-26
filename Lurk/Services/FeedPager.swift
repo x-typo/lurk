@@ -7,7 +7,8 @@ final class FeedPager {
         case idle
         case loading
         case loaded
-        case failed(String)
+        // `denied` when Reddit refused the request, as it does every signed-out read.
+        case failed(String, denied: Bool)
     }
 
     typealias FetchPage = @MainActor (_ after: String?) async throws -> RedditListing
@@ -65,8 +66,13 @@ final class FeedPager {
     }
 
     var initialError: String? {
-        guard case .failed(let message) = initialLoadState else { return nil }
+        guard case .failed(let message, _) = initialLoadState else { return nil }
         return message
+    }
+
+    var initialLoadDenied: Bool {
+        guard case .failed(_, let denied) = initialLoadState else { return false }
+        return denied
     }
 
     func loadIfNeeded(fetchPage: FetchPage, include: IncludePost) async {
@@ -168,7 +174,9 @@ final class FeedPager {
                 return
             }
             pendingRestorations.removeAll()
-            initialLoadState = .failed(failure.underlyingError.localizedDescription)
+            initialLoadState = .failed(
+                failure.underlyingError.localizedDescription, denied: Self.deniesAccess(failure.underlyingError)
+            )
         } catch {
             guard generation == operationGeneration else { return }
             if isCancellation(error) {
@@ -176,7 +184,7 @@ final class FeedPager {
                 return
             }
             pendingRestorations.removeAll()
-            initialLoadState = .failed(error.localizedDescription)
+            initialLoadState = .failed(error.localizedDescription, denied: Self.deniesAccess(error))
         }
     }
 
@@ -285,6 +293,10 @@ final class FeedPager {
             paginationError = error.localizedDescription
             isLoadingMore = false
         }
+    }
+
+    private static func deniesAccess(_ error: Error) -> Bool {
+        (error as? RedditClientError)?.deniesAccess == true
     }
 
     private func fetchBatch(
