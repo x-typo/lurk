@@ -75,6 +75,7 @@ actor RedditClient {
     private let baseURL = "https://www.reddit.com"
     private static let pageSize = "25"
     private static let profilePageSize = "20"
+    private static let moreChildrenBatchSize = 100
     private let session: URLSession
 
     init() {
@@ -129,7 +130,7 @@ actor RedditClient {
         return try await fetch(url)
     }
 
-    func fetchComments(permalink: String) async throws -> [Comment] {
+    func fetchComments(permalink: String) async throws -> [CommentNode] {
         let path = "\(permalink).json"
         var components = try buildComponents(path: path)
         components.queryItems = [URLQueryItem(name: "raw_json", value: "1")]
@@ -141,7 +142,66 @@ actor RedditClient {
         let listings = try RedditAPI.decoder.decode([CommentListing].self, from: data)
 
         guard listings.count >= 2 else { return [] }
-        return Comment.parse(from: listings[1])
+        return CommentNode.parse(from: listings[1])
+    }
+
+    // Returns loaded nodes, each paired with its parent, for `CommentNode.merging`.
+    func fetchMoreComments(postID: String, more: CommentMore) async throws -> [LoadedCommentNode] {
+        guard Comment.isRedditID(postID) else { throw URLError(.badURL) }
+        if more.continuesThread {
+            return try await fetchContinuedThread(postID: postID, more: more)
+        }
+
+        let batch = Array(more.childIDs.prefix(Self.moreChildrenBatchSize))
+        var components = try buildComponents(path: "/api/morechildren.json")
+        components.queryItems = [
+            URLQueryItem(name: "api_type", value: "json"),
+            URLQueryItem(name: "link_id", value: "t3_\(postID)"),
+            URLQueryItem(name: "children", value: batch.joined(separator: ",")),
+            URLQueryItem(name: "raw_json", value: "1"),
+        ]
+        guard let url = components.url else { throw URLError(.badURL) }
+
+        let (data, response) = try await session.data(from: url)
+        try validateHTTPResponse(response, data: data)
+        try validateRedditErrors(in: data)
+
+        let things = try RedditAPI.decoder.decode(MoreChildrenResponse.self, from: data).json.data?.things ?? []
+        var loaded = CommentNode.loaded(fromFlat: things)
+        let remaining = Array(more.childIDs.dropFirst(batch.count))
+        if !remaining.isEmpty {
+            loaded.append(LoadedCommentNode(parentID: more.parentID, node: .more(CommentMore(
+                parentID: more.parentID,
+                count: max(more.count - batch.count, remaining.count),
+                childIDs: remaining
+            ))))
+        }
+        return loaded
+    }
+
+    private func fetchContinuedThread(postID: String, more: CommentMore) async throws -> [LoadedCommentNode] {
+        let commentID = String(more.parentID.dropFirst(3))
+        guard more.parentID.hasPrefix("t1_"), Comment.isRedditID(commentID) else { throw URLError(.badURL) }
+
+        var components = try buildComponents(path: "/comments/\(postID).json")
+        components.queryItems = [
+            URLQueryItem(name: "comment", value: commentID),
+            URLQueryItem(name: "raw_json", value: "1"),
+        ]
+        guard let url = components.url else { throw URLError(.badURL) }
+
+        let (data, response) = try await session.data(from: url)
+        try validateHTTPResponse(response, data: data)
+
+        let listings = try RedditAPI.decoder.decode([CommentListing].self, from: data)
+        guard listings.count >= 2,
+              let parent = listings[1].data.children.first(where: { $0.kind == "t1" && $0.data.id == commentID }),
+              case .listing(let replies) = parent.data.replies
+        else { return [] }
+        return CommentNode.flatten(
+            CommentNode.parse(replies.data.children, parentID: more.parentID),
+            under: more.parentID
+        )
     }
 
     func execute(_ request: URLRequest) async throws {

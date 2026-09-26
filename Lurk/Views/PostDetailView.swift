@@ -6,7 +6,7 @@ struct PostDetailView: View {
     let post: Post
     var removeAction: PostRemoveAction? = nil
     var commentsFetch: CommentLoadStore.Fetch? = nil
-    var continueThreadAction: ((URL) -> Void)? = nil
+    var commentsFetchMore: CommentLoadStore.FetchMore? = nil
 
     @Environment(RedditSession.self) private var session
     @Environment(\.redditClient) private var client
@@ -35,7 +35,11 @@ struct PostDetailView: View {
     @State private var showShareSheet = false
     @State private var removingPost = false
     @State private var removeError: String?
-    @State private var safariDestination: SafariDestination?
+    @State private var commentVotes: [String: Int] = [:]
+    @State private var replyTarget: Comment?
+    @State private var selectingCommentID: String?
+    @State private var commentActionError: String?
+    @State private var commentShare: CommentShareTarget?
 
     var body: some View {
         NavigationStack {
@@ -318,8 +322,11 @@ struct PostDetailView: View {
         .sheet(isPresented: $showCommentSheet, onDismiss: resumeAfterPresentation) {
             ComposeReplySheet(thingID: "t3_\(post.id)", isPresented: $showCommentSheet)
         }
-        .sheet(item: $safariDestination, onDismiss: resumeAfterPresentation) { destination in
-            SafariView(url: destination.url) { safariDestination = nil }
+        .sheet(item: $replyTarget, onDismiss: resumeAfterPresentation) { comment in
+            ComposeReplySheet(thingID: "t1_\(comment.id)", isPresented: replySheetPresented)
+        }
+        .sheet(item: $commentShare, onDismiss: resumeAfterPresentation) { share in
+            PostShareSheet(url: share.url, title: share.title, imageURL: nil)
         }
         .fullScreenCover(isPresented: $showMediaViewer, onDismiss: mediaViewerDismissed) {
             if let videoURL = post.videoURL {
@@ -375,34 +382,132 @@ struct PostDetailView: View {
                     .foregroundStyle(Theme.primary)
                     .accessibilityLabel("Retry loading comments")
             case .loaded:
-                if commentStore.comments.isEmpty {
+                if commentStore.nodes.isEmpty {
                     Text("No comments to show.")
                         .font(.subheadline)
                         .foregroundStyle(Theme.textSecondary)
                 } else {
-                    LazyVStack(alignment: .leading, spacing: 0) {
-                        ForEach(commentStore.comments) { comment in
-                            CommentRowView(
-                                comment: comment,
-                                postPermalink: post.permalink,
-                                collapsedCommentIDs: $collapsedCommentIDs,
-                                onContinueThread: { url in
-                                    if let continueThreadAction {
-                                        continueThreadAction(url)
-                                    } else {
-                                        suspendDetailMedia()
-                                        safariDestination = SafariDestination(url: url)
-                                    }
-                                },
-                                onPresentReply: suspendDetailMedia,
-                                onDismissReply: resumeAfterPresentation
-                            )
-                        }
-                    }
+                    commentThread
                 }
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private var commentThread: some View {
+        let rows = CommentNode.rows(from: commentStore.nodes, collapsed: collapsedCommentIDs)
+        let firstRowID = rows.first?.id
+        return LazyVStack(alignment: .leading, spacing: 0) {
+            ForEach(rows) { row in
+                switch row {
+                case .comment(let comment, let depth, let isCollapsed, let hiddenReplyCount):
+                    let shareURL = comment.permalinkURL(postPermalink: post.permalink)
+                    CommentThreadRowView(
+                        comment: comment,
+                        depth: depth,
+                        isCollapsed: isCollapsed,
+                        hiddenReplyCount: hiddenReplyCount,
+                        vote: commentVotes[comment.id] ?? comment.initialVote,
+                        isSelecting: selectingCommentID == comment.id,
+                        showsSeparator: depth == 0 && row.id != firstRowID,
+                        onToggleCollapse: { toggleCollapse(comment) },
+                        onVote: { submitCommentVote($0, for: comment) },
+                        onReply: { presentReply(to: comment) },
+                        onSelectText: { selectingCommentID = comment.id },
+                        onShare: shareURL.map { url in { presentShare(of: comment, url: url) } }
+                    )
+                case .more(let more, let depth):
+                    CommentMoreRowView(
+                        more: more,
+                        depth: depth,
+                        isLoading: commentStore.loadingMoreID == more.id,
+                        isWaiting: commentStore.loadingMoreID.map { $0 != more.id } ?? false,
+                        error: commentStore.moreErrors[more.id]
+                    ) {
+                        loadMoreComments(more)
+                    }
+                }
+            }
+        }
+        .alert("Reddit action failed", isPresented: commentActionErrorPresented) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text(commentActionError ?? "")
+        }
+    }
+
+    private var commentActionErrorPresented: Binding<Bool> {
+        Binding(
+            get: { commentActionError != nil },
+            set: { if !$0 { commentActionError = nil } }
+        )
+    }
+
+    private var replySheetPresented: Binding<Bool> {
+        Binding(
+            get: { replyTarget != nil },
+            set: { if !$0 { replyTarget = nil } }
+        )
+    }
+
+    private func toggleCollapse(_ comment: Comment) {
+        withAnimation(.easeInOut(duration: 0.2)) {
+            if selectingCommentID == comment.id {
+                selectingCommentID = nil
+            } else if collapsedCommentIDs.contains(comment.id) {
+                collapsedCommentIDs.remove(comment.id)
+            } else {
+                collapsedCommentIDs.insert(comment.id)
+            }
+        }
+    }
+
+    private func loadMoreComments(_ more: CommentMore) {
+        Task { @MainActor in
+            await commentStore.loadMore(more) { more in
+                if let commentsFetchMore {
+                    return try await commentsFetchMore(more)
+                }
+                return try await client.fetchMoreComments(postID: post.id, more: more)
+            }
+        }
+    }
+
+    private func submitCommentVote(_ newVote: Int, for comment: Comment) {
+        guard session.isLoggedIn else {
+            commentActionError = "Log in to Reddit to vote."
+            return
+        }
+        let previousVote = commentVotes[comment.id] ?? comment.initialVote
+        commentVotes[comment.id] = newVote
+
+        Task { @MainActor in
+            do {
+                let request = session.authenticatedRequest(
+                    url: RedditAPI.vote,
+                    formData: ["id": "t1_\(comment.id)", "dir": "\(newVote)"]
+                )
+                try await client.execute(request)
+            } catch {
+                guard commentVotes[comment.id] == newVote else { return }
+                commentVotes[comment.id] = previousVote
+                commentActionError = error.localizedDescription
+            }
+        }
+    }
+
+    private func presentShare(of comment: Comment, url: URL) {
+        suspendDetailMedia()
+        commentShare = CommentShareTarget(url: url, title: "u/\(comment.author) on \(post.title)")
+    }
+
+    private func presentReply(to comment: Comment) {
+        guard session.isLoggedIn else {
+            commentActionError = "Log in to Reddit to reply."
+            return
+        }
+        suspendDetailMedia()
+        replyTarget = comment
     }
 
     private var removeErrorPresented: Binding<Bool> {
@@ -534,6 +639,12 @@ struct PostDetailView: View {
             animatedMediaRefreshID = UUID()
         }
     }
+}
+
+private struct CommentShareTarget: Identifiable {
+    let url: URL
+    let title: String
+    var id: URL { url }
 }
 
 @Observable
@@ -681,139 +792,6 @@ private struct PostImagePreviewView: View {
                 GalleryDotIndicator(count: post.galleryItems.count)
             }
         }
-    }
-}
-
-struct CommentRowView: View {
-    let comment: Comment
-    let postPermalink: String
-    @Binding var collapsedCommentIDs: Set<String>
-    let onContinueThread: (URL) -> Void
-    var onPresentReply: () -> Void = {}
-    var onDismissReply: () -> Void = {}
-    @Environment(RedditSession.self) private var session
-    @State private var selecting = false
-    @State private var showReplySheet = false
-
-    private var collapsed: Bool { collapsedCommentIDs.contains(comment.id) }
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Button(action: handleNonInteractiveTap) {
-                HStack(spacing: 6) {
-                    Text("u/\(comment.author)")
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(Theme.primary)
-                    if comment.isSubmitter {
-                        Text("OP")
-                            .font(.caption2.weight(.bold))
-                            .foregroundStyle(Theme.opBadge)
-                    }
-                    Text(Formatters.timeAgo(comment.createdUtc))
-                        .font(.caption)
-                        .foregroundStyle(Theme.textMuted)
-                    Spacer()
-                }
-                .frame(minHeight: 44)
-                .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel(collapsed ? "Expand comment by \(comment.author)" : "Collapse comment by \(comment.author)")
-            if !collapsed {
-                CommentBodyView(
-                    content: comment.body,
-                    nonInteractiveTapAction: CommentBodyTapAction(
-                        perform: handleNonInteractiveTap,
-                        mediaAccessibility: MediaActionAccessibility(
-                            label: "Collapse comment by \(comment.author)",
-                            hint: "Double-tap to collapse this comment."
-                        )
-                    ),
-                    onNonInteractiveLongPress: beginSelecting,
-                    isSelecting: selecting
-                )
-
-                HStack(spacing: 12) {
-                    VoteControlsView(thingID: "t1_\(comment.id)", initialScore: comment.score, inactiveColor: Theme.textMuted)
-
-                    if session.isLoggedIn {
-                        Button {
-                            onPresentReply()
-                            showReplySheet = true
-                        } label: {
-                            Label("Reply", systemImage: "bubble.left")
-                                .foregroundStyle(Theme.textMuted)
-                        }
-                    } else {
-                        Label("Reply", systemImage: "bubble.left")
-                            .foregroundStyle(Theme.textMuted)
-                    }
-
-                    Spacer()
-                }
-                .font(.caption)
-                .padding(.top, 4)
-
-                if !comment.replies.isEmpty {
-                    ForEach(comment.replies) { reply in
-                        CommentRowView(
-                            comment: reply,
-                            postPermalink: postPermalink,
-                            collapsedCommentIDs: $collapsedCommentIDs,
-                            onContinueThread: onContinueThread,
-                            onPresentReply: onPresentReply,
-                            onDismissReply: onDismissReply
-                        )
-                            .padding(.leading, 16)
-                            .overlay(alignment: .leading) {
-                                Rectangle()
-                                    .fill(Theme.border)
-                                    .frame(width: 2)
-                                    .padding(.leading, 4)
-                            }
-                    }
-                }
-
-                if comment.hasMoreReplies,
-                   let url = comment.continuationURL(postPermalink: postPermalink) {
-                    Button {
-                        onContinueThread(url)
-                    } label: {
-                        Label("Continue thread in Safari", systemImage: "arrow.up.right.square")
-                            .font(.caption.weight(.medium))
-                            .foregroundStyle(Theme.primary)
-                            .frame(minHeight: 44, alignment: .leading)
-                            .contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityHint("Opens this comment and its replies in Safari")
-                    .padding(.top, 4)
-                }
-            }
-        }
-        .padding(.vertical, 8)
-        .sheet(isPresented: $showReplySheet, onDismiss: onDismissReply) {
-            ComposeReplySheet(thingID: "t1_\(comment.id)", isPresented: $showReplySheet)
-        }
-    }
-
-    private func handleNonInteractiveTap() {
-        if selecting {
-            withAnimation(.easeInOut(duration: 0.2)) { selecting = false }
-        } else {
-            withAnimation(.easeInOut(duration: 0.2)) {
-                if collapsed {
-                    collapsedCommentIDs.remove(comment.id)
-                } else {
-                    collapsedCommentIDs.insert(comment.id)
-                }
-            }
-        }
-    }
-
-    private func beginSelecting() {
-        guard !collapsed else { return }
-        withAnimation(.easeInOut(duration: 0.2)) { selecting = true }
     }
 }
 
@@ -1261,6 +1239,13 @@ struct SelectableTextView: UIViewRepresentable {
 
     func updateUIView(_ textView: UITextView, context: Context) {
         textView.text = text
+    }
+
+    // Without this, the non-scrolling text view reports a single-line height and clips wrapped text.
+    func sizeThatFits(_ proposal: ProposedViewSize, uiView textView: UITextView, context: Context) -> CGSize? {
+        guard let width = proposal.width, width.isFinite else { return nil }
+        let fitted = textView.sizeThatFits(CGSize(width: width, height: .greatestFiniteMagnitude))
+        return CGSize(width: width, height: fitted.height)
     }
 }
 
