@@ -10,9 +10,9 @@ struct CommentParsingTests {
         let nodes = try parse([node("abc", children: [
             node("def"), more(count: 7, children: ["ghi", "jkl"]), ["kind": "unknown", "data": [:]],
         ])])
-        let replies = try #require(replies(of: nodes.first))
-        #expect(replies.count == 2)
-        guard case .comment(let reply, _) = replies[0], case .more(let placeholder) = replies[1] else {
+        let children = try #require(replies(of: nodes.first))
+        #expect(children.count == 2)
+        guard case .comment(let reply, _) = children[0], case .more(let placeholder) = children[1] else {
             Issue.record("Expected a comment followed by a placeholder")
             return
         }
