@@ -4,18 +4,52 @@ import WebKit
 @MainActor
 @Observable
 final class RedditSession {
+    typealias SendLoginCheck = @MainActor (URLRequest) async throws -> (Data, URLResponse)
+
+    enum LoginCheckResult: Equatable {
+        case signedIn(name: String, modhash: String)
+        case signedOut
+        // Offline, timed out, or an unexpected response: nothing shows the stored sign-in is bad.
+        case undetermined
+    }
+
     private(set) var isLoggedIn = false
     private(set) var username: String?
     // Bumped when the request cookies change (sign-in, sign-out), so views holding account-specific
     // data reload. The restore at launch reuses the cookies requests already send, so it doesn't bump.
     private(set) var credentialsVersion = 0
+    // Set when a check couldn't reach a verdict; the cookies stay, and the next activation checks again.
+    private(set) var needsLoginCheck = false
+    // The launch check, so tests can wait for it.
+    private(set) var restoreTask: Task<Void, Never>?
     private var modhash: String?
     private var cookies: [HTTPCookie] = []
+    private var loginCheckGeneration = 0
+    private let sendLoginCheck: SendLoginCheck
 
     private let loginCheckURL = URL(string: "https://www.reddit.com/api/me.json")!
 
-    init(restoringSession: Bool = true) {
-        if restoringSession { restoreSession() }
+    // Offline, a check waits for the network instead of failing, so a launch without it restores the sign-in.
+    private static let loginCheckSession: URLSession = {
+        let configuration = URLSessionConfiguration.default
+        configuration.waitsForConnectivity = true
+        return URLSession(configuration: configuration)
+    }()
+
+    init(
+        restoringSession: Bool = true,
+        storedCookies: [HTTPCookie]? = nil,
+        sendLoginCheck: SendLoginCheck? = nil
+    ) {
+        self.sendLoginCheck = sendLoginCheck ?? { try await Self.loginCheckSession.data(for: $0) }
+        guard restoringSession else { return }
+        // The restore reuses the cookies requests already send, so it doesn't bump credentialsVersion.
+        let redditCookies = storedCookies
+            ?? HTTPCookieStorage.shared.cookies?.filter { $0.domain.contains("reddit.com") }
+            ?? []
+        guard !redditCookies.isEmpty else { return }
+        cookies = redditCookies
+        restoreTask = Task { await checkLoginStatus() }
     }
 
     func syncCookies(from webView: WKWebView) async {
@@ -33,28 +67,50 @@ final class RedditSession {
     }
 
     func checkLoginStatus() async {
+        loginCheckGeneration += 1
+        let generation = loginCheckGeneration
+        needsLoginCheck = false
         var request = URLRequest(url: loginCheckURL)
         request.setValue(RedditAPI.userAgent, forHTTPHeaderField: "User-Agent")
         applyCookies(to: &request)
 
+        let result: LoginCheckResult
         do {
-            let (data, response) = try await URLSession.shared.data(for: request)
-            guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
-                clearSession()
-                return
-            }
-            let json = try JSONSerialization.jsonObject(with: data) as? [String: Any]
-            if let data = json?["data"] as? [String: Any],
-               let name = data["name"] as? String,
-               let mh = data["modhash"] as? String {
-                username = name
-                modhash = mh
-                isLoggedIn = true
-            } else {
-                clearSession()
-            }
+            let (data, response) = try await sendLoginCheck(request)
+            result = Self.loginCheckResult(data: data, response: response)
         } catch {
+            result = .undetermined
+        }
+        // A newer check, a sign-in, or a sign-out has taken over.
+        guard generation == loginCheckGeneration else { return }
+        switch result {
+        case .signedIn(let name, let hash):
+            username = name
+            modhash = hash
+            isLoggedIn = true
+        case .signedOut:
             clearSession()
+        case .undetermined:
+            needsLoginCheck = true
+        }
+    }
+
+    // Only Reddit refusing the cookies, or answering without a user, signs out.
+    nonisolated static func loginCheckResult(data: Data, response: URLResponse) -> LoginCheckResult {
+        guard let http = response as? HTTPURLResponse else { return .undetermined }
+        switch http.statusCode {
+        case 200:
+            guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+                return .undetermined
+            }
+            guard let fields = json["data"] as? [String: Any],
+                  let name = fields["name"] as? String,
+                  let modhash = fields["modhash"] as? String else { return .signedOut }
+            return .signedIn(name: name, modhash: modhash)
+        case 401, 403:
+            return .signedOut
+        default:
+            return .undetermined
         }
     }
 
@@ -110,6 +166,7 @@ final class RedditSession {
             HTTPCookieStorage.shared.deleteCookie($0)
         }
         credentialsVersion += 1
+        loginCheckGeneration += 1
         clearSession()
         let store = WKWebsiteDataStore.default()
         let records = await store.dataRecords(ofTypes: WKWebsiteDataStore.allWebsiteDataTypes())
@@ -117,13 +174,6 @@ final class RedditSession {
         if !redditRecords.isEmpty {
             await store.removeData(ofTypes: WKWebsiteDataStore.allWebsiteDataTypes(), for: redditRecords)
         }
-    }
-
-    private func restoreSession() {
-        let redditCookies = HTTPCookieStorage.shared.cookies?.filter { $0.domain.contains("reddit.com") } ?? []
-        guard !redditCookies.isEmpty else { return }
-        cookies = redditCookies
-        Task { await checkLoginStatus() }
     }
 
     private func applyCookies(to request: inout URLRequest) {
@@ -138,5 +188,6 @@ final class RedditSession {
         username = nil
         modhash = nil
         cookies = []
+        needsLoginCheck = false
     }
 }
