@@ -189,7 +189,9 @@ struct PostDetailView: View {
                         Spacer()
 
                         if session.isLoggedIn {
+                            // Disabled during Unsave, so a Save's failure can't be dismissed with the detail.
                             PostSaveButton(thingID: "t3_\(post.id)", loadedSaved: post.saved)
+                                .disabled(removingPost)
                                 .padding(.trailing, 8)
                         }
 
