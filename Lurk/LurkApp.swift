@@ -42,7 +42,6 @@ private struct LurkRootView: View {
     @State private var unreadReplies = UnreadRepliesStore()
     @Environment(\.scenePhase) private var scenePhase
     @State private var selectedTab = 0
-    @State private var subredditResetKey = 0
     @State private var showsSignIn = false
 
     var body: some View {
@@ -82,24 +81,36 @@ private struct LurkRootView: View {
     }
 
     private var mainTabView: some View {
-        TabView(selection: tabSelection) {
+        TabView(selection: $selectedTab) {
             // Loaded posts carry the viewer's votes and saves, so feeds reload when the cookies change.
-            PopularFeedView()
-                .id(session.credentialsVersion)
-                .tabItem { Label("Popular", systemImage: "flame") }
-                .tag(0)
-            HomeFeedView()
-                .id(session.credentialsVersion)
-                .tabItem { Label("Home", systemImage: "house") }
-                .tag(1)
-            SubredditsView(resetKey: subredditResetKey)
-                .id(session.credentialsVersion)
-                .tabItem { Label("Subreddits", systemImage: "list.bullet") }
-                .tag(2)
-            SettingsView()
-                .tabItem { Label("Settings", systemImage: "gearshape") }
-                .modifier(UnreadRepliesTabBadge())
-                .tag(3)
+            NavigationStack {
+                PopularFeedView()
+                    .tabRootTitle("Popular")
+            }
+            .id(session.credentialsVersion)
+            .tabItem { Label("Popular", systemImage: "flame") }
+            .tag(0)
+            NavigationStack {
+                HomeFeedView()
+                    .tabRootTitle("Home")
+            }
+            .id(session.credentialsVersion)
+            .tabItem { Label("Home", systemImage: "house") }
+            .tag(1)
+            NavigationStack {
+                SubredditsView()
+                    .tabRootTitle("Subreddits")
+            }
+            .id(session.credentialsVersion)
+            .tabItem { Label("Subreddits", systemImage: "list.bullet") }
+            .tag(2)
+            NavigationStack {
+                SettingsView()
+                    .tabRootTitle("Settings")
+            }
+            .tabItem { Label("Settings", systemImage: "gearshape") }
+            .modifier(UnreadRepliesTabBadge())
+            .tag(3)
         }
     }
 
@@ -114,16 +125,13 @@ private struct LurkRootView: View {
             return try await client.fetchInboxReplies(filter: filter, after: after)
         }
     }
+}
 
-    private var tabSelection: Binding<Int> {
-        Binding(
-            get: { selectedTab },
-            set: { newValue in
-                if newValue == selectedTab && newValue == 2 {
-                    subredditResetKey += 1
-                }
-                selectedTab = newValue
-            }
-        )
+private extension View {
+    // A slim title bar, so content scrolls under the bar instead of under the status bar.
+    func tabRootTitle(_ title: String) -> some View {
+        navigationTitle(title)
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbarColorScheme(.dark, for: .navigationBar)
     }
 }

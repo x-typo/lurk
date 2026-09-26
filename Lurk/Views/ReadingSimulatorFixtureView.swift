@@ -86,7 +86,7 @@ struct ReadingSimulatorFixtureView: View {
             }
             Text("Feed requests: \(requests)")
                 .font(.caption)
-            PaginatedFeedView(showSubredditNav: false) { after in
+            PaginatedFeedView(subredditNavigation: .none) { after in
                 requests += 1
                 if !pagination {
                     return try Self.listing(posts: Self.posts)
