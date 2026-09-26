@@ -5,6 +5,7 @@ struct ThreadView: View {
     let target: ThreadTarget
 
     @Environment(\.redditClient) private var client
+    @Environment(EngagementStore.self) private var engagement
     @Environment(\.openURL) private var openURL
     @Environment(\.dismiss) private var dismiss
 
@@ -75,7 +76,15 @@ struct ThreadView: View {
     private func load() async {
         loadError = nil
         do {
-            post = try await client.fetchPost(id: target.postID)
+            let started = Date.now
+            let fetched = try await client.fetchPost(id: target.postID)
+            // Fresh from Reddit, like a feed page, so it corrects this session's settled vote and save.
+            engagement.reconcile(
+                fetchStartedAt: started,
+                votes: [("t3_\(fetched.id)", fetched.initialVote)],
+                saves: [("t3_\(fetched.id)", fetched.saved)]
+            )
+            post = fetched
         } catch {
             loadError = error.localizedDescription
         }
