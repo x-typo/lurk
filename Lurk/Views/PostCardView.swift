@@ -6,6 +6,8 @@ struct PostCardView: View {
     var onShowDetail: (() -> Void)?
     var onShowSubreddit: (() -> Void)?
     var onShowGallery: (() -> Void)?
+    var hideLabel = "Hide"
+    var hideSystemImage = "eye.slash"
 
     @State private var offset: CGFloat = 0
     @State private var interaction = PostCardInteractionState()
@@ -17,7 +19,9 @@ struct PostCardView: View {
 
     var body: some View {
         ZStack {
-            (offset > 0 ? Theme.swipeOpen : offset < 0 ? Theme.swipeHide : Color.clear)
+            if offset != 0 {
+                swipeBackground
+            }
 
             VStack(alignment: .leading, spacing: 8) {
                 HStack(spacing: 6) {
@@ -219,6 +223,10 @@ struct PostCardView: View {
                                 }
                                 try? await Task.sleep(for: .seconds(0.25))
                                 onHide?(post.id)
+                                // The lazy feed keeps this card's state for its post ID, so a post restored
+                                // by Undo or a failed hide would otherwise come back collapsed and invisible.
+                                collapsing = false
+                                offset = 0
                             }
                         case .reset:
                             withAnimation(.spring()) { offset = 0 }
@@ -232,6 +240,33 @@ struct PostCardView: View {
         .frame(height: collapsing ? 0 : nil)
         .clipped()
         .opacity(collapsing ? 0 : 1)
+        .sensoryFeedback(trigger: swipeAction) { _, action in
+            action == .reset ? nil : .selection
+        }
+    }
+
+    private var swipeAction: PostCardSwipeAction {
+        PostCardInteractionState.swipeAction(forOffset: offset, canHide: onHide != nil)
+    }
+
+    // Gray until the swipe passes the action threshold, then the action's color, icon, and label.
+    private var swipeBackground: some View {
+        let revealsTrailingEdge = offset < 0
+        let isArmed = swipeAction != .reset
+        return ZStack(alignment: revealsTrailingEdge ? .trailing : .leading) {
+            Rectangle()
+                .fill(isArmed ? (revealsTrailingEdge ? Theme.swipeHide : Theme.swipeOpen) : Theme.surfaceElevated)
+            HStack(spacing: 6) {
+                Image(systemName: revealsTrailingEdge ? hideSystemImage : "safari")
+                if isArmed {
+                    Text(revealsTrailingEdge ? hideLabel : "Open")
+                }
+            }
+            .font(.subheadline.weight(.semibold))
+            .foregroundStyle(isArmed ? .white : Theme.textMuted)
+            .padding(.horizontal, 24)
+        }
+        .accessibilityHidden(true)
     }
 
     private func performTap(_ requestedAction: PostCardTapAction) {
@@ -316,10 +351,15 @@ struct PostCardInteractionState: Equatable {
         dragAxis = nil
         suppressesTapActions = true
         guard resolvedAxis == .horizontal else { return nil }
-        if translation.width > Self.swipeThreshold {
+        return Self.swipeAction(forOffset: translation.width, canHide: canHide)
+    }
+
+    // The action a release at this horizontal offset performs; the card also uses it to arm its swipe feedback.
+    static func swipeAction(forOffset offset: CGFloat, canHide: Bool) -> PostCardSwipeAction {
+        if offset > swipeThreshold {
             return .openReddit
         }
-        if translation.width < -Self.swipeThreshold, canHide {
+        if offset < -swipeThreshold, canHide {
             return .hide
         }
         return .reset

@@ -3,7 +3,16 @@ import SwiftUI
 struct PostRemoveAction {
     let label: String
     let apiURL: URL
+    var systemImage = "minus.circle"
     var onComplete: ((String) -> Void)? = nil
+}
+
+private struct HiddenPostUndo: Identifiable {
+    let id = UUID()
+    let post: Post
+    let index: Int?
+    // A deadline rather than a duration, so leaving and returning to the feed can't extend it.
+    let expiresAt = Date.now.addingTimeInterval(4)
 }
 
 struct PaginatedFeedView: View {
@@ -23,6 +32,7 @@ struct PaginatedFeedView: View {
     @Environment(PostFilterStore.self) private var filterStore
     @Environment(BlockedSubredditStore.self) private var blockStore
     @Environment(MuteStore.self) private var muteStore
+    @Environment(PostHideSync.self) private var hideSync
     @Environment(RedditSession.self) private var session
     @Environment(\.redditClient) private var client
 
@@ -31,6 +41,7 @@ struct PaginatedFeedView: View {
     @State private var subredditPost: Post?
     @State private var galleryPost: Post?
     @State private var writeError: String?
+    @State private var hiddenUndo: HiddenPostUndo?
     @State private var readRequest: ReadRequest?
     @State private var feedPlaybackStore = InlineGIFPlaybackStore()
     @State private var presentationPlaybackStore = InlineGIFPlaybackStore()
@@ -73,7 +84,9 @@ struct PaginatedFeedView: View {
                                 onHide: { _ in removePost(post) },
                                 onShowDetail: { selectedPost = post },
                                 onShowSubreddit: showSubredditNav ? { subredditPost = post } : nil,
-                                onShowGallery: { galleryPost = post }
+                                onShowGallery: { galleryPost = post },
+                                hideLabel: removeAction?.label ?? "Hide",
+                                hideSystemImage: removeAction?.systemImage ?? "eye.slash"
                             )
                             .task(id: post.id == posts.last?.id) {
                                 requestLoadMoreIfNeeded(for: post)
@@ -100,6 +113,26 @@ struct PaginatedFeedView: View {
             }
         }
         .background(Theme.background)
+        .overlay(alignment: .bottom) {
+            if let hiddenUndo {
+                HideUndoToast { undoHide(hiddenUndo) }
+                    .padding(.horizontal, 12)
+                    .padding(.bottom, 8)
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
+            }
+        }
+        .task(id: hiddenUndo?.id) {
+            guard let expiresAt = hiddenUndo?.expiresAt else { return }
+            let remaining = expiresAt.timeIntervalSinceNow
+            if remaining > 0 {
+                do {
+                    try await Task.sleep(for: .seconds(remaining))
+                } catch {
+                    return
+                }
+            }
+            withAnimation(.easeOut(duration: 0.2)) { hiddenUndo = nil }
+        }
         .environment(feedPlaybackStore)
         .onChange(of: isPresentingContent) { _, isPresenting in
             if isPresenting {
@@ -114,7 +147,7 @@ struct PaginatedFeedView: View {
             PostDetailView(
                 post: post,
                 removeAction: removeAction.map { action in
-                    PostRemoveAction(label: action.label, apiURL: action.apiURL) { id in
+                    PostRemoveAction(label: action.label, apiURL: action.apiURL, systemImage: action.systemImage) { id in
                         action.onComplete?(id)
                         pager.removePost(id: id)
                     }
@@ -190,21 +223,50 @@ struct PaginatedFeedView: View {
         let removedIndex = pager.posts.firstIndex { $0.id == post.id }
         filterStore.hidePost(post.id)
         pager.removeFilteredPost(id: post.id)
+        withAnimation(.easeOut(duration: 0.2)) {
+            hiddenUndo = HiddenPostUndo(post: post, index: removedIndex)
+        }
 
-        guard session.isLoggedIn else { return }
+        syncHidden(true, post: post) { error in
+            if hiddenUndo?.post.id == post.id { hiddenUndo = nil }
+            restoreHiddenPost(post, to: removedIndex)
+            writeError = error.localizedDescription
+        }
+    }
 
-        Task { @MainActor in
-            do {
+    private func undoHide(_ undo: HiddenPostUndo) {
+        withAnimation(.easeOut(duration: 0.2)) {
+            hiddenUndo = nil
+            restoreHiddenPost(undo.post, to: undo.index)
+        }
+
+        syncHidden(false, post: undo.post) { error in
+            filterStore.hidePost(undo.post.id)
+            pager.removeFilteredPost(id: undo.post.id)
+            writeError = error.localizedDescription
+        }
+    }
+
+    // Signed out, hiding and Undo stay local.
+    private func syncHidden(_ hidden: Bool, post: Post, onFailure: @escaping @MainActor (Error) -> Void) {
+        guard session.isLoggedIn, let account = session.username else {
+            hideSync.supersede(postID: post.id)
+            return
+        }
+        hideSync.enqueue(
+            postID: post.id,
+            hidden: hidden,
+            account: account,
+            currentAccount: { session.isLoggedIn ? session.username : nil },
+            send: {
                 let request = session.authenticatedRequest(
-                    url: RedditAPI.hide,
+                    url: hidden ? RedditAPI.hide : RedditAPI.unhide,
                     formData: ["id": "t3_\(post.id)"]
                 )
                 try await client.execute(request)
-            } catch {
-                restoreHiddenPost(post, to: removedIndex)
-                writeError = error.localizedDescription
-            }
-        }
+            },
+            onFailure: onFailure
+        )
     }
 
     private func restoreHiddenPost(_ post: Post, to index: Int?) {
@@ -271,6 +333,33 @@ struct PaginatedFeedView: View {
         case .retryLoadMore:
             await retryLoadMore()
         }
+    }
+}
+
+private struct HideUndoToast: View {
+    let undo: () -> Void
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "eye.slash")
+                .foregroundStyle(Theme.textSecondary)
+                .accessibilityHidden(true)
+            Text("Post hidden")
+                .foregroundStyle(Theme.text)
+            Spacer()
+            Button(action: undo) {
+                Text("Undo")
+                    .fontWeight(.semibold)
+                    .foregroundStyle(Theme.primary)
+                    .frame(minWidth: 44, minHeight: 44)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+        }
+        .font(.subheadline)
+        .padding(.leading, 16)
+        .padding(.trailing, 8)
+        .background(Theme.surfaceElevated, in: RoundedRectangle(cornerRadius: 14))
     }
 }
 

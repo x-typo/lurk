@@ -9,7 +9,7 @@ struct SavedPostsView: View {
         NavigationStack {
             PaginatedFeedView(
                 applyFilters: false,
-                removeAction: PostRemoveAction(label: "Unsave", apiURL: RedditAPI.unsave)
+                removeAction: PostRemoveAction(label: "Unsave", apiURL: RedditAPI.unsave, systemImage: "bookmark.slash")
             ) { after in
                 guard let username = session.username else { throw URLError(.userAuthenticationRequired) }
                 return try await client.fetchSavedPosts(username: username, after: after)

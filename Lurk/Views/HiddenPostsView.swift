@@ -10,7 +10,7 @@ struct HiddenPostsView: View {
         NavigationStack {
             PaginatedFeedView(
                 applyFilters: false,
-                removeAction: PostRemoveAction(label: "Unhide", apiURL: RedditAPI.unhide) { id in
+                removeAction: PostRemoveAction(label: "Unhide", apiURL: RedditAPI.unhide, systemImage: "eye") { id in
                     filterStore.unhidePost(id)
                 }
             ) { after in

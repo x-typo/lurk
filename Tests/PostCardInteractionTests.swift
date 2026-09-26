@@ -127,4 +127,19 @@ struct PostCardInteractionTests {
             ) == .reset
         )
     }
+    @Test("Swipe feedback arms at exactly the offsets where a release acts")
+    func swipeFeedbackMatchesRelease() {
+        for offset: CGFloat in [-400, -101, -100, -40, 0, 40, 100, 101, 400] {
+            for canHide in [true, false] {
+                var state = PostCardInteractionState()
+                _ = state.updateDrag(translation: CGSize(width: offset < 0 ? -30 : 30, height: 1))
+                let released = state.endDrag(translation: CGSize(width: offset, height: 1), canHide: canHide)
+                #expect(PostCardInteractionState.swipeAction(forOffset: offset, canHide: canHide) == released,
+                        "offset \(offset), canHide \(canHide)")
+            }
+        }
+        #expect(PostCardInteractionState.swipeAction(forOffset: -101, canHide: true) == .hide)
+        #expect(PostCardInteractionState.swipeAction(forOffset: -101, canHide: false) == .reset)
+        #expect(PostCardInteractionState.swipeAction(forOffset: 101, canHide: false) == .openReddit)
+    }
 }
