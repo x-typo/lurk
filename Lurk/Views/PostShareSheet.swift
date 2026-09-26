@@ -1,14 +1,12 @@
-import LinkPresentation
 import SwiftUI
 import UIKit
 
 struct PostShareSheet: UIViewControllerRepresentable {
     let url: URL
     let title: String
-    let imageURL: URL?
 
     func makeUIViewController(context: Context) -> UIActivityViewController {
-        let source = PostShareItemSource(url: url, title: title, imageURL: imageURL)
+        let source = PostShareItemSource(url: url, title: title)
         let controller = UIActivityViewController(activityItems: [source], applicationActivities: nil)
         controller.popoverPresentationController?.sourceView = controller.view
         return controller
@@ -17,15 +15,15 @@ struct PostShareSheet: UIViewControllerRepresentable {
     func updateUIViewController(_ controller: UIActivityViewController, context: Context) {}
 }
 
+// Deliberately provides no link metadata: when an app supplies its own, Messages uses it
+// instead of fetching Reddit's preview card for the link, the way Safari's share gets it.
 private final class PostShareItemSource: NSObject, UIActivityItemSource {
     private let url: URL
     private let title: String
-    private let imageURL: URL?
 
-    init(url: URL, title: String, imageURL: URL?) {
+    init(url: URL, title: String) {
         self.url = url
         self.title = title
-        self.imageURL = imageURL
     }
 
     func activityViewControllerPlaceholderItem(_ controller: UIActivityViewController) -> Any {
@@ -38,16 +36,5 @@ private final class PostShareItemSource: NSObject, UIActivityItemSource {
 
     func activityViewController(_ controller: UIActivityViewController, subjectForActivityType type: UIActivity.ActivityType?) -> String {
         title
-    }
-
-    func activityViewControllerLinkMetadata(_ controller: UIActivityViewController) -> LPLinkMetadata? {
-        let metadata = LPLinkMetadata()
-        metadata.originalURL = url
-        metadata.url = url
-        metadata.title = title
-        if let imageURL, imageURL.isFileURL {
-            metadata.imageProvider = NSItemProvider(contentsOf: imageURL)
-        }
-        return metadata
     }
 }
