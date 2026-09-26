@@ -43,6 +43,7 @@ Flag violations of these conventions during review.
 - Swipe gestures use `DragGesture` with axis locking to prevent conflict with `ScrollView` scrolling.
 - Axis lock pattern: determine axis on first movement (`abs(dx) > abs(dy)`), then lock. Flag gestures without axis detection.
 - `PostCardView` swipe actions: left = hide post, right = open in Safari. Do not add new swipe actions without updating this document.
+- `CommentThreadRowView` swipe actions: short left = upvote, long left = downvote, right = reply. Do not add new swipe actions without updating this document.
 - Other gestures (tap-to-open, gallery drag-to-dismiss) are unrelated to this constraint.
 
 ## UserDefaults & Persistence
@@ -57,7 +58,7 @@ Flag violations of these conventions during review.
 - Anonymous `.json` endpoint for unauthenticated browsing. Reddit's external rate limit is ~100 requests/minute (not enforced in-app).
 - `after` parameter for pagination. Flag any offset-based pagination.
 - Video playback prefers `RedditVideo.hlsUrl` (HLS playlist, includes audio) and falls back to `RedditVideo.fallbackUrl` (CMAF MP4, video-only) when HLS is unavailable. Flag assumptions that `Post.url` is directly playable for video posts.
-- Comment trees are recursive. `maxRenderDepth` limits rendering depth. Flag unbounded recursion.
+- Comment trees are parsed into `CommentNode` values and rendered as flat, lazily loaded `CommentRow`s. Reddit's "more" placeholders load in-app through `fetchMoreComments`, one request at a time. Tree recursion is bounded by the loaded thread's depth; `maxIndentDepth` caps indentation, not content.
 
 ## Error Handling
 

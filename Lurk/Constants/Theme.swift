@@ -13,4 +13,13 @@ enum Theme {
     static let downvote = Color(red: 0.384, green: 0.498, blue: 1) // Reddit periwinkle #6180FF
     static let opBadge = Color(red: 0, green: 0.478, blue: 1) // #007AFF
     static let border = Color(red: 0.2, green: 0.2, blue: 0.2)
+    static let swipeReply = Color(red: 0.114, green: 0.620, blue: 0.459) // #1D9E75
+    // One rail color per reply level, repeating past the last entry.
+    static let commentRails = [
+        primary,
+        Color(red: 0.216, green: 0.541, blue: 0.867), // #378ADD
+        swipeReply,
+        Color(red: 0.498, green: 0.467, blue: 0.867), // #7F77DD
+        Color(red: 0.937, green: 0.624, blue: 0.153), // #EF9F27
+    ]
 }

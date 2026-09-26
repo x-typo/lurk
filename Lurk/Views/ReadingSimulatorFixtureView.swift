@@ -19,7 +19,7 @@ struct ReadingSimulatorFixtureView: View {
     @State private var largeText = false
     @State private var pagination = false
     @State private var lastBrowserURL: URL?
-    @State private var captureLinks = true
+    @State private var moreAttempts = 0
 
     private static let firstID = "abc123"
     private static let sampleSubreddit = "readingqa"
@@ -35,6 +35,7 @@ struct ReadingSimulatorFixtureView: View {
             HStack {
                 Button("Comments") {
                     attempts = 0
+                    moreAttempts = 0
                     lastBrowserURL = nil
                     selectedSample = .comments
                 }
@@ -80,8 +81,6 @@ struct ReadingSimulatorFixtureView: View {
                 lastBrowserURL = nil
                 selectedSample = .collapseScroll
             }
-            Toggle("Capture browser links", isOn: $captureLinks)
-                .padding(.horizontal)
             Text("Feed requests: \(requests)")
                 .font(.caption)
             PaginatedFeedView(showSubredditNav: false) { after in
@@ -118,7 +117,14 @@ struct ReadingSimulatorFixtureView: View {
                     throw URLError(.notConnectedToInternet)
                 }
                 return Self.comments
-            }, continueThreadAction: captureLinks ? { url in lastBrowserURL = url } : nil)
+            }, commentsFetchMore: { more in
+                moreAttempts += 1
+                try await Task.sleep(for: .milliseconds(300))
+                if moreAttempts == 1 {
+                    throw URLError(.notConnectedToInternet)
+                }
+                return Self.loadedReplies(for: more)
+            })
             .dynamicTypeSize(largeText ? .accessibility1 : .large)
             .safeAreaInset(edge: .bottom) {
                 if let lastBrowserURL {
@@ -181,39 +187,73 @@ struct ReadingSimulatorFixtureView: View {
         return try RedditAPI.decoder.decode(RedditListing.self, from: data)
     }
 
-    private static var comments: [Comment] {
-        var replies: [Comment] = []
-        for depth in (0...3).reversed() {
-            replies = [Comment(
-                id: "d0000\(depth)", author: "reader_\(depth)",
-                body: depth == 0
-                    ? "The ending is >!a friendly dragon!<. The secret link is >![the map](https://example.com/secret)!<."
-                    : "Reply level \(depth). This sentence should have enough room to read comfortably.",
-                score: 5, createdUtc: Date().timeIntervalSince1970,
-                depth: depth, replies: replies, isSubmitter: depth == 0, hasMoreReplies: depth == 3
-            )]
-        }
-        return replies
+    private static func comment(
+        _ id: String,
+        _ author: String,
+        _ body: String,
+        depth: Int,
+        score: Int = 5,
+        isSubmitter: Bool = false,
+        likes: Bool? = nil,
+        replies: [CommentNode] = []
+    ) -> CommentNode {
+        .comment(Comment(
+            id: id, author: author, body: body, score: score,
+            createdUtc: Date().timeIntervalSince1970, depth: depth,
+            isSubmitter: isSubmitter, likes: likes
+        ), replies: replies)
     }
 
-    private static let collapseScrollComments: [Comment] = (1...30).map { index in
-        let timestamp: TimeInterval = 1_750_000_000
-        let replies: [Comment] = index == 1 ? [
-            Comment(
-                id: "collapse_child", author: "scroll_child",
-                body: "Collapse this nested reply, then collapse and expand its parent. This reply should stay collapsed.",
-                score: 3, createdUtc: timestamp, depth: 1,
-                replies: [Comment(
-                    id: "collapse_grandchild", author: "scroll_grandchild",
-                    body: "This grandchild is hidden whenever its parent is collapsed.",
-                    score: 1, createdUtc: timestamp, depth: 2, replies: [], isSubmitter: false
-                )], isSubmitter: false
+    // Six levels deep, ending in a continuation, plus reply-level and top-level "more" placeholders.
+    private static var comments: [CommentNode] {
+        var thread: [CommentNode] = [.more(CommentMore(parentID: "t1_deep5", depth: 6, count: 0, childIDs: []))]
+        for depth in (0...5).reversed() {
+            thread = [comment(
+                "deep\(depth)", "reader_\(depth)",
+                depth == 0
+                    ? "The ending is >!a friendly dragon!<. The secret link is >![the map](https://example.com/secret)!<."
+                    : "Reply level \(depth). This sentence should have enough room to read comfortably.",
+                depth: depth, isSubmitter: depth == 0, likes: depth == 1 ? true : nil, replies: thread
+            )]
+        }
+        return thread + [
+            comment("second", "second_reader", "A second top-level comment with a short nested thread.",
+                    depth: 0, score: 42, likes: false, replies: [
+                        comment("secondreply", "nested_reader", "One loaded reply.", depth: 1),
+                        .more(CommentMore(parentID: "t1_second", depth: 1, count: 3, childIDs: ["morea", "moreb", "morec"])),
+                    ]),
+            comment("third", "third_reader", "A third top-level comment.", depth: 0, score: 7),
+            .more(CommentMore(parentID: "t3_\(firstID)", depth: 0, count: 12, childIDs: ["topa", "topb", "topc"])),
+        ]
+    }
+
+    private static func loadedReplies(for more: CommentMore) -> [CommentNode] {
+        if more.continuesThread {
+            return [comment("deep6", "deeper_reader", "Loaded in the app instead of Safari.", depth: more.depth, replies: [
+                comment("deep7", "deepest_reader", "Level \(more.depth + 1) still has room to read.", depth: more.depth + 1),
+            ])]
+        }
+        return more.childIDs.enumerated().map { index, id in
+            comment(id, "loaded_\(index + 1)", "Loaded reply \(index + 1).", depth: more.depth)
+        }
+    }
+
+    private static let collapseScrollComments: [CommentNode] = (1...30).map { index in
+        let replies: [CommentNode] = index == 1 ? [
+            comment(
+                "collapsechild", "scroll_child",
+                "Collapse this nested reply, then collapse and expand its parent. This reply should stay collapsed.",
+                depth: 1, score: 3,
+                replies: [comment(
+                    "collapsegrandchild", "scroll_grandchild",
+                    "This grandchild is hidden whenever its parent is collapsed.", depth: 2, score: 1
+                )]
             )
         ] : []
-        return Comment(
-            id: "collapse_\(index)", author: "scroll_\(index)",
-            body: "Comment \(index). Collapse the first five comments, scroll far down to later numbered comments, then return. Each collapsed comment should remain closed for this visit. Closing and reopening the post starts a fresh visit.",
-            score: index, createdUtc: timestamp, depth: 0, replies: replies, isSubmitter: false
+        return comment(
+            "collapse\(index)", "scroll_\(index)",
+            "Comment \(index). Collapse the first five comments, scroll far down to later numbered comments, then return. Each collapsed comment should remain closed for this visit. Closing and reopening the post starts a fresh visit.",
+            depth: 0, score: index, replies: replies
         )
     }
 
