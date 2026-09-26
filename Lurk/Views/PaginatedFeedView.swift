@@ -9,6 +9,11 @@ struct PostRemoveAction {
     var onComplete: ((String) -> Void)? = nil
 }
 
+private struct SubredditRoute: Hashable {
+    let subreddit: String
+    let title: String
+}
+
 private struct HiddenPostUndo: Identifiable {
     let id = UUID()
     let post: Post
@@ -25,7 +30,15 @@ struct PaginatedFeedView: View {
         case retryLoadMore(UUID)
     }
 
-    var showSubredditNav: Bool = true
+    enum SubredditNavigation {
+        case none
+        // Over the feed with Close, for feeds outside a tab's navigation stack (Saved, Hidden).
+        case cover
+        // Onto the tab's navigation stack.
+        case push
+    }
+
+    var subredditNavigation: SubredditNavigation = .cover
     var applyFilters: Bool = true
     var applyBlockFilter: Bool = true
     var removeAction: PostRemoveAction? = nil
@@ -99,7 +112,7 @@ struct PaginatedFeedView: View {
                                 post: post,
                                 onHide: { _ in removePost(post) },
                                 onShowDetail: { selectedPost = post },
-                                onShowSubreddit: showSubredditNav ? { subredditPost = post } : nil,
+                                onShowSubreddit: subredditNavigation == .none ? nil : { subredditPost = post },
                                 onShowGallery: { galleryPost = post },
                                 hideLabel: removeAction?.label ?? "Hide",
                                 hideSystemImage: removeAction?.systemImage ?? "eye.slash"
@@ -173,7 +186,10 @@ struct PaginatedFeedView: View {
             )
             .environment(presentationPlaybackStore)
         }
-        .fullScreenCover(item: $subredditPost) { post in
+        .navigationDestination(item: pushedSubreddit) { route in
+            SubredditPage(subreddit: route.subreddit, title: route.title)
+        }
+        .fullScreenCover(item: subredditPost(for: .cover)) { post in
             SubredditCoverView(subreddit: post.subreddit, title: post.subredditNamePrefixed) {
                 subredditPost = nil
             }
@@ -193,6 +209,21 @@ struct PaginatedFeedView: View {
         Binding(
             get: { writeError != nil },
             set: { if !$0 { writeError = nil } }
+        )
+    }
+
+    private func subredditPost(for navigation: SubredditNavigation) -> Binding<Post?> {
+        Binding(
+            get: { subredditNavigation == navigation ? subredditPost : nil },
+            set: { subredditPost = $0 }
+        )
+    }
+
+    // Pushes need a Hashable value; popping clears the post.
+    private var pushedSubreddit: Binding<SubredditRoute?> {
+        Binding(
+            get: { subredditPost(for: .push).wrappedValue.map { SubredditRoute(subreddit: $0.subreddit, title: $0.subredditNamePrefixed) } },
+            set: { if $0 == nil { subredditPost = nil } }
         )
     }
 

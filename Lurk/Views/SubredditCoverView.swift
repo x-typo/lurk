@@ -5,23 +5,9 @@ struct SubredditCoverView: View {
     let title: String
     let onClose: () -> Void
 
-    @Environment(RedditSession.self) private var session
-    @Environment(SubredditStore.self) private var subStore
-    @Environment(BlockedSubredditStore.self) private var blockStore
-    @Environment(\.redditClient) private var client
-
-    @State private var isPending = false
-    @State private var syncError: String?
-
-    private var isJoined: Bool {
-        subStore.subreddits.contains { $0.lowercased() == subreddit.lowercased() }
-    }
-
     var body: some View {
-        // The stack only hosts the bottom toolbar, so Close sits where the other reading screens put it.
         NavigationStack {
-            content
-                .toolbar(.hidden, for: .navigationBar)
+            SubredditPage(subreddit: subreddit, title: title)
                 .toolbar {
                     ToolbarItem(placement: .status) {
                         Button("Close") { onClose() }
@@ -31,48 +17,29 @@ struct SubredditCoverView: View {
         }
         .preferredColorScheme(.dark)
     }
+}
 
-    private var content: some View {
+// A subreddit's feed with Join/Leave and Block in the navigation bar. Tabs push it; SubredditCoverView
+// hosts it everywhere else.
+struct SubredditPage: View {
+    let subreddit: String
+    let title: String
+
+    @Environment(RedditSession.self) private var session
+    @Environment(SubredditStore.self) private var subStore
+    @Environment(BlockedSubredditStore.self) private var blockStore
+    @Environment(\.redditClient) private var client
+    @Environment(\.dismiss) private var dismiss
+
+    @State private var isPending = false
+    @State private var syncError: String?
+
+    private var isJoined: Bool {
+        subStore.subreddits.contains { $0.lowercased() == subreddit.lowercased() }
+    }
+
+    var body: some View {
         VStack(spacing: 0) {
-            ZStack {
-                Text(title)
-                    .font(.body.weight(.semibold))
-                    .foregroundStyle(Theme.text)
-                HStack(spacing: 16) {
-                    Spacer()
-                    Button {
-                        Task { await toggleSubscription() }
-                    } label: {
-                        if isPending {
-                            ProgressView().tint(Theme.primary)
-                        } else {
-                            Text(isJoined ? "Leave" : "Join")
-                                .foregroundStyle(Theme.primary)
-                        }
-                    }
-                    .disabled(isPending)
-                    Menu {
-                        Button(role: .destructive) {
-                            blockStore.block(subreddit)
-                            onClose()
-                        } label: {
-                            Label("Block r/\(subreddit)", systemImage: "nosign")
-                        }
-                    } label: {
-                        Image(systemName: "ellipsis")
-                            .font(.body.weight(.semibold))
-                            .foregroundStyle(Theme.primary)
-                            .frame(width: 32, height: 32)
-                            .contentShape(Rectangle())
-                    }
-                }
-            }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 12)
-            .background(Theme.background)
-            .overlay(alignment: .bottom) {
-                Theme.border.frame(height: 1)
-            }
             if let syncError {
                 Text(syncError)
                     .font(.caption)
@@ -84,6 +51,38 @@ struct SubredditCoverView: View {
             SubredditFeedView(subreddit: subreddit)
         }
         .background(Theme.background)
+        .navigationTitle(title)
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbarColorScheme(.dark, for: .navigationBar)
+        .toolbar {
+            ToolbarItemGroup(placement: .topBarTrailing) {
+                Button {
+                    Task { await toggleSubscription() }
+                } label: {
+                    if isPending {
+                        ProgressView().tint(Theme.primary)
+                    } else {
+                        Text(isJoined ? "Leave" : "Join")
+                            .foregroundStyle(Theme.primary)
+                    }
+                }
+                .disabled(isPending)
+                Menu {
+                    Button(role: .destructive) {
+                        blockStore.block(subreddit)
+                        // Pops a pushed page, or closes the cover when this is its root.
+                        dismiss()
+                    } label: {
+                        Label("Block r/\(subreddit)", systemImage: "nosign")
+                    }
+                } label: {
+                    Image(systemName: "ellipsis")
+                        .font(.body.weight(.semibold))
+                        .foregroundStyle(Theme.primary)
+                }
+                .accessibilityLabel("More")
+            }
+        }
     }
 
     private func toggleSubscription() async {

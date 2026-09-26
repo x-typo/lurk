@@ -5,7 +5,7 @@ struct SubredditFeedView: View {
     @Environment(\.redditClient) private var client
 
     var body: some View {
-        PaginatedFeedView(showSubredditNav: false, applyBlockFilter: false) { after in
+        PaginatedFeedView(subredditNavigation: .none, applyBlockFilter: false) { after in
             try await client.fetchSubredditPosts(subreddit, after: after)
         }
         .id(subreddit.lowercased())

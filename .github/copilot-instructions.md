@@ -69,7 +69,7 @@ Flag violations of these conventions during review.
 
 ## SwiftUI Patterns
 
-- `TabView` with `.tabItem` for top-level navigation. Per-tab content.
+- `TabView` with `.tabItem` for top-level navigation. Each tab is a `NavigationStack` with an inline title: subreddits push with `navigationDestination` (`SubredditPage`), and tapping the selected tab pops to its root. Screens outside a tab stack (Settings covers, post detail, Inbox) open subreddits in `SubredditCoverView`.
 - `LazyVStack` for feed lists. Not `VStack` with `ForEach`.
 - `PaginatedFeedView` is the reusable pagination component. New feeds should use it, not reimplement pagination.
 - Pull-to-refresh on all feed views.
