@@ -11,6 +11,8 @@ struct ThreadView: View {
     @State private var post: Post?
     @State private var loadError: String?
     @State private var attempt = 0
+    // The presenter pauses its own inline media while this sheet is up, so the thread plays through its own store.
+    @State private var playbackStore = InlineGIFPlaybackStore()
 
     var body: some View {
         if let post {
@@ -19,6 +21,7 @@ struct ThreadView: View {
                 commentsFetch: contextFetch,
                 focusedCommentID: target.commentID
             )
+            .environment(playbackStore)
         } else {
             NavigationStack {
                 Group {

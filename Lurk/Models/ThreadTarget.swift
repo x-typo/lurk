@@ -13,15 +13,22 @@ struct ThreadTarget: Identifiable, Hashable {
 }
 
 extension ThreadTarget {
-    // Accepts Reddit URLs and permalinks shaped `/r/<sub>/comments/<post>/<slug>/<comment>/`, with or
-    // without the comment and query items such as `?context=3`.
+    // Accepts Reddit URLs and permalinks shaped `/r/<sub>/comments/<post>/<slug>/<comment>/` (or
+    // `/user/<name>/…`, `/u/<name>/…`, `/comments/<post>/…`), with or without the comment and query items
+    // such as `?context=3`. Segments are matched by position, so a subreddit named "comments" still works.
     init?(url: URL) {
         if let host = url.host?.lowercased(), host != "reddit.com", !host.hasSuffix(".reddit.com") {
             return nil
         }
         let parts = url.pathComponents.filter { $0 != "/" }
-        guard let index = parts.firstIndex(of: "comments"),
-              index + 1 < parts.count,
+        let index: Int
+        switch parts.first?.lowercased() {
+        case "r", "user", "u": index = 2
+        case "comments": index = 0
+        default: return nil
+        }
+        guard index + 1 < parts.count,
+              parts[index] == "comments",
               Comment.isRedditID(parts[index + 1]) else { return nil }
         postID = parts[index + 1]
         sourceURL = url

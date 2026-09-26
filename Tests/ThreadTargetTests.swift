@@ -26,6 +26,13 @@ struct ThreadTargetTests {
         #expect(permalink.postID == "abc123")
         #expect(permalink.commentID == "def456")
 
+        let named = try #require(ThreadTarget(permalink: "/r/comments/comments/abc123/a_post/def456/"))
+        #expect(named.postID == "abc123")
+        #expect(named.commentID == "def456")
+
+        let profile = try #require(ThreadTarget(permalink: "/user/someone/comments/abc123/a_post/"))
+        #expect(profile.postID == "abc123")
+
         let short = try #require(ThreadTarget(permalink: "/comments/abc123/"))
         #expect(short.postID == "abc123")
         #expect(short.commentID == nil)
@@ -38,6 +45,7 @@ struct ThreadTargetTests {
             "https://www.reddit.com/r/swift/",
             "https://www.reddit.com/r/swift/comments/ABC/a_post/",
             "https://www.reddit.com/r/swift/comments/../a_post/",
+            "https://www.reddit.com/r/swift/about/comments/abc123/",
         ] {
             let url = try #require(URL(string: link))
             #expect(ThreadTarget(url: url) == nil, "\(link)")
