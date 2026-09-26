@@ -11,8 +11,8 @@ private struct HiddenPostUndo: Identifiable {
     let id = UUID()
     let post: Post
     let index: Int?
-    // Nil when signed out: the hide was local only.
-    let hideRequest: Task<Bool, Never>?
+    // A deadline rather than a duration, so leaving and returning to the feed can't extend it.
+    let expiresAt = Date.now.addingTimeInterval(4)
 }
 
 struct PaginatedFeedView: View {
@@ -41,6 +41,7 @@ struct PaginatedFeedView: View {
     @State private var galleryPost: Post?
     @State private var writeError: String?
     @State private var hiddenUndo: HiddenPostUndo?
+    @State private var hideSync = PostHideSync()
     @State private var readRequest: ReadRequest?
     @State private var feedPlaybackStore = InlineGIFPlaybackStore()
     @State private var presentationPlaybackStore = InlineGIFPlaybackStore()
@@ -121,11 +122,14 @@ struct PaginatedFeedView: View {
             }
         }
         .task(id: hiddenUndo?.id) {
-            guard hiddenUndo != nil else { return }
-            do {
-                try await Task.sleep(for: .seconds(4))
-            } catch {
-                return
+            guard let expiresAt = hiddenUndo?.expiresAt else { return }
+            let remaining = expiresAt.timeIntervalSinceNow
+            if remaining > 0 {
+                do {
+                    try await Task.sleep(for: .seconds(remaining))
+                } catch {
+                    return
+                }
             }
             withAnimation(.easeOut(duration: 0.2)) { hiddenUndo = nil }
         }
@@ -219,29 +223,14 @@ struct PaginatedFeedView: View {
         let removedIndex = pager.posts.firstIndex { $0.id == post.id }
         filterStore.hidePost(post.id)
         pager.removeFilteredPost(id: post.id)
-
-        var hideRequest: Task<Bool, Never>?
-        if session.isLoggedIn {
-            hideRequest = Task { @MainActor in
-                do {
-                    let request = session.authenticatedRequest(
-                        url: RedditAPI.hide,
-                        formData: ["id": "t3_\(post.id)"]
-                    )
-                    try await client.execute(request)
-                    return true
-                } catch {
-                    // Undo already restored the post; there's nothing to report.
-                    guard filterStore.isHidden(post.id) else { return false }
-                    if hiddenUndo?.post.id == post.id { hiddenUndo = nil }
-                    restoreHiddenPost(post, to: removedIndex)
-                    writeError = error.localizedDescription
-                    return false
-                }
-            }
-        }
         withAnimation(.easeOut(duration: 0.2)) {
-            hiddenUndo = HiddenPostUndo(post: post, index: removedIndex, hideRequest: hideRequest)
+            hiddenUndo = HiddenPostUndo(post: post, index: removedIndex)
+        }
+
+        syncHidden(true, post: post) { error in
+            if hiddenUndo?.post.id == post.id { hiddenUndo = nil }
+            restoreHiddenPost(post, to: removedIndex)
+            writeError = error.localizedDescription
         }
     }
 
@@ -250,24 +239,30 @@ struct PaginatedFeedView: View {
             hiddenUndo = nil
             restoreHiddenPost(undo.post, to: undo.index)
         }
-        guard let hideRequest = undo.hideRequest else { return }
 
-        Task { @MainActor in
-            // An unhide sent before the hide finishes could reach Reddit first and leave the post hidden.
-            // A failed hide has already restored the post.
-            guard await hideRequest.value else { return }
-            do {
+        syncHidden(false, post: undo.post) { error in
+            filterStore.hidePost(undo.post.id)
+            pager.removeFilteredPost(id: undo.post.id)
+            writeError = error.localizedDescription
+        }
+    }
+
+    // Signed out, hiding and Undo stay local.
+    private func syncHidden(_ hidden: Bool, post: Post, onFailure: @escaping @MainActor (Error) -> Void) {
+        guard session.isLoggedIn, let account = session.username else { return }
+        hideSync.enqueue(
+            postID: post.id,
+            account: account,
+            currentAccount: { session.isLoggedIn ? session.username : nil },
+            send: {
                 let request = session.authenticatedRequest(
-                    url: RedditAPI.unhide,
-                    formData: ["id": "t3_\(undo.post.id)"]
+                    url: hidden ? RedditAPI.hide : RedditAPI.unhide,
+                    formData: ["id": "t3_\(post.id)"]
                 )
                 try await client.execute(request)
-            } catch {
-                filterStore.hidePost(undo.post.id)
-                pager.removeFilteredPost(id: undo.post.id)
-                writeError = error.localizedDescription
-            }
-        }
+            },
+            onFailure: onFailure
+        )
     }
 
     private func restoreHiddenPost(_ post: Post, to index: Int?) {
