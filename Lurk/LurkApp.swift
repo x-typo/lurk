@@ -2,6 +2,11 @@ import SwiftUI
 
 @main
 struct LurkApp: App {
+    init() {
+        // AsyncImage uses the shared cache, and the system default is too small to keep a feed's images.
+        URLCache.shared = URLCache(memoryCapacity: 64 * 1024 * 1024, diskCapacity: 256 * 1024 * 1024)
+    }
+
     var body: some Scene {
         WindowGroup {
 #if DEBUG

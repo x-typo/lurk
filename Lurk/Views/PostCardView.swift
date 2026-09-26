@@ -18,6 +18,23 @@ struct PostCardView: View {
 
     private let swipeHideOffset: CGFloat = 500
 
+    // Fits inside the capped box when the aspect ratio is known; otherwise keeps the image's own shape.
+    @ViewBuilder
+    private func feedImage(_ image: Image) -> some View {
+        if let aspectRatio = post.imageAspectRatio {
+            image
+                .resizable()
+                .aspectRatio(contentMode: .fit)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .aspectRatio(Post.feedBoxAspectRatio(aspectRatio), contentMode: .fit)
+                .background(Theme.background)
+        } else {
+            image
+                .resizable()
+                .aspectRatio(contentMode: .fit)
+        }
+    }
+
     var body: some View {
         ZStack {
             if offset != 0 {
@@ -57,7 +74,6 @@ struct PostCardView: View {
                     Text(post.title)
                         .font(.body)
                         .foregroundStyle(Theme.text)
-                        .lineLimit(4)
                         .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
                         .contentShape(Rectangle())
                 }
@@ -101,18 +117,19 @@ struct PostCardView: View {
                         case .gif(let url):
                             AnimatedGIFView(
                                 url: url,
-                                posterURL: post.imageURL,
+                                posterURL: post.feedImageURL,
                                 onMediaTap: { performTap(.showMedia) }
                             )
-                                .aspectRatio(post.imageAspectRatio ?? 16 / 9, contentMode: .fit)
+                                .aspectRatio(Post.feedBoxAspectRatio(post.imageAspectRatio), contentMode: .fit)
+                                .background(Theme.background)
                         case .video(let url):
                             Button {
                                 performTap(.showMedia)
                             } label: {
                                 InlineLoopingVideoView(
                                     url: url,
-                                    posterURL: post.imageURL,
-                                    aspectRatio: post.videoAspectRatio ?? post.imageAspectRatio
+                                    posterURL: post.feedImageURL,
+                                    aspectRatio: Post.feedBoxAspectRatio(post.videoAspectRatio ?? post.imageAspectRatio)
                                 )
                                 .contentShape(Rectangle())
                             }
@@ -127,23 +144,21 @@ struct PostCardView: View {
                                 .allowsHitTesting(false)
                         }
                     }
-                } else if let imageURL = post.imageURL {
+                } else if let imageURL = post.feedImageURL {
                     Button {
                         performTap(.showMedia)
                     } label: {
                         AsyncImage(url: imageURL) { phase in
                             switch phase {
                             case .success(let image):
-                                image
-                                    .resizable()
-                                    .aspectRatio(post.imageAspectRatio, contentMode: .fit)
+                                feedImage(image)
                                     .clipShape(RoundedRectangle(cornerRadius: 8))
                             case .failure:
                                 EmptyView()
                             default:
                                 RoundedRectangle(cornerRadius: 8)
                                     .fill(Theme.surfaceElevated)
-                                    .aspectRatio(post.imageAspectRatio ?? 16/9, contentMode: .fit)
+                                    .aspectRatio(Post.feedBoxAspectRatio(post.imageAspectRatio), contentMode: .fit)
                                     .overlay { ProgressView().tint(Theme.textMuted) }
                             }
                         }

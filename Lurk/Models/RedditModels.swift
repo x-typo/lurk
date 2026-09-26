@@ -230,15 +230,17 @@ struct Preview: Decodable {
 struct PreviewImage: Decodable {
     let source: ImageSource
     var variants: PreviewVariants? = nil
+    var resolutions: [ImageSource] = []
 }
 
 extension PreviewImage {
-    private enum CodingKeys: String, CodingKey { case source, variants }
+    private enum CodingKeys: String, CodingKey { case source, variants, resolutions }
 
     init(from decoder: Decoder) throws {
         let values = try decoder.container(keyedBy: CodingKeys.self)
         source = try values.decode(ImageSource.self, forKey: .source)
         variants = try? values.decode(PreviewVariants.self, forKey: .variants)
+        resolutions = (try? values.decode([ImageSource].self, forKey: .resolutions)) ?? []
     }
 }
 
@@ -280,6 +282,8 @@ struct GalleryItem: Decodable {
 struct MediaMetadataItem: Decodable {
     let e: String?
     let s: MediaMetadataSource?
+    // Smaller copies of `s`, like a preview's `resolutions`.
+    var p: [MediaMetadataSource]? = nil
 
     var isAnimated: Bool {
         e == "AnimatedImage"
@@ -432,6 +436,41 @@ extension Post {
               imageURL.isHTTPMediaURL,
               imageURL.isGIFURL else { return nil }
         return imageURL
+    }
+
+    // Feed cards load the smallest preview at least this wide, else the widest one. Reddit's previews
+    // top out at 1,080 px, about a card's width on the largest iPhones.
+    private static let feedImageWidth = 1080
+    // Media taller than 4:5 fits inside a 4:5 box in feed cards, so a tall post can't fill the screen.
+    static let tallestFeedAspectRatio: CGFloat = 4 / 5
+
+    // A copy sized for feed cards. The detail, zoom viewer, and Save to Photos keep the full `imageURL`.
+    var feedImageURL: URL? {
+        if let image = contentPreview?.images?.first,
+           let url = Self.feedSized([image.source] + image.resolutions, width: \.width, url: \.decodedUrl) {
+            return url
+        }
+        if let firstItem = contentGalleryData?.items?.first,
+           let item = contentMediaMetadata?[firstItem.mediaId],
+           let source = item.s {
+            let sized = ([source] + (item.p ?? [])).filter { $0.x != nil && $0.decodedStaticUrl != nil }
+            if let url = Self.feedSized(sized, width: { $0.x ?? 0 }, url: { $0.decodedStaticUrl ?? "" }) {
+                return url
+            }
+        }
+        return imageURL
+    }
+
+    static func feedBoxAspectRatio(_ mediaAspectRatio: CGFloat?) -> CGFloat {
+        max(mediaAspectRatio ?? 16 / 9, tallestFeedAspectRatio)
+    }
+
+    private static func feedSized<Copy>(_ copies: [Copy], width: (Copy) -> Int, url: (Copy) -> String) -> URL? {
+        let byWidth = copies.sorted { width($0) < width($1) }
+        guard let pick = byWidth.first(where: { width($0) >= feedImageWidth }) ?? byWidth.last,
+              let pickedURL = URL(string: url(pick)),
+              pickedURL.isHTTPMediaURL else { return nil }
+        return pickedURL
     }
 
     var imageAspectRatio: CGFloat? {

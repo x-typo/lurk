@@ -355,6 +355,51 @@ struct PostMediaTests {
         ]]]
     }
 
+    @Test("Feed cards load the smallest copy at least a card wide; other screens keep the original")
+    func feedImageSizing() throws {
+        let large = try makePost(url: "https://i.redd.it/large.jpg", preview: sizedPreview(3024, [108, 216, 320, 640, 960, 1080]))
+        #expect(large.feedImageURL?.absoluteString == "https://preview.redd.it/large.jpg?width=1080")
+        #expect(large.imageURL?.absoluteString == "https://preview.redd.it/large.jpg?width=3024")
+
+        let small = try makePost(url: "https://i.redd.it/small.jpg", preview: sizedPreview(848, [108, 216, 320, 640]))
+        #expect(small.feedImageURL?.absoluteString == "https://preview.redd.it/small.jpg?width=848")
+
+        let gallery = try makePost(
+            url: "https://www.reddit.com/gallery/abc",
+            galleryData: ["items": [["media_id": "item"]]],
+            mediaMetadata: ["item": [
+                "e": "Image",
+                "s": ["u": "https://preview.redd.it/item.jpg?width=2316", "x": 2316, "y": 2233],
+                "p": [
+                    ["u": "https://preview.redd.it/item.jpg?width=640", "x": 640, "y": 617],
+                    ["u": "https://preview.redd.it/item.jpg?width=1080", "x": 1080, "y": 1041],
+                ],
+            ]]
+        )
+        #expect(gallery.feedImageURL?.absoluteString == "https://preview.redd.it/item.jpg?width=1080")
+        #expect(gallery.imageURL?.absoluteString == "https://preview.redd.it/item.jpg?width=2316")
+
+        let direct = try makePost(url: "https://i.imgur.com/direct.jpg")
+        #expect(direct.feedImageURL != nil)
+        #expect(direct.feedImageURL == direct.imageURL)
+    }
+
+    @Test("Media taller than 4:5 gets a 4:5 box in feed cards; other shapes keep theirs")
+    func feedBoxAspectRatio() {
+        #expect(Post.feedBoxAspectRatio(9 / 16) == Post.tallestFeedAspectRatio)
+        #expect(Post.feedBoxAspectRatio(1.5) == 1.5)
+        let widescreen: CGFloat = 16.0 / 9.0
+        #expect(Post.feedBoxAspectRatio(nil) == widescreen)
+    }
+
+    private func sizedPreview(_ sourceWidth: Int, _ widths: [Int]) -> [String: Any] {
+        let name = sourceWidth > 1000 ? "large" : "small"
+        func copy(_ width: Int) -> [String: Any] {
+            ["url": "https://preview.redd.it/\(name).jpg?width=\(width)", "width": width, "height": width * 4 / 3]
+        }
+        return ["images": [["source": copy(sourceWidth), "resolutions": widths.map(copy)]]]
+    }
+
     private func makePost(
         url: String,
         isVideo: Bool = false,

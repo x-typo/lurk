@@ -17,10 +17,12 @@ struct InlineLoopingVideoView: View {
         let isActive = scenePhase == .active && playbackStore.isActive(playbackID)
 
         ZStack {
+            // A feed card's capped box can be wider than the video, which then fits inside it.
+            Theme.background
             if let posterURL {
                 AsyncImage(url: posterURL) { phase in
                     if case .success(let image) = phase {
-                        image.resizable().aspectRatio(contentMode: .fill)
+                        image.resizable().aspectRatio(contentMode: .fit)
                     } else {
                         Theme.surfaceElevated
                     }
