@@ -101,15 +101,16 @@ final class RedditSession {
     }
 
     func logout() async {
+        // Before publishing the signed-out state, so feeds that reload for it can't send these cookies.
+        HTTPCookieStorage.shared.cookies?.filter { $0.domain.contains("reddit.com") }.forEach {
+            HTTPCookieStorage.shared.deleteCookie($0)
+        }
         clearSession()
         let store = WKWebsiteDataStore.default()
         let records = await store.dataRecords(ofTypes: WKWebsiteDataStore.allWebsiteDataTypes())
         let redditRecords = records.filter { $0.displayName.contains("reddit") }
         if !redditRecords.isEmpty {
             await store.removeData(ofTypes: WKWebsiteDataStore.allWebsiteDataTypes(), for: redditRecords)
-        }
-        HTTPCookieStorage.shared.cookies?.filter { $0.domain.contains("reddit.com") }.forEach {
-            HTTPCookieStorage.shared.deleteCookie($0)
         }
     }
 

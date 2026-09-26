@@ -566,12 +566,16 @@ struct PostDetailView: View {
             dismiss()
         }
         if action.unsaves {
-            await engagement.submitSave(false, for: "t3_\(postId)", loaded: post.saved, send: {
+            let thingID = "t3_\(postId)"
+            engagement.submitSave(false, for: thingID, loaded: post.saved, send: {
                 try await client.execute(request)
-                finish()
             }, onFailure: { error in
                 removeError = error.localizedDescription
-            }).value
+            })
+            // A Save tapped meanwhile keeps the post in the list and the detail open.
+            if await !engagement.settledSave(thingID, loaded: post.saved) {
+                finish()
+            }
             return
         }
         do {

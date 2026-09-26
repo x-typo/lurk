@@ -218,10 +218,18 @@ struct PaginatedFeedView: View {
             writeError = error.localizedDescription
         }
         if action.unsaves {
-            engagement.submitSave(false, for: "t3_\(post.id)", loaded: post.saved, send: {
+            let thingID = "t3_\(post.id)"
+            engagement.submitSave(false, for: thingID, loaded: post.saved, send: {
                 try await client.execute(request)
-                action.onComplete?(post.id)
-            }, onFailure: fail)
+            }, onFailure: { writeError = $0.localizedDescription })
+            // A newer Save, or failures Reddit never applied, can leave the post saved; the row follows that.
+            Task { @MainActor in
+                if await engagement.settledSave(thingID, loaded: post.saved) {
+                    restoreRemovedPost(post, to: removedIndex)
+                } else {
+                    action.onComplete?(post.id)
+                }
+            }
             return
         }
         Task { @MainActor in

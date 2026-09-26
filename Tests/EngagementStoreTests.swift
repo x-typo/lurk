@@ -152,6 +152,44 @@ struct EngagementStoreTests {
         #expect(store.vote(for: "t3_a", loaded: 0) == -1)
     }
 
+    @Test("Settling an Unsave waits for a Save queued meanwhile and reports the final choice")
+    func settledSaveWaitsForQueuedWrites() async {
+        let store = EngagementStore()
+        let unsaveGate = Gate()
+        let saveGate = Gate()
+        let log = Log()
+        store.submitSave(false, for: "t3_a", loaded: true, send: { await unsaveGate.wait() }, onFailure: log.fail)
+        let settled = Task { await store.settledSave("t3_a", loaded: true) }
+        await unsaveGate.waitUntilStarted()
+        store.submitSave(true, for: "t3_a", loaded: true, send: {
+            await saveGate.wait()
+            throw URLError(.timedOut)
+        }, onFailure: log.fail)
+
+        unsaveGate.open()
+        await saveGate.waitUntilStarted()
+        saveGate.open()
+        #expect(await settled.value == false)
+        #expect(log.failures == 1)
+    }
+
+    @Test("When an Unsave and a later Save both fail, the post settles as saved")
+    func bothFailSettlesSaved() async {
+        let store = EngagementStore()
+        let gate = Gate()
+        let log = Log()
+        store.submitSave(false, for: "t3_a", loaded: true, send: {
+            await gate.wait()
+            throw URLError(.timedOut)
+        }, onFailure: log.fail)
+        store.submitSave(true, for: "t3_a", loaded: true, send: { throw URLError(.timedOut) }, onFailure: log.fail)
+
+        await gate.waitUntilStarted()
+        gate.open()
+        #expect(await store.settledSave("t3_a", loaded: true))
+        #expect(log.failures == 0)
+    }
+
     @MainActor
     private final class Log {
         var events: [String] = []

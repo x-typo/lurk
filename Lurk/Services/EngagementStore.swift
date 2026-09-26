@@ -49,6 +49,14 @@ final class EngagementStore {
                 show: { [weak self] in self?.saves[thingID] = $0 }, send: send, onFailure: onFailure)
     }
 
+    // Waits until no save writes are queued for the thing, then returns the viewer's final choice.
+    func settledSave(_ thingID: String, loaded: Bool) async -> Bool {
+        while let tail = saveLanes.tails[thingID] {
+            await tail.value
+        }
+        return isSaved(thingID, loaded: loaded)
+    }
+
     func setAccount(_ account: String?) {
         guard account != self.account else { return }
         self.account = account
