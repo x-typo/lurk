@@ -4,6 +4,7 @@ import Foundation
 final class MuteStore {
     private static let usersKey = "lurk.mutedUsers"
     private static let keywordsKey = "lurk.mutedKeywords"
+    private static let hidesPinnedKey = "lurk.hidePinnedModComments"
     // Bots that were hard-coded before muting moved to Settings.
     private static let seedUsers = [
         "AutoModerator",
@@ -22,6 +23,10 @@ final class MuteStore {
     private(set) var keywords: [String] = []
     // Lowercased, for case-insensitive lookups.
     private(set) var mutedUserKeys: Set<String> = []
+    // On unless turned off in Settings. Pinned comments are mostly moderator bots.
+    var hidesPinnedModComments: Bool {
+        didSet { defaults.set(hidesPinnedModComments, forKey: Self.hidesPinnedKey) }
+    }
 
     // Observed, so feeds re-filter when keywords change.
     private var keywordPattern: NSRegularExpression?
@@ -29,6 +34,7 @@ final class MuteStore {
 
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
+        hidesPinnedModComments = defaults.object(forKey: Self.hidesPinnedKey) as? Bool ?? true
         load()
     }
 

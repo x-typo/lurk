@@ -400,7 +400,8 @@ struct PostDetailView: View {
         let rows = CommentNode.rows(
             from: commentStore.nodes,
             collapsed: collapsedCommentIDs,
-            mutedUsers: muteStore.mutedUserKeys
+            mutedUsers: muteStore.mutedUserKeys,
+            hidesPinned: muteStore.hidesPinnedModComments
         )
         let firstRowID = rows.first?.id
         return LazyVStack(alignment: .leading, spacing: 0) {

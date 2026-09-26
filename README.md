@@ -14,7 +14,7 @@ Lurk uses Reddit's web session cookies for a personal signed-in browsing workflo
 - **Swipe Gestures** - Swipe left to hide a post (with a few seconds to Undo), swipe right to open in Safari
 - **Comment Threads** - Full threads with colored depth lines and in-app "load more"; swipe a comment left to vote (short = up, long = down), right to reply
 - **Post Hiding** - Hidden posts persist across sessions (UserDefaults, capped at 5,000)
-- **Muting** - Mute users and title keywords from Settings, or mute someone from a comment's long-press menu
+- **Muting** - Mute users and title keywords from Settings, or mute someone from a comment's long-press menu. Comments moderators pin to the top of a thread are hidden too, unless you turn that off in Settings
 - **Dark Mode** - Native dark theme, no toggle
 - **Pull-to-Refresh** - Refresh any feed
 - **Optional Account Actions** - Sign in to vote, comment, sync subscribed subreddits, and manage saved/hidden posts

@@ -34,6 +34,18 @@ struct MuteStoreTests {
         }
     }
 
+    @Test("Hiding pinned mod comments starts on and persists when turned off")
+    func hidesPinnedModComments() {
+        withDefaults { defaults in
+            let store = MuteStore(defaults: defaults)
+            #expect(store.hidesPinnedModComments)
+            store.hidesPinnedModComments = false
+            #expect(!MuteStore(defaults: defaults).hidesPinnedModComments)
+            store.hidesPinnedModComments = true
+            #expect(MuteStore(defaults: defaults).hidesPinnedModComments)
+        }
+    }
+
     @Test("Usernames are normalized, deduplicated ignoring case, and validated")
     func normalizesUsers() {
         withDefaults { defaults in
