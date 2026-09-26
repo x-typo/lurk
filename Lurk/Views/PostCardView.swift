@@ -18,23 +18,6 @@ struct PostCardView: View {
 
     private let swipeHideOffset: CGFloat = 500
 
-    // Fits inside the capped box when the aspect ratio is known; otherwise keeps the image's own shape.
-    @ViewBuilder
-    private func feedImage(_ image: Image) -> some View {
-        if let aspectRatio = post.imageAspectRatio {
-            image
-                .resizable()
-                .aspectRatio(contentMode: .fit)
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .aspectRatio(Post.feedBoxAspectRatio(aspectRatio), contentMode: .fit)
-                .background(Theme.background)
-        } else {
-            image
-                .resizable()
-                .aspectRatio(contentMode: .fit)
-        }
-    }
-
     var body: some View {
         ZStack {
             if offset != 0 {
@@ -151,8 +134,11 @@ struct PostCardView: View {
                         AsyncImage(url: imageURL) { phase in
                             switch phase {
                             case .success(let image):
-                                feedImage(image)
-                                    .clipShape(RoundedRectangle(cornerRadius: 8))
+                                FeedMediaHeightCap {
+                                    image.resizable().aspectRatio(contentMode: .fit)
+                                }
+                                .background(Theme.background)
+                                .clipShape(RoundedRectangle(cornerRadius: 8))
                             case .failure:
                                 EmptyView()
                             default:
@@ -398,5 +384,24 @@ struct PostCardInteractionState: Equatable {
 
     private static func axis(for translation: CGSize) -> DragAxis {
         abs(translation.width) > abs(translation.height) ? .horizontal : .vertical
+    }
+}
+
+// Caps feed media at the tallest feed shape (4:5) for the width it's given; taller media fits inside.
+// It measures the laid-out media, so it works without Reddit's size metadata.
+struct FeedMediaHeightCap: Layout {
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        guard let media = subviews.first else { return .zero }
+        let natural = media.sizeThatFits(ProposedViewSize(width: proposal.width, height: nil))
+        let width = proposal.width ?? natural.width
+        return CGSize(width: width, height: min(natural.height, width / Post.tallestFeedAspectRatio))
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        subviews.first?.place(
+            at: CGPoint(x: bounds.midX, y: bounds.midY),
+            anchor: .center,
+            proposal: ProposedViewSize(bounds.size)
+        )
     }
 }
