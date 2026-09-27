@@ -100,6 +100,64 @@ struct CommentParsingTests {
         #expect(pinned == [true, false, false])
     }
 
+    @Test("A Reddit-hosted comment GIF gets its MP4, size, and a preview poster from the comment's metadata")
+    func commentGIFVideo() throws {
+        let nodes = try parse([node(
+            "gif", body: "rats caused this https://i.redd.it/abc.gif",
+            mediaMetadata: ["abc": [
+                "e": "AnimatedImage",
+                "s": [
+                    "gif": "https://i.redd.it/abc.gif",
+                    "mp4": "https://preview.redd.it/abc.gif?format=mp4&amp;s=sig",
+                    "x": 480,
+                    "y": 270,
+                ],
+                "p": [
+                    ["u": "https://preview.redd.it/abc.gif?width=108&amp;format=png8", "x": 108, "y": 61],
+                    ["u": "https://preview.redd.it/abc.gif?width=320&amp;format=png8", "x": 320, "y": 180],
+                ],
+            ]]
+        )])
+        guard case .comment(let comment, _) = try #require(nodes.first) else {
+            Issue.record("Expected a comment")
+            return
+        }
+        let video = try #require(comment.gifVideos["abc"])
+        #expect(video.url == URL(string: "https://preview.redd.it/abc.gif?format=mp4&s=sig"))
+        #expect(video.posterURL == URL(string: "https://preview.redd.it/abc.gif?width=320&format=png8"))
+        let aspectRatio = try #require(video.aspectRatio)
+        #expect(abs(aspectRatio - 480.0 / 270.0) < 0.000_001)
+
+        let inText = try #require(URL(string: "https://i.redd.it/abc.gif"))
+        #expect(CommentGIFVideo.matching(inText, in: comment.gifVideos) == video)
+        let preview = try #require(URL(string: "https://preview.redd.it/abc.gif?width=640&format=png8"))
+        #expect(CommentGIFVideo.matching(preview, in: comment.gifVideos) == video)
+        let elsewhere = try #require(URL(string: "https://example.com/abc.gif"))
+        #expect(CommentGIFVideo.matching(elsewhere, in: comment.gifVideos) == nil)
+        let other = try #require(URL(string: "https://i.redd.it/other.gif"))
+        #expect(CommentGIFVideo.matching(other, in: comment.gifVideos) == nil)
+    }
+
+    @Test("Malformed or unusable comment media metadata leaves the comment and its GIF decoding in place")
+    func malformedCommentMediaMetadata() throws {
+        let unusable: [String: Any] = ["abc": [
+            "e": "AnimatedImage",
+            "s": ["gif": "https://i.redd.it/abc.gif", "mp4": "file:///private/tmp/abc.mp4", "x": 1, "y": 1],
+        ]]
+        let wrongType: [String: Any] = ["abc": ["e": "AnimatedImage", "s": ["x": "wide"]]]
+        let nodes = try parse([
+            node("text", mediaMetadata: "not metadata"),
+            node("type", mediaMetadata: wrongType),
+            node("scheme", mediaMetadata: unusable),
+        ])
+        let comments = nodes.compactMap { node -> Lurk.Comment? in
+            guard case .comment(let comment, _) = node else { return nil }
+            return comment
+        }
+        #expect(comments.map(\.id) == ["text", "type", "scheme"])
+        #expect(comments.allSatisfy { $0.gifVideos.isEmpty })
+    }
+
     @Test("A comment carries Reddit's saved state, and a missing value stays unknown")
     func viewerSave() throws {
         let nodes = try parse([node("saved", saved: true), node("unsaved", saved: false), node("unknown")])
@@ -234,10 +292,13 @@ struct CommentParsingTests {
         likes: Bool? = nil,
         saved: Bool? = nil,
         stickied: Bool? = nil,
+        body: String = "body",
+        mediaMetadata: Any? = nil,
         children: [[String: Any]] = []
     ) -> [String: Any] {
-        var data: [String: Any] = ["author": author, "body": "body", "score": score,
+        var data: [String: Any] = ["author": author, "body": body, "score": score,
                                    "replies": ["data": ["children": children]]]
+        if let mediaMetadata { data["media_metadata"] = mediaMetadata }
         if let id { data["id"] = id }
         if let depth { data["depth"] = depth }
         if let likes { data["likes"] = likes }

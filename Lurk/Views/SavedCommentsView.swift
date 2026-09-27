@@ -156,7 +156,8 @@ private struct SavedCommentCard: View {
                             hint: "Double-tap to open this comment's thread."
                         )
                     )
-                }
+                },
+                gifVideos: comment.gifVideos
             )
 
             HStack {

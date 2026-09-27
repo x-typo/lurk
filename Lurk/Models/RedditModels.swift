@@ -285,7 +285,7 @@ struct MediaMetadataItem: Decodable {
     // Smaller copies of `s`, like a preview's `resolutions`.
     var p: [MediaMetadataSource]? = nil
 
-    var isAnimated: Bool {
+    nonisolated var isAnimated: Bool {
         e == "AnimatedImage"
     }
 }
@@ -298,7 +298,7 @@ struct MediaMetadataSource: Decodable {
     let x: Int?
     let y: Int?
 
-    var decodedStaticUrl: String? {
+    nonisolated var decodedStaticUrl: String? {
         u?.replacingOccurrences(of: "&amp;", with: "&")
     }
 
@@ -310,7 +310,7 @@ struct MediaMetadataSource: Decodable {
         decodedStaticUrl ?? decodedAnimatedUrl
     }
 
-    var decodedVideoUrl: String? {
+    nonisolated var decodedVideoUrl: String? {
         mp4?.replacingOccurrences(of: "&amp;", with: "&")
     }
 }
@@ -716,7 +716,7 @@ private extension RedditVideo {
 }
 
 extension URL {
-    var isHTTPMediaURL: Bool {
+    nonisolated var isHTTPMediaURL: Bool {
         guard let scheme = scheme?.lowercased() else { return false }
         return scheme == "http" || scheme == "https"
     }

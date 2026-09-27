@@ -27,8 +27,11 @@ struct UserComment: Identifiable, Decodable {
     let parentId: String?
     let parentAuthor: String?
     var likes: Bool? = nil
+    var mediaMetadata: LenientMediaMetadata? = nil
 
     var initialVote: Int { likes.voteDirection }
+
+    var gifVideos: [String: CommentGIFVideo] { CommentGIFVideo.all(in: mediaMetadata?.items) }
 
     var actionLine: String {
         if parentId?.hasPrefix("t1_") == true, let parentAuthor, !parentAuthor.isEmpty {
