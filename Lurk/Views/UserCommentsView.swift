@@ -16,6 +16,7 @@ struct UserCommentsView: View {
     @State private var subredditComment: UserComment?
     @State private var editingComment: UserComment?
     @State private var thread: ThreadTarget?
+    @State private var openedGIF: GalleryMedia?
     @State private var deletingComment: UserComment?
     @State private var deletingID: String?
     @State private var writeError: String?
@@ -58,6 +59,10 @@ struct UserCommentsView: View {
                 }
             }
             .background(Theme.background)
+            .environment(\.openCommentGIF, OpenCommentGIFAction { media in
+                suspendInlineGIFPlayback()
+                openedGIF = media
+            })
             .task { await loadComments() }
             .navigationTitle("Comments")
             .navigationBarTitleDisplayMode(.inline)
@@ -81,6 +86,9 @@ struct UserCommentsView: View {
             EditUserCommentSheet(comment: comment) { updatedBody in
                 updateCommentBody(id: comment.id, body: updatedBody)
             }
+        }
+        .fullScreenCover(item: $openedGIF, onDismiss: resumeInlineGIFPlayback) { media in
+            GalleryViewerView(items: [media])
         }
         .fullScreenCover(item: $subredditComment, onDismiss: resumeInlineGIFPlayback) { comment in
             SubredditCoverView(subreddit: comment.subreddit, title: comment.subredditNamePrefixed) {
@@ -119,7 +127,7 @@ struct UserCommentsView: View {
     }
 
     private var isPresentingContent: Bool {
-        editingComment != nil || subredditComment != nil || thread != nil
+        editingComment != nil || subredditComment != nil || thread != nil || openedGIF != nil
     }
 
     // Opens a Reddit thread link in Lurk; anything else still goes to the browser.

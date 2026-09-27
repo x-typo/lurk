@@ -44,6 +44,7 @@ struct PostDetailView: View {
     @State private var selectingCommentID: String?
     @State private var commentActionError: String?
     @State private var commentShare: CommentShareTarget?
+    @State private var commentGIF: GalleryMedia?
 
     var body: some View {
         NavigationStack {
@@ -300,6 +301,10 @@ struct PostDetailView: View {
             }
             .background(Theme.background)
             .defaultScrollAnchor(.top)
+            .environment(\.openCommentGIF, OpenCommentGIFAction { media in
+                suspendDetailMedia()
+                commentGIF = media
+            })
             .task(id: commentLoadAttempt) {
                 await commentStore.load { try await fetchComments(wholeThread: showsFullThread) }
             }
@@ -350,6 +355,9 @@ struct PostDetailView: View {
         }
         .sheet(item: $commentShare, onDismiss: resumeAfterPresentation) { share in
             PostShareSheet(url: share.url, title: share.title)
+        }
+        .fullScreenCover(item: $commentGIF, onDismiss: mediaViewerDismissed) { media in
+            GalleryViewerView(items: [media])
         }
         .fullScreenCover(isPresented: $showMediaViewer, onDismiss: mediaViewerDismissed) {
             if let videoURL = post.videoURL {
@@ -911,6 +919,25 @@ private struct PostImagePreviewView: View {
     }
 }
 
+// Opens a comment's GIF full screen, where Save and Share keep it a GIF. Without it, a tap on a GIF does
+// what a tap on its comment does.
+struct OpenCommentGIFAction {
+    let action: (GalleryMedia) -> Void
+
+    func callAsFunction(_ media: GalleryMedia) { action(media) }
+}
+
+private struct OpenCommentGIFKey: EnvironmentKey {
+    static let defaultValue: OpenCommentGIFAction? = nil
+}
+
+extension EnvironmentValues {
+    var openCommentGIF: OpenCommentGIFAction? {
+        get { self[OpenCommentGIFKey.self] }
+        set { self[OpenCommentGIFKey.self] = newValue }
+    }
+}
+
 struct CommentBodyTapAction {
     let perform: () -> Void
     let mediaAccessibility: MediaActionAccessibility
@@ -927,6 +954,7 @@ struct CommentBodyView: View {
     @State private var revealedSpoilers: Set<Int> = []
     @State private var revealedContent: String?
     @Environment(\.openURL) private var openURL
+    @Environment(\.openCommentGIF) private var openGIF
 
     // Matches in priority order: giphy embeds, markdown links, image URLs, plain URLs
     private static let tokenPattern = try! NSRegularExpression(
@@ -1027,22 +1055,30 @@ struct CommentBodyView: View {
                         }
                     }
                 case .gif(let url):
-                    if let video = CommentGIFVideo.matching(url, in: gifVideos) {
+                    let video = CommentGIFVideo.matching(url, in: gifVideos)
+                    let openFullScreen = openGIF.map { openGIF in
+                        { openGIF(GalleryMedia(id: 0, url: url, isAnimated: true, posterURL: video?.posterURL, videoURL: video?.url)) }
+                    }
+                    let tap = openFullScreen ?? nonInteractiveTapAction?.perform
+                    let tapAccessibility = openFullScreen == nil
+                        ? nonInteractiveTapAction?.mediaAccessibility ?? .openGIF
+                        : .openGIF
+                    if let video {
                         InlineLoopingVideoView(url: video.url, posterURL: video.posterURL, aspectRatio: video.aspectRatio)
                             .frame(maxHeight: 250)
                             .clipShape(RoundedRectangle(cornerRadius: 8))
                             .modifier(MediaActionsModifier(
                                 isEnabled: true,
-                                onTap: nonInteractiveTapAction?.perform,
+                                onTap: tap,
                                 onLongPress: onNonInteractiveLongPress,
-                                accessibility: nonInteractiveTapAction?.mediaAccessibility ?? .openGIF
+                                accessibility: tapAccessibility
                             ))
                     } else {
                         AnimatedGIFView(
                             url: url,
-                            onMediaTap: nonInteractiveTapAction?.perform,
+                            onMediaTap: tap,
                             onMediaLongPress: onNonInteractiveLongPress,
-                            mediaActionAccessibility: nonInteractiveTapAction?.mediaAccessibility ?? .openGIF
+                            mediaActionAccessibility: tapAccessibility
                         )
                             .aspectRatio(contentMode: .fit)
                             .frame(maxHeight: 250)
