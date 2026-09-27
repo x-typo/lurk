@@ -59,6 +59,7 @@ Flag violations of these conventions during review.
 - `after` parameter for pagination. Flag any offset-based pagination.
 - Video playback prefers `RedditVideo.hlsUrl` (HLS playlist, includes audio) and falls back to `RedditVideo.fallbackUrl` (CMAF MP4, video-only) when HLS is unavailable. Flag assumptions that `Post.url` is directly playable for video posts.
 - Animated gallery items play Reddit's `media_metadata` MP4 (`GalleryMedia.videoURL`, `Post.galleryVideoURL`) through AVPlayer, which has no GIF size limits; the GIF decoder handles only GIFs without an MP4. Flag new GIF-decoding paths for Reddit-hosted animations.
+- Save and Share keep a GIF a GIF: they copy Reddit's original (`Post.savableGIFURL`, a gallery item's `url`) within `MediaSaver.maximumGIFDownloadBytes`, not the decoder's limits, and fall back to the MP4 only when the GIF can't be downloaded. Real videos save as video. Flag saves that store the MP4 when Reddit has the GIF.
 - Comment trees are parsed into `CommentNode` values and rendered as flat, lazily loaded `CommentRow`s. Reddit's "more" placeholders load in-app through `fetchMoreComments`, one request at a time. Tree recursion is bounded by the loaded thread's depth; `maxIndentDepth` caps indentation, not content.
 
 ## Error Handling

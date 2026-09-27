@@ -132,6 +132,7 @@ struct PostMediaTests {
         #expect(first.videoURL == mp4)
         #expect(first.posterURL == URL(string: "https://preview.redd.it/animated.gif?width=640&format=png8"))
         #expect(post.galleryItems.last?.videoURL == nil)
+        #expect(post.savableGIFURL == URL(string: "https://i.redd.it/animated.gif"))
     }
 
     @Test("An animated gallery item without a usable MP4 keeps its GIF")
@@ -396,6 +397,34 @@ struct PostMediaTests {
         #expect(malformed.videoURL == nil)
         #expect(malformed.animatedImageURL?.lastPathComponent == "loop.gif")
         #expect(malformed.imageURL?.lastPathComponent == "poster.jpg")
+    }
+
+    @Test("Save and Share keep a GIF a GIF, even when it plays as MP4, and a video a video")
+    func savesGIFsAsGIFs() throws {
+        let gifPost = try makePost(
+            url: "https://i.redd.it/original.gif",
+            preview: variantPreview(mp4URL: "https://preview.redd.it/loop.mp4")
+        )
+        #expect(gifPost.loopsVideo)
+        #expect(gifPost.savableGIFURL == URL(string: "https://i.redd.it/original.gif"))
+        #expect(gifPost.downloadableVideoURLs == [URL(string: "https://preview.redd.it/loop.mp4")!])
+
+        let video = try makePost(
+            url: "https://v.redd.it/original",
+            isVideo: true,
+            media: ["reddit_video": ["fallback_url": "https://v.redd.it/original/DASH_720.mp4", "is_gif": false]],
+            preview: variantPreview(mp4URL: "https://preview.redd.it/loop.mp4")
+        )
+        #expect(video.animatedImageURL != nil)
+        #expect(video.savableGIFURL == nil)
+
+        let loopingVideo = try makePost(
+            url: "https://v.redd.it/looping",
+            isVideo: true,
+            media: ["reddit_video": ["fallback_url": "https://v.redd.it/looping/DASH_720.mp4", "is_gif": true]]
+        )
+        #expect(loopingVideo.loopsVideo)
+        #expect(loopingVideo.savableGIFURL == nil)
     }
 
     private func variantPreview(mp4URL: String?) -> [String: Any] {

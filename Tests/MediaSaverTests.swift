@@ -21,7 +21,18 @@ struct MediaSaverTests {
 
         #expect(MediaSaver.isValidGIFDownload(
             response: response,
-            fileSize: GIFDecoder.Limits.default.maximumEncodedBytes,
+            fileSize: MediaSaver.maximumGIFDownloadBytes,
+            signature: Data("GIF89a".utf8)
+        ))
+    }
+
+    @Test("Saving copies a GIF without decoding it, so one too large to animate still downloads")
+    func acceptsGIFTooLargeToAnimate() throws {
+        let response = try #require(httpResponse(statusCode: 200))
+
+        #expect(MediaSaver.isValidGIFDownload(
+            response: response,
+            fileSize: 101_779_515, // The largest r/HighQualityGifs GIF seen
             signature: Data("GIF89a".utf8)
         ))
     }
@@ -30,7 +41,7 @@ struct MediaSaverTests {
     func rejectsInvalidDownloads() throws {
         let badResponse = try #require(httpResponse(statusCode: 404))
         let successResponse = try #require(httpResponse(statusCode: 204))
-        let limit = GIFDecoder.Limits.default.maximumEncodedBytes
+        let limit = MediaSaver.maximumGIFDownloadBytes
 
         #expect(!MediaSaver.isValidGIFDownload(
             response: badResponse,

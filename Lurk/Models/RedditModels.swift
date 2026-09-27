@@ -534,6 +534,13 @@ extension Post {
         playbackVideo?.isGif == true
     }
 
+    // Reddit keeps a GIF's original next to the MP4 that plays it, so saving and sharing use the GIF.
+    // A real video stays a video, even when Reddit also has a GIF preview of it.
+    var savableGIFURL: URL? {
+        guard loopsVideo || videoURL == nil else { return nil }
+        return animatedImageURL
+    }
+
     var animatedMedia: AnimatedPostMedia? {
         if loopsVideo, let videoURL {
             return .video(videoURL)

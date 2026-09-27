@@ -34,23 +34,27 @@ enum MediaSaver {
         }
     }
 
-    // Saves the GIF when it fits the download limit, otherwise Reddit's MP4 of it as a video.
-    static func saveAnimatedImage(from url: URL, video videoURL: URL?) async -> SaveResult {
+    // Saves the GIF itself, or Reddit's MP4 of it as a video when the GIF can't be downloaded.
+    static func saveAnimatedImage(from url: URL, videos videoURLs: [URL]) async -> SaveResult {
         let result = await saveImageData(from: url)
-        guard result == .failed, let videoURL, !Task.isCancelled else { return result }
-        return await saveVideo(from: videoURL)
+        guard result == .failed, !videoURLs.isEmpty, !Task.isCancelled else { return result }
+        return await saveVideo(from: videoURLs)
     }
 
-    // The GIF to share when it fits the download limit, otherwise Reddit's MP4 of it.
-    static func temporaryAnimatedFile(from url: URL, video videoURL: URL?) async throws -> URL {
+    // The GIF to share, or Reddit's MP4 of it when the GIF can't be downloaded.
+    static func temporaryAnimatedFile(from url: URL, videos videoURLs: [URL]) async throws -> URL {
         do {
             return try await temporaryGIFFile(from: url)
         } catch {
             try Task.checkCancellation()
-            guard let videoURL else { throw error }
-            return try await temporaryVideoFile(from: videoURL)
+            guard !videoURLs.isEmpty else { throw error }
+            return try await temporaryVideoFile(from: videoURLs)
         }
     }
+
+    // Saved and shared GIFs are copied, never decoded, so this only bounds the download. r/HighQualityGifs
+    // posts reached 101.8 MB (2026-09-27), and Reddit publishes no GIF size limit.
+    nonisolated static let maximumGIFDownloadBytes = 200 * 1_024 * 1_024
 
     nonisolated static func temporaryGIFFile(from url: URL) async throws -> URL {
         let session = URLSession(configuration: .ephemeral)
@@ -68,7 +72,7 @@ enum MediaSaver {
         bytes: Bytes,
         response: URLResponse,
         to fileURL: URL,
-        maximumEncodedBytes: Int = GIFDecoder.Limits.default.maximumEncodedBytes
+        maximumEncodedBytes: Int = maximumGIFDownloadBytes
     ) async throws where Bytes.Element == UInt8 {
         guard maximumEncodedBytes > 0,
               let httpResponse = response as? HTTPURLResponse,
@@ -136,7 +140,7 @@ enum MediaSaver {
         response: URLResponse,
         fileSize: Int,
         signature: Data,
-        maximumEncodedBytes: Int = GIFDecoder.Limits.default.maximumEncodedBytes
+        maximumEncodedBytes: Int = maximumGIFDownloadBytes
     ) -> Bool {
         guard let httpResponse = response as? HTTPURLResponse,
               (200...299).contains(httpResponse.statusCode),
