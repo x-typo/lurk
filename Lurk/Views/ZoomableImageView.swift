@@ -175,6 +175,8 @@ private struct ZoomableImageRepresentable: UIViewRepresentable {
         private var player: AVQueuePlayer?
         private var looper: AVPlayerLooper?
         private var playerObservations: [NSKeyValueObservation] = []
+        // Bumped by every stop, so a retired player's queued report can't reach its replacement.
+        private var videoGeneration = 0
 
         deinit {
             loadTask?.cancel()
@@ -202,7 +204,7 @@ private struct ZoomableImageRepresentable: UIViewRepresentable {
             imageView?.isHidden = videoURL != nil
             playerView?.isHidden = videoURL == nil
             if let videoURL {
-                playVideo(videoURL, requestID: requestID)
+                playVideo(videoURL)
                 return
             }
             loadTask = Task { [weak self] in
@@ -246,7 +248,7 @@ private struct ZoomableImageRepresentable: UIViewRepresentable {
             }
         }
 
-        private func playVideo(_ videoURL: URL, requestID: UUID) {
+        private func playVideo(_ videoURL: URL) {
             onStateChange?(.loading)
             let player = AVQueuePlayer()
             player.isMuted = true
@@ -254,28 +256,28 @@ private struct ZoomableImageRepresentable: UIViewRepresentable {
             self.player = player
             self.looper = looper
             playerView?.playerLayer.player = player
-            // The page shows once the first frame is ready; the poster covers it until then. Reports are
-            // bound to this player, since a retired one's can arrive after a reload reuses the request ID.
-            let playerID = ObjectIdentifier(player)
+            // The page shows once the first frame is ready; the poster covers it until then.
+            let generation = videoGeneration
             if let playerLayer = playerView?.playerLayer {
                 playerObservations.append(playerLayer.observe(\.isReadyForDisplay, options: [.initial, .new]) { [weak self] layer, _ in
                     guard layer.isReadyForDisplay else { return }
-                    Task { @MainActor [weak self] in self?.finishVideo(.loaded, requestID: requestID, playerID: playerID) }
+                    Task { @MainActor [weak self] in self?.finishVideo(.loaded, generation: generation) }
                 })
             }
             playerObservations.append(looper.observe(\.status, options: [.new]) { [weak self] looper, _ in
                 guard looper.status == .failed else { return }
-                Task { @MainActor [weak self] in self?.finishVideo(.failed, requestID: requestID, playerID: playerID) }
+                Task { @MainActor [weak self] in self?.finishVideo(.failed, generation: generation) }
             })
             player.play()
         }
 
-        private func finishVideo(_ state: ZoomableImageView.LoadState, requestID: UUID, playerID: ObjectIdentifier) {
-            guard currentRequestID == requestID, let player, ObjectIdentifier(player) == playerID else { return }
+        private func finishVideo(_ state: ZoomableImageView.LoadState, generation: Int) {
+            guard videoGeneration == generation else { return }
             onStateChange?(state)
         }
 
         private func stopVideo() {
+            videoGeneration += 1
             playerObservations.forEach { $0.invalidate() }
             playerObservations = []
             looper?.disableLooping()

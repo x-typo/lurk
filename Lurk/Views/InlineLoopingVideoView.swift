@@ -144,6 +144,8 @@ private struct InlineLoopingVideoRepresentable: UIViewRepresentable {
         private var player: AVQueuePlayer?
         private var looper: AVPlayerLooper?
         private var statusObservation: NSKeyValueObservation?
+        // Bumped by every cancel, so a retired player's queued report can't reach its replacement.
+        private var playbackGeneration = 0
 
         deinit {
             looper?.disableLooping()
@@ -160,12 +162,11 @@ private struct InlineLoopingVideoRepresentable: UIViewRepresentable {
             let looper = AVPlayerLooper(player: player, templateItem: AVPlayerItem(url: url))
             self.player = player
             self.looper = looper
-            // Only the current looper may report: a retired one's failure can arrive after its replacement starts.
+            let generation = playbackGeneration
             statusObservation = looper.observe(\.status, options: [.new]) { [weak self] observed, _ in
                 guard observed.status == .failed else { return }
-                let failedLooper = ObjectIdentifier(observed)
                 Task { @MainActor [weak self] in
-                    guard let self, let current = self.looper, ObjectIdentifier(current) == failedLooper else { return }
+                    guard let self, self.playbackGeneration == generation else { return }
                     self.onFailure?()
                 }
             }
@@ -174,6 +175,7 @@ private struct InlineLoopingVideoRepresentable: UIViewRepresentable {
         }
 
         func cancel() {
+            playbackGeneration += 1
             statusObservation?.invalidate()
             statusObservation = nil
             looper?.disableLooping()
