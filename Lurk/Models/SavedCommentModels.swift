@@ -23,4 +23,7 @@ struct SavedComment: Identifiable, Decodable {
     let subredditNamePrefixed: String
     let permalink: String
     let linkTitle: String
+    var mediaMetadata: LenientMediaMetadata? = nil
+
+    var gifVideos: [String: CommentGIFVideo] { CommentGIFVideo.all(in: mediaMetadata?.items) }
 }

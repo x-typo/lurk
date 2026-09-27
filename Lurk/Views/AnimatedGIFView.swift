@@ -23,6 +23,63 @@ struct MediaActionAccessibility {
     )
 }
 
+// Tap, long-press, and accessibility for inline media, shared by a GIF and its MP4.
+struct MediaActionsModifier: ViewModifier {
+    let isEnabled: Bool
+    let onTap: (() -> Void)?
+    let onLongPress: (() -> Void)?
+    let accessibility: MediaActionAccessibility
+
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        if let onTap, let onLongPress {
+            content
+                .contentShape(Rectangle())
+                .gesture(
+                    LongPressGesture()
+                        .exclusively(before: TapGesture())
+                        .onEnded { value in
+                            switch value {
+                            case .first:
+                                onLongPress()
+                            case .second:
+                                guard isEnabled else { return }
+                                onTap()
+                            }
+                        }
+                )
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel(accessibility.label)
+                .accessibilityAddTraits(.isButton)
+                .accessibilityHint(accessibility.hint)
+                .accessibilityAction {
+                    guard isEnabled else { return }
+                    onTap()
+                }
+                .accessibilityAction(named: Text("Select comment text")) {
+                    onLongPress()
+                }
+        } else if let onTap {
+            Button(action: onTap) {
+                content
+            }
+            .buttonStyle(.plain)
+            .disabled(!isEnabled)
+            .accessibilityLabel(accessibility.label)
+            .accessibilityHint(accessibility.hint)
+        } else if let onLongPress {
+            content
+                .contentShape(Rectangle())
+                .onLongPressGesture(perform: onLongPress)
+                .accessibilityAction(named: Text("Select comment text")) {
+                    onLongPress()
+                }
+        } else {
+            content
+        }
+    }
+}
+
 @Observable
 @MainActor
 final class InlineGIFPlaybackStore {
@@ -315,53 +372,14 @@ struct AnimatedGIFView: View {
         }
     }
 
-    @ViewBuilder
     private func interactiveMediaLayer(isActive: Bool) -> some View {
-        if let onMediaTap, let onMediaLongPress {
-            mediaLayer(isActive: isActive)
-                .contentShape(Rectangle())
-                .gesture(
-                    LongPressGesture()
-                        .exclusively(before: TapGesture())
-                        .onEnded { value in
-                            switch value {
-                            case .first:
-                                onMediaLongPress()
-                            case .second:
-                                guard loadState.allowsMediaPresentation else { return }
-                                onMediaTap()
-                            }
-                        }
-                )
-                .accessibilityElement(children: .ignore)
-                .accessibilityLabel(mediaActionAccessibility.label)
-                .accessibilityAddTraits(.isButton)
-                .accessibilityHint(mediaActionAccessibility.hint)
-                .accessibilityAction {
-                    guard loadState.allowsMediaPresentation else { return }
-                    onMediaTap()
-                }
-                .accessibilityAction(named: Text("Select comment text")) {
-                    onMediaLongPress()
-                }
-        } else if let onMediaTap {
-            Button(action: onMediaTap) {
-                mediaLayer(isActive: isActive)
-            }
-            .buttonStyle(.plain)
-            .disabled(!loadState.allowsMediaPresentation)
-            .accessibilityLabel(mediaActionAccessibility.label)
-            .accessibilityHint(mediaActionAccessibility.hint)
-        } else if let onMediaLongPress {
-            mediaLayer(isActive: isActive)
-                .contentShape(Rectangle())
-                .onLongPressGesture(perform: onMediaLongPress)
-                .accessibilityAction(named: Text("Select comment text")) {
-                    onMediaLongPress()
-                }
-        } else {
-            mediaLayer(isActive: isActive)
-        }
+        mediaLayer(isActive: isActive)
+            .modifier(MediaActionsModifier(
+                isEnabled: loadState.allowsMediaPresentation,
+                onTap: onMediaTap,
+                onLongPress: onMediaLongPress,
+                accessibility: mediaActionAccessibility
+            ))
     }
 
     private func mediaLayer(isActive: Bool) -> some View {

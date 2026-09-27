@@ -273,7 +273,8 @@ private struct UserCommentRow: View {
                         label: "Open comment thread",
                         hint: "Double-tap to open this comment's thread."
                     )
-                )
+                ),
+                gifVideos: comment.gifVideos
             )
 
             HStack(spacing: 14) {

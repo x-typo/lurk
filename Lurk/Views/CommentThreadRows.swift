@@ -116,7 +116,8 @@ struct CommentThreadRowView: View {
                             hint: "Double-tap to collapse this comment."
                         )
                     ),
-                    isSelecting: isSelecting
+                    isSelecting: isSelecting,
+                    gifVideos: comment.gifVideos
                 )
             }
         }

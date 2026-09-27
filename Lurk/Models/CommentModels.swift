@@ -30,6 +30,45 @@ struct CommentData: Decodable {
     let count: Int?
     let children: [String]?
     let stickied: Bool?
+    let mediaMetadata: LenientMediaMetadata?
+}
+
+// A malformed entry drops the comment's media metadata, never the comment.
+struct LenientMediaMetadata: Decodable {
+    let items: [String: MediaMetadataItem]
+
+    init(from decoder: Decoder) throws {
+        items = (try? decoder.singleValueContainer().decode([String: MediaMetadataItem].self)) ?? [:]
+    }
+}
+
+// A Reddit-hosted comment GIF's MP4. The comment text links the GIF as `https://i.redd.it/<id>.gif`,
+// and the comment's media metadata carries the MP4 under the same ID.
+nonisolated struct CommentGIFVideo: Equatable {
+    let url: URL
+    let aspectRatio: CGFloat?
+    let posterURL: URL?
+
+    static func all(in metadata: [String: MediaMetadataItem]?) -> [String: CommentGIFVideo] {
+        var videos: [String: CommentGIFVideo] = [:]
+        for (id, item) in metadata ?? [:] where item.isAnimated {
+            guard let source = item.s,
+                  let url = source.decodedVideoUrl.flatMap(URL.init(string:)), url.isHTTPMediaURL else { continue }
+            let aspectRatio = source.x.flatMap { width in
+                source.y.flatMap { height in height > 0 ? CGFloat(width) / CGFloat(height) : nil }
+            }
+            let posterURL = item.p?.last?.decodedStaticUrl
+                .flatMap(URL.init(string:))
+                .flatMap { $0.isHTTPMediaURL ? $0 : nil }
+            videos[id] = CommentGIFVideo(url: url, aspectRatio: aspectRatio, posterURL: posterURL)
+        }
+        return videos
+    }
+
+    static func matching(_ gifURL: URL, in videos: [String: CommentGIFVideo]) -> CommentGIFVideo? {
+        guard let host = gifURL.host?.lowercased(), host == "i.redd.it" || host == "preview.redd.it" else { return nil }
+        return videos[gifURL.deletingPathExtension().lastPathComponent]
+    }
 }
 
 enum CommentReplies: Decodable {
@@ -71,6 +110,7 @@ struct Comment: Identifiable {
     var likes: Bool? = nil
     // Nil when the response left `saved` out, which says nothing about the viewer's choice.
     var saved: Bool? = nil
+    var gifVideos: [String: CommentGIFVideo] = [:]
     // Reddit's `stickied`: a moderator pinned it to the top of the thread.
     var isPinned = false
 
@@ -171,6 +211,7 @@ extension CommentNode {
                 isSubmitter: data.isSubmitter ?? false,
                 likes: data.likes,
                 saved: data.saved,
+                gifVideos: CommentGIFVideo.all(in: data.mediaMetadata?.items),
                 isPinned: data.stickied ?? false
             )
             var replies: [CommentNode] = []

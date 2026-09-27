@@ -12,9 +12,10 @@ struct InlineLoopingVideoView: View {
     @Environment(\.scenePhase) private var scenePhase
     @State private var playbackID = UUID()
     @State private var requestID = UUID()
+    @State private var failed = false
 
     var body: some View {
-        let isActive = scenePhase == .active && playbackStore.isActive(playbackID)
+        let isActive = scenePhase == .active && playbackStore.isActive(playbackID) && !failed
 
         ZStack {
             // A feed card's capped box can be wider than the video, which then fits inside it.
@@ -34,9 +35,28 @@ struct InlineLoopingVideoView: View {
             InlineLoopingVideoRepresentable(
                 url: url,
                 requestID: requestID,
-                isActive: isActive
+                isActive: isActive,
+                onFailure: markFailed
             )
             .opacity(isActive ? 1 : 0)
+
+            if failed {
+                // Backed like a too-large GIF's notice, so it reads over the poster.
+                VStack(spacing: 8) {
+                    Image(systemName: "photo")
+                        .font(.title2)
+                        .foregroundStyle(.white)
+                    Text("Couldn't load GIF")
+                        .font(.caption)
+                        .foregroundStyle(.white)
+                    Button("Retry", action: retry)
+                        .font(.caption.weight(.semibold))
+                        .frame(minHeight: 44)
+                        .padding(.horizontal, 8)
+                }
+                .padding(12)
+                .background(.black.opacity(0.65), in: RoundedRectangle(cornerRadius: 10))
+            }
         }
         .aspectRatio(aspectRatio ?? 16 / 9, contentMode: .fit)
         .clipped()
@@ -61,16 +81,36 @@ struct InlineLoopingVideoView: View {
     }
 }
 
+extension InlineLoopingVideoView {
+    // Like a GIF that fails to load: its candidate stops playing until Retry builds a new player.
+    private func markFailed() {
+        failed = true
+        if activation == .whenVisible {
+            playbackStore.setCandidateEligible(false, id: playbackID)
+        }
+    }
+
+    private func retry() {
+        if activation == .whenVisible {
+            playbackStore.setCandidateEligible(true, id: playbackID)
+        }
+        failed = false
+        requestID = UUID()
+    }
+}
+
 private struct InlineLoopingVideoRepresentable: UIViewRepresentable {
     let url: URL
     let requestID: UUID
     let isActive: Bool
+    let onFailure: () -> Void
 
     func makeCoordinator() -> Coordinator { Coordinator() }
 
     func makeUIView(context: Context) -> PlayerLayerView {
         let view = PlayerLayerView()
         context.coordinator.playerView = view
+        context.coordinator.onFailure = onFailure
         if isActive {
             context.coordinator.play(url: url, requestID: requestID)
         }
@@ -79,6 +119,7 @@ private struct InlineLoopingVideoRepresentable: UIViewRepresentable {
 
     func updateUIView(_ view: PlayerLayerView, context: Context) {
         context.coordinator.playerView = view
+        context.coordinator.onFailure = onFailure
         guard isActive else {
             context.coordinator.cancel()
             return
@@ -99,8 +140,12 @@ private struct InlineLoopingVideoRepresentable: UIViewRepresentable {
         weak var playerView: PlayerLayerView?
         var currentURL: URL?
         var currentRequestID: UUID?
+        var onFailure: (() -> Void)?
         private var player: AVQueuePlayer?
         private var looper: AVPlayerLooper?
+        private var statusObservation: NSKeyValueObservation?
+        // Bumped by every cancel, so a retired player's queued report can't reach its replacement.
+        private var playbackGeneration = 0
 
         deinit {
             looper?.disableLooping()
@@ -117,11 +162,22 @@ private struct InlineLoopingVideoRepresentable: UIViewRepresentable {
             let looper = AVPlayerLooper(player: player, templateItem: AVPlayerItem(url: url))
             self.player = player
             self.looper = looper
+            let generation = playbackGeneration
+            statusObservation = looper.observe(\.status, options: [.new]) { [weak self] observed, _ in
+                guard observed.status == .failed else { return }
+                Task { @MainActor [weak self] in
+                    guard let self, self.playbackGeneration == generation else { return }
+                    self.onFailure?()
+                }
+            }
             playerView?.playerLayer.player = player
             player.play()
         }
 
         func cancel() {
+            playbackGeneration += 1
+            statusObservation?.invalidate()
+            statusObservation = nil
             looper?.disableLooping()
             looper = nil
             player?.pause()

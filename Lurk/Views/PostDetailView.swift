@@ -920,6 +920,8 @@ struct CommentBodyView: View {
     var nonInteractiveTapAction: CommentBodyTapAction? = nil
     var onNonInteractiveLongPress: (() -> Void)? = nil
     var isSelecting = false
+    // MP4s for the comment's Reddit-hosted GIFs, by media ID; a match plays in place of decoding the GIF.
+    var gifVideos: [String: CommentGIFVideo] = [:]
     @State private var revealedSpoilers: Set<Int> = []
     @State private var revealedContent: String?
     @Environment(\.openURL) private var openURL
@@ -1023,15 +1025,27 @@ struct CommentBodyView: View {
                         }
                     }
                 case .gif(let url):
-                    AnimatedGIFView(
-                        url: url,
-                        onMediaTap: nonInteractiveTapAction?.perform,
-                        onMediaLongPress: onNonInteractiveLongPress,
-                        mediaActionAccessibility: nonInteractiveTapAction?.mediaAccessibility ?? .openGIF
-                    )
-                        .aspectRatio(contentMode: .fit)
-                        .frame(maxHeight: 250)
-                        .clipShape(RoundedRectangle(cornerRadius: 8))
+                    if let video = CommentGIFVideo.matching(url, in: gifVideos) {
+                        InlineLoopingVideoView(url: video.url, posterURL: video.posterURL, aspectRatio: video.aspectRatio)
+                            .frame(maxHeight: 250)
+                            .clipShape(RoundedRectangle(cornerRadius: 8))
+                            .modifier(MediaActionsModifier(
+                                isEnabled: true,
+                                onTap: nonInteractiveTapAction?.perform,
+                                onLongPress: onNonInteractiveLongPress,
+                                accessibility: nonInteractiveTapAction?.mediaAccessibility ?? .openGIF
+                            ))
+                    } else {
+                        AnimatedGIFView(
+                            url: url,
+                            onMediaTap: nonInteractiveTapAction?.perform,
+                            onMediaLongPress: onNonInteractiveLongPress,
+                            mediaActionAccessibility: nonInteractiveTapAction?.mediaAccessibility ?? .openGIF
+                        )
+                            .aspectRatio(contentMode: .fit)
+                            .frame(maxHeight: 250)
+                            .clipShape(RoundedRectangle(cornerRadius: 8))
+                    }
                 case .link(let title, let url):
                     Button {
                         openURL(url)
