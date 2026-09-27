@@ -13,6 +13,7 @@ Lurk uses Reddit's web session cookies for a personal signed-in browsing workflo
 - **Subreddit Management** - Follow/unfollow subreddits, browse individual feeds
 - **Swipe Gestures** - Swipe left to hide a post (with a few seconds to Undo), swipe right to open in Safari
 - **Comment Threads** - Full threads with colored depth lines and in-app "load more"; swipe a comment left to vote (short = up, long = down), right to reply
+- **Thread Links from Other Apps** - `lurk://open?url=<Reddit thread link>` opens that thread in Lurk (Rakuroku uses it for episode discussions)
 - **Post Hiding** - Hidden posts persist across sessions (UserDefaults, capped at 5,000)
 - **Muting** - Mute users and title keywords from Settings, or mute someone from a comment's long-press menu. Comments moderators pin to the top of a thread are hidden too, unless you turn that off in Settings
 - **Dark Mode** - Native dark theme, no toggle

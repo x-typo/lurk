@@ -45,3 +45,34 @@ extension ThreadTarget {
         self.init(url: url)
     }
 }
+
+// Other apps open Reddit threads in Lurk with `lurk://open?url=<percent-encoded Reddit link>` (Rakuroku's
+// contract). Once Lurk registers the scheme, iOS hands it every `lurk://` link, so the sender's own
+// browser fallback never runs; a Reddit link Lurk can't open as a thread goes to the browser instead.
+enum LurkLink: Equatable {
+    // https on reddit.com, www.reddit.com, or old.reddit.com, shaped `/r/<subreddit>/comments/<post>/` with an
+    // optional slug.
+    case thread(ThreadTarget)
+    // Any other https link on reddit.com, a subdomain of it, or redd.it.
+    case web(URL)
+
+    init?(_ url: URL) {
+        guard url.scheme?.lowercased() == "lurk", url.host?.lowercased() == "open",
+              let value = URLComponents(url: url, resolvingAgainstBaseURL: false)?
+                .queryItems?.first(where: { $0.name == "url" })?.value,
+              let link = URL(string: value),
+              link.scheme?.lowercased() == "https",
+              let host = link.host?.lowercased(),
+              host == "reddit.com" || host.hasSuffix(".reddit.com") || host == "redd.it" else { return nil }
+        let parts = link.pathComponents.filter { $0 != "/" }
+        if ["reddit.com", "www.reddit.com", "old.reddit.com"].contains(host),
+           (4...5).contains(parts.count),
+           parts[0].lowercased() == "r",
+           parts[2] == "comments",
+           Comment.isRedditID(parts[3]) {
+            self = .thread(ThreadTarget(postID: parts[3], sourceURL: link))
+        } else {
+            self = .web(link)
+        }
+    }
+}

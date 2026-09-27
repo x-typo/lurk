@@ -41,13 +41,26 @@ private struct LurkRootView: View {
     @State private var playbackStore = InlineGIFPlaybackStore()
     @State private var unreadReplies = UnreadRepliesStore()
     @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.openURL) private var openURL
     @State private var selectedTab = 0
     @State private var showsSignIn = false
+    @State private var linkedThread: ThreadTarget?
 
     var body: some View {
         mainTabView
             .sheet(isPresented: $showsSignIn) {
                 RedditLoginView()
+            }
+            .sheet(item: $linkedThread) { target in
+                ThreadView(target: target)
+            }
+            // A thread link from another app, whether Lurk was running or the link launched it.
+            .onOpenURL { url in
+                switch LurkLink(url) {
+                case .thread(let target): linkedThread = target
+                case .web(let link): openURL(link)
+                case nil: break
+                }
             }
             .tint(Theme.primary)
             .preferredColorScheme(.dark)

@@ -76,6 +76,7 @@ Flag violations of these conventions during review.
 - `PaginatedFeedView` is the reusable pagination component. New feeds should use it, not reimplement pagination.
 - Pull-to-refresh on all feed views.
 - Sheet presentation for post detail + comments.
+- `lurk://open?url=<Reddit thread link>` is a contract with the owner's Rakuroku app. `LurkLink` opens https `reddit.com`, `www.reddit.com`, and `old.reddit.com` links shaped `/r/<subreddit>/comments/<id>/` (optional slug) as threads. Other https Reddit links go to the browser, since Rakuroku's own fallback can't run once Lurk takes the scheme; anything else is ignored. `LurkRootView` handles it in `onOpenURL`. Flag changes to the scheme or the accepted shapes.
 
 ## Testing
 
