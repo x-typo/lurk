@@ -20,25 +20,40 @@ enum MediaSaver {
         }
     }
 
-    static func saveImageData(from url: URL) async -> SaveResult {
-        do {
-            let fileURL = try await temporaryGIFFile(from: url)
-            defer { try? FileManager.default.removeItem(at: fileURL) }
-            try Task.checkCancellation()
-            let result = await saveToLibrary {
-                PHAssetChangeRequest.creationRequestForAssetFromImage(atFileURL: fileURL)
-            }
-            return result
-        } catch {
-            return .failed
-        }
-    }
-
     // Saves the GIF itself, or Reddit's MP4 of it as a video when the GIF can't be downloaded.
     static func saveAnimatedImage(from url: URL, videos videoURLs: [URL]) async -> SaveResult {
-        let result = await saveImageData(from: url)
-        guard result == .failed, !videoURLs.isEmpty, !Task.isCancelled else { return result }
-        return await saveVideo(from: videoURLs)
+        await saveAnimatedImage(
+            from: url,
+            videos: videoURLs,
+            downloadGIF: temporaryGIFFile(from:),
+            saveGIF: { fileURL in
+                await saveToLibrary {
+                    PHAssetChangeRequest.creationRequestForAssetFromImage(atFileURL: fileURL)
+                }
+            },
+            saveVideos: { await saveVideo(from: $0) }
+        )
+    }
+
+    // Only a GIF that can't be downloaded falls back to the MP4. A downloaded GIF that Photos won't
+    // import stays a failed save rather than quietly becoming a video.
+    static func saveAnimatedImage(
+        from url: URL,
+        videos videoURLs: [URL],
+        downloadGIF: (URL) async throws -> URL,
+        saveGIF: (URL) async -> SaveResult,
+        saveVideos: ([URL]) async -> SaveResult
+    ) async -> SaveResult {
+        let fileURL: URL
+        do {
+            fileURL = try await downloadGIF(url)
+        } catch {
+            guard !videoURLs.isEmpty, !Task.isCancelled else { return .failed }
+            return await saveVideos(videoURLs)
+        }
+        defer { try? FileManager.default.removeItem(at: fileURL) }
+        guard !Task.isCancelled else { return .failed }
+        return await saveGIF(fileURL)
     }
 
     // The GIF to share, or Reddit's MP4 of it when the GIF can't be downloaded.
