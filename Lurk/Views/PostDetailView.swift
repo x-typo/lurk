@@ -462,7 +462,9 @@ struct PostDetailView: View {
                         onSelectText: { selectingCommentID = comment.id },
                         onShare: shareURL.map { url in { presentShare(of: comment, url: url) } },
                         onMute: canMute(comment) ? { muteStore.muteUser(comment.author) } : nil,
-                        isFocused: comment.id == focusedCommentID
+                        isFocused: comment.id == focusedCommentID,
+                        isSaved: engagement.isSaved("t1_\(comment.id)", loaded: comment.saved ?? false),
+                        onSave: session.isLoggedIn ? { toggleCommentSave(comment) } : nil
                     )
                 case .more(let more, let depth):
                     CommentMoreRowView(
@@ -510,7 +512,7 @@ struct PostDetailView: View {
         }
     }
 
-    // `wholeThread` ignores `commentsFetch`. Reconciles this session's settled votes with what Reddit returned.
+    // `wholeThread` ignores `commentsFetch`. Reconciles this session's settled votes and saves with what Reddit returned.
     private func fetchComments(wholeThread: Bool) async throws -> [CommentNode] {
         let started = Date.now
         let nodes: [CommentNode]
@@ -519,9 +521,11 @@ struct PostDetailView: View {
         } else {
             nodes = try await client.fetchComments(permalink: post.permalink)
         }
+        let comments = CommentNode.comments(in: nodes)
         engagement.reconcile(
             fetchStartedAt: started,
-            votes: CommentNode.comments(in: nodes).map { ("t1_\($0.id)", $0.initialVote) }
+            votes: comments.map { ("t1_\($0.id)", $0.initialVote) },
+            saves: comments.compactMap(\.savedEntry)
         )
         return nodes
     }
@@ -536,10 +540,15 @@ struct PostDetailView: View {
                 } else {
                     loaded = try await client.fetchMoreComments(postID: post.id, more: more)
                 }
-                engagement.reconcile(fetchStartedAt: started, votes: loaded.compactMap { entry in
+                let comments = loaded.compactMap { entry -> Comment? in
                     guard case .comment(let comment, _) = entry.node else { return nil }
-                    return ("t1_\(comment.id)", comment.initialVote)
-                })
+                    return comment
+                }
+                engagement.reconcile(
+                    fetchStartedAt: started,
+                    votes: comments.map { ("t1_\($0.id)", $0.initialVote) },
+                    saves: comments.compactMap(\.savedEntry)
+                )
                 return loaded
             }
         }
@@ -555,6 +564,21 @@ struct PostDetailView: View {
             let request = session.authenticatedRequest(
                 url: RedditAPI.vote,
                 formData: ["id": thingID, "dir": "\(newVote)"]
+            )
+            try await client.execute(request)
+        }, onFailure: { error in
+            commentActionError = error.localizedDescription
+        })
+    }
+
+    private func toggleCommentSave(_ comment: Comment) {
+        let thingID = "t1_\(comment.id)"
+        let loaded = comment.saved ?? false
+        let saved = !engagement.isSaved(thingID, loaded: loaded)
+        engagement.submitSave(saved, for: thingID, loaded: loaded, send: {
+            let request = session.authenticatedRequest(
+                url: saved ? RedditAPI.save : RedditAPI.unsave,
+                formData: ["id": thingID]
             )
             try await client.execute(request)
         }, onFailure: { error in
