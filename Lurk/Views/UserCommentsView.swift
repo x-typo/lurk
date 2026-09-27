@@ -332,6 +332,7 @@ private struct EditUserCommentSheet: View {
     @Environment(\.redditClient) private var client
     @Environment(\.dismiss) private var dismiss
 
+    private let originalText: String
     @State private var text: String
     @State private var saving = false
     @State private var editError: String?
@@ -343,6 +344,7 @@ private struct EditUserCommentSheet: View {
     init(comment: UserComment, onSaved: @escaping (String) -> Void) {
         commentID = comment.id
         self.onSaved = onSaved
+        originalText = comment.body
         _text = State(initialValue: comment.body)
     }
 
@@ -395,6 +397,7 @@ private struct EditUserCommentSheet: View {
         .presentationDetents([.medium])
         .preferredColorScheme(.dark)
         .onChange(of: text) { _, _ in editError = nil }
+        .tracksUnsentText(text != originalText)
     }
 
     private func save() async {

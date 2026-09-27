@@ -45,6 +45,8 @@ private struct LurkRootView: View {
     @State private var selectedTab = 0
     @State private var showsSignIn = false
     @State private var linkedThread: ThreadTarget?
+    @State private var pendingLinkedThread: ThreadTarget?
+    @State private var unsentText = UnsentTextTracker()
 
     var body: some View {
         mainTabView
@@ -57,10 +59,20 @@ private struct LurkRootView: View {
             // A thread link from another app, whether Lurk was running or the link launched it.
             .onOpenURL { url in
                 switch LurkLink(url) {
-                case .thread(let target): linkedThread = target
+                case .thread(let target):
+                    if unsentText.hasUnsentText {
+                        pendingLinkedThread = target
+                    } else {
+                        linkedThread = target
+                    }
                 case .web(let link): openURL(link)
                 case nil: break
                 }
+            }
+            .onChange(of: unsentText.hasUnsentText) { _, hasUnsentText in
+                guard !hasUnsentText, let pendingLinkedThread else { return }
+                self.pendingLinkedThread = nil
+                linkedThread = pendingLinkedThread
             }
             .tint(Theme.primary)
             .preferredColorScheme(.dark)
@@ -73,6 +85,7 @@ private struct LurkRootView: View {
             .environment(engagement)
             .environment(playbackStore)
             .environment(unreadReplies)
+            .environment(unsentText)
             .environment(\.redditClient, client)
             .environment(\.presentSignIn, PresentSignInAction { showsSignIn = true })
             .onChange(of: account, initial: true) { _, account in
