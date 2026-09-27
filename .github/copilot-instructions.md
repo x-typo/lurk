@@ -80,11 +80,9 @@ Flag violations of these conventions during review.
 
 ## Testing
 
-- No test suite currently. When adding tests:
-  - Swift Testing framework for new tests.
-  - Priority targets: `Formatters`, `RedditModels` computed properties, `PostFilterStore` logic.
-  - `RedditClient` currently creates its own `URLSession` internally. Test via `URLProtocol` subclass registered on the shared session config.
-  - Mock `URLSession` via `URLProtocol` subclass, not by making the client a protocol.
+- `LurkTests` uses Swift Testing; existing tests live in `Tests/`.
+- Extend the existing deterministic, network-free coverage for changed behavior. `RedditClient(session:)` accepts an injected `URLSession`; use the existing `URLProtocol` fixture pattern rather than introducing a client protocol or mocking framework.
+- Follow [AGENTS.md](../AGENTS.md) for local simulator reuse, serial testing, build-output ownership, and cleanup.
 
 ## Naming
 
