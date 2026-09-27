@@ -21,7 +21,18 @@ struct MediaSaverTests {
 
         #expect(MediaSaver.isValidGIFDownload(
             response: response,
-            fileSize: GIFDecoder.Limits.default.maximumEncodedBytes,
+            fileSize: MediaSaver.maximumGIFDownloadBytes,
+            signature: Data("GIF89a".utf8)
+        ))
+    }
+
+    @Test("Saving copies a GIF without decoding it, so one too large to animate still downloads")
+    func acceptsGIFTooLargeToAnimate() throws {
+        let response = try #require(httpResponse(statusCode: 200))
+
+        #expect(MediaSaver.isValidGIFDownload(
+            response: response,
+            fileSize: 101_779_515, // The largest r/HighQualityGifs GIF seen
             signature: Data("GIF89a".utf8)
         ))
     }
@@ -30,7 +41,7 @@ struct MediaSaverTests {
     func rejectsInvalidDownloads() throws {
         let badResponse = try #require(httpResponse(statusCode: 404))
         let successResponse = try #require(httpResponse(statusCode: 204))
-        let limit = GIFDecoder.Limits.default.maximumEncodedBytes
+        let limit = MediaSaver.maximumGIFDownloadBytes
 
         #expect(!MediaSaver.isValidGIFDownload(
             response: badResponse,
@@ -148,6 +159,53 @@ struct MediaSaverTests {
 
         #expect(await downloadTask.value)
         #expect(!FileManager.default.fileExists(atPath: outputURL.path))
+    }
+
+    @Test("A downloaded GIF is saved or fails as a GIF; it never becomes Reddit's MP4")
+    @MainActor
+    func keepsDownloadedGIFAsGIF() async {
+        let gifURL = URL(string: "https://i.redd.it/loop.gif")!
+        let videoURL = URL(string: "https://preview.redd.it/loop.gif?format=mp4")!
+        for importResult in [MediaSaver.SaveResult.saved, .denied, .failed] {
+            var videoAttempts = 0
+            let result = await MediaSaver.saveAnimatedImage(
+                from: gifURL,
+                videos: [videoURL],
+                downloadGIF: { _ in
+                    FileManager.default.temporaryDirectory.appendingPathComponent("\(UUID().uuidString).gif")
+                },
+                saveGIF: { _ in importResult },
+                saveVideos: { _ in
+                    videoAttempts += 1
+                    return .saved
+                }
+            )
+            #expect(result == importResult)
+            #expect(videoAttempts == 0)
+        }
+    }
+
+    @Test("A GIF that can't be downloaded saves Reddit's MP4 instead")
+    @MainActor
+    func savesVideoWhenGIFDownloadFails() async {
+        let gifURL = URL(string: "https://i.redd.it/loop.gif")!
+        let videoURL = URL(string: "https://preview.redd.it/loop.gif?format=mp4")!
+        var savedVideos: [[URL]] = []
+        let result = await MediaSaver.saveAnimatedImage(
+            from: gifURL,
+            videos: [videoURL],
+            downloadGIF: { _ in throw FixtureFailure.expected },
+            saveGIF: { _ in
+                Issue.record("A GIF that failed to download can't be imported")
+                return .saved
+            },
+            saveVideos: { urls in
+                savedVideos.append(urls)
+                return .saved
+            }
+        )
+        #expect(result == .saved)
+        #expect(savedVideos == [[videoURL]])
     }
 
     @Test("Cancelling a video fallback stops before the next URL")

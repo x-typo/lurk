@@ -6,6 +6,8 @@ struct VideoViewerView: View {
     let url: URL
     let aspectRatio: CGFloat?
     let downloadURLs: [URL]
+    // A GIF post's original, which Save and Share use instead of the MP4 that plays it.
+    let gifURL: URL?
     let loops: Bool
     @State private var player: AVPlayer
     @State private var loopObserver: NSObjectProtocol?
@@ -26,10 +28,11 @@ struct VideoViewerView: View {
         case idle, saving, saved, denied, failed
     }
 
-    init(url: URL, aspectRatio: CGFloat?, downloadURLs: [URL] = [], loops: Bool = false) {
+    init(url: URL, aspectRatio: CGFloat?, downloadURLs: [URL] = [], gifURL: URL? = nil, loops: Bool = false) {
         self.url = url
         self.aspectRatio = aspectRatio
         self.downloadURLs = downloadURLs
+        self.gifURL = gifURL
         self.loops = loops
         _player = State(initialValue: AVPlayer(url: url))
     }
@@ -84,7 +87,7 @@ struct VideoViewerView: View {
                 HStack(spacing: 20) {
                     Spacer()
 
-                    if !downloadURLs.isEmpty {
+                    if !downloadURLs.isEmpty || gifURL != nil {
                         Button {
                             cancelSaveTask()
                             let operationID = UUID()
@@ -97,7 +100,11 @@ struct VideoViewerView: View {
                                         saveTaskID = nil
                                     }
                                 }
-                                let result = await MediaSaver.saveVideo(from: downloadURLs)
+                                let result = if let gifURL {
+                                    await MediaSaver.saveAnimatedImage(from: gifURL, videos: downloadURLs)
+                                } else {
+                                    await MediaSaver.saveVideo(from: downloadURLs)
+                                }
                                 guard saveTaskID == operationID, !Task.isCancelled else { return }
                                 switch result {
                                 case .saved: saveState = .saved
@@ -146,7 +153,11 @@ struct VideoViewerView: View {
                                 }
 
                                 do {
-                                    let tempURL = try await MediaSaver.temporaryVideoFile(from: downloadURLs)
+                                    let tempURL = if let gifURL {
+                                        try await MediaSaver.temporaryAnimatedFile(from: gifURL, videos: downloadURLs)
+                                    } else {
+                                        try await MediaSaver.temporaryVideoFile(from: downloadURLs)
+                                    }
                                     var shouldCleanUp = true
                                     defer {
                                         if shouldCleanUp {

@@ -143,7 +143,7 @@ struct GalleryViewerView: View {
                                 return
                             }
                             let result = item.isAnimated
-                                ? await MediaSaver.saveAnimatedImage(from: item.url, video: item.videoURL)
+                                ? await MediaSaver.saveAnimatedImage(from: item.url, videos: item.videoURL.map { [$0] } ?? [])
                                 : await MediaSaver.saveImage(from: item.url)
                             guard saveTaskID == operationID, !Task.isCancelled else { return }
                             saveState = result == .saved ? .saved : .failed
@@ -190,7 +190,7 @@ struct GalleryViewerView: View {
                             if item.isAnimated {
                                 do {
                                     let temporaryFileURL = try await MediaSaver.temporaryAnimatedFile(
-                                        from: item.url, video: item.videoURL
+                                        from: item.url, videos: item.videoURL.map { [$0] } ?? []
                                     )
                                     var shouldCleanUp = true
                                     defer {

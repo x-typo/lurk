@@ -229,12 +229,13 @@ struct PostDetailView: View {
                                     guard mediaSaveTaskID == operationID, !Task.isCancelled else { return }
                                     let result: MediaSaver.SaveResult
                                     let videoURLs = post.downloadableVideoURLs
-                                    if !videoURLs.isEmpty {
-                                        result = await MediaSaver.saveVideo(from: videoURLs)
-                                    } else if let animatedImageURL = post.animatedImageURL {
+                                    if let gifURL = post.savableGIFURL {
+                                        // A gallery GIF falls back to its item's MP4, a GIF post to the one it plays.
                                         result = await MediaSaver.saveAnimatedImage(
-                                            from: animatedImageURL, video: post.galleryVideoURL
+                                            from: gifURL, videos: post.galleryVideoURL.map { [$0] } ?? videoURLs
                                         )
+                                    } else if !videoURLs.isEmpty {
+                                        result = await MediaSaver.saveVideo(from: videoURLs)
                                     } else if let imageURL = post.imageURL {
                                         result = await MediaSaver.saveImage(from: imageURL)
                                     } else {
@@ -356,6 +357,7 @@ struct PostDetailView: View {
                     url: videoURL,
                     aspectRatio: post.videoAspectRatio,
                     downloadURLs: post.downloadableVideoURLs,
+                    gifURL: post.savableGIFURL,
                     loops: post.loopsVideo
                 )
             } else if !post.galleryItems.isEmpty {
