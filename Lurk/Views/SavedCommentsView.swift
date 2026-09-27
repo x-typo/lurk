@@ -12,6 +12,7 @@ struct SavedCommentsView: View {
     @State private var loadingMore = false
     @State private var error: String?
     @State private var thread: ThreadTarget?
+    @State private var openedGIF: GalleryMedia?
     @State private var playbackSuspension: InlineGIFPlaybackSuspension?
 
     var body: some View {
@@ -47,6 +48,10 @@ struct SavedCommentsView: View {
                 }
             }
             .background(Theme.background)
+            .environment(\.openCommentGIF, OpenCommentGIFAction { media in
+                playbackSuspension = playbackStore.suspend()
+                openedGIF = media
+            })
             .task { await loadComments() }
             .navigationTitle("Saved Comments")
             .navigationBarTitleDisplayMode(.inline)
@@ -61,6 +66,9 @@ struct SavedCommentsView: View {
         .preferredColorScheme(.dark)
         .sheet(item: $thread, onDismiss: resumeInlineGIFPlayback) { target in
             ThreadView(target: target)
+        }
+        .fullScreenCover(item: $openedGIF, onDismiss: resumeInlineGIFPlayback) { media in
+            GalleryViewerView(items: [media])
         }
     }
 
