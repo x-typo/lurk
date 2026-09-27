@@ -254,22 +254,24 @@ private struct ZoomableImageRepresentable: UIViewRepresentable {
             self.player = player
             self.looper = looper
             playerView?.playerLayer.player = player
-            // The page shows once the first frame is ready; the poster covers it until then.
+            // The page shows once the first frame is ready; the poster covers it until then. Reports are
+            // bound to this player, since a retired one's can arrive after a reload reuses the request ID.
+            let playerID = ObjectIdentifier(player)
             if let playerLayer = playerView?.playerLayer {
                 playerObservations.append(playerLayer.observe(\.isReadyForDisplay, options: [.initial, .new]) { [weak self] layer, _ in
                     guard layer.isReadyForDisplay else { return }
-                    Task { @MainActor [weak self] in self?.finishVideo(.loaded, requestID: requestID) }
+                    Task { @MainActor [weak self] in self?.finishVideo(.loaded, requestID: requestID, playerID: playerID) }
                 })
             }
             playerObservations.append(looper.observe(\.status, options: [.new]) { [weak self] looper, _ in
                 guard looper.status == .failed else { return }
-                Task { @MainActor [weak self] in self?.finishVideo(.failed, requestID: requestID) }
+                Task { @MainActor [weak self] in self?.finishVideo(.failed, requestID: requestID, playerID: playerID) }
             })
             player.play()
         }
 
-        private func finishVideo(_ state: ZoomableImageView.LoadState, requestID: UUID) {
-            guard currentRequestID == requestID, player != nil else { return }
+        private func finishVideo(_ state: ZoomableImageView.LoadState, requestID: UUID, playerID: ObjectIdentifier) {
+            guard currentRequestID == requestID, let player, ObjectIdentifier(player) == playerID else { return }
             onStateChange?(state)
         }
 

@@ -160,10 +160,12 @@ private struct InlineLoopingVideoRepresentable: UIViewRepresentable {
             let looper = AVPlayerLooper(player: player, templateItem: AVPlayerItem(url: url))
             self.player = player
             self.looper = looper
-            statusObservation = looper.observe(\.status, options: [.new]) { [weak self] looper, _ in
-                guard looper.status == .failed else { return }
+            // Only the current looper may report: a retired one's failure can arrive after its replacement starts.
+            statusObservation = looper.observe(\.status, options: [.new]) { [weak self] observed, _ in
+                guard observed.status == .failed else { return }
+                let failedLooper = ObjectIdentifier(observed)
                 Task { @MainActor [weak self] in
-                    guard let self, self.currentRequestID == requestID else { return }
+                    guard let self, let current = self.looper, ObjectIdentifier(current) == failedLooper else { return }
                     self.onFailure?()
                 }
             }
