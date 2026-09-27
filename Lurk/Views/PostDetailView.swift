@@ -1609,6 +1609,7 @@ struct ComposeReplySheet: View {
         .onChange(of: text) { _, _ in
             postError = nil
         }
+        .tracksUnsentText(!isEmpty)
     }
 
     private func postReply() async {

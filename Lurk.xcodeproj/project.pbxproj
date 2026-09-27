@@ -21,6 +21,16 @@
 		E8435C5246E74FD88C94B505 /* LurkTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = LurkTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
+/* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
+		4B59212D78C046D68C45F795 /* Exceptions for "Lurk" folder in "Lurk" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Info.plist,
+			);
+			target = 58DE7D1F2F78E66A00510F5C /* Lurk */;
+		};
+/* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
+
 /* Begin PBXFileSystemSynchronizedRootGroup section */
 		C12EE6BBB0574708AB92C6D6 /* Tests */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
@@ -29,6 +39,9 @@
 		};
 		58DE7D222F78E66A00510F5C /* Lurk */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				4B59212D78C046D68C45F795 /* Exceptions for "Lurk" folder in "Lurk" target */,
+			);
 			path = Lurk;
 			sourceTree = "<group>";
 		};
@@ -331,6 +344,7 @@
 				DEVELOPMENT_TEAM = K83R42K74H;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = Lurk/Info.plist;
 				INFOPLIST_KEY_NSPhotoLibraryAddUsageDescription = "Lurk needs access to save photos and videos from Reddit posts.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
@@ -365,6 +379,7 @@
 				DEVELOPMENT_TEAM = K83R42K74H;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = Lurk/Info.plist;
 				INFOPLIST_KEY_NSPhotoLibraryAddUsageDescription = "Lurk needs access to save photos and videos from Reddit posts.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
