@@ -306,6 +306,19 @@ struct RedditMarkdownTests {
         let aligned = outline("A|B\n| >!:---!< | --- |\na|b|lost", revealed: [0])
         #expect(aligned.contains("lost") && !aligned.contains("TABLE"), "\(aligned)")
         #expect(emphasized("~~1.~~>![x](https://example.com)!<", revealed: [0], intent: .strikethrough) == ["1."])
+        // Reddit's ">!" and "!<" are punctuation, so emphasis right beside a revealed spoiler still pairs.
+        #expect(emphasized("**Answer:**>!1984!<", revealed: [0], intent: .stronglyEmphasized) == ["Answer:"])
+        #expect(emphasized(">!x!<_it_", revealed: [0]) == ["it"])
+        for ending in ["___", "***", "*", "_", "__"] {
+            #expect(emphasized(">!a\n\(ending)!<_it_", revealed: [0]) == ["it"], "\(ending)")
+        }
+        #expect(emphasized(">!a\n***!<**b**", revealed: [0], intent: .stronglyEmphasized) == ["b"])
+        #expect(emphasized("**Poster:**[![a](https://i.imgur.com/t.png)](https://example.com/p)", intent: .stronglyEmphasized) == ["Poster:"])
+        // A URL ends where "!<" stood.
+        #expect(outline("see >!https://example.com/a!< now", revealed: [0]) == "P(see [https://example.com/a](https://example.com/a) now)")
+        #expect(outline("The link is >!www.example.com!<", revealed: [0]) == "P(The link is [www.example.com](http://www.example.com))")
+        // The line holding only "!<" isn't blank, so the paragraph goes on.
+        #expect(outline(">!line one\nline two\n!<\nMy thoughts", revealed: [0]) == "P(line one⏎line two⏎⏎My thoughts)")
         #expect(emphasized("- >!_it_ y!<", revealed: [0]) == ["it"])
         #expect(emphasized("_1_>![x](https://example.com)!<", revealed: [0]) == ["1"])
         #expect(emphasized("**1.**>![x](https://example.com)!<", revealed: [0], intent: .stronglyEmphasized) == ["1."])

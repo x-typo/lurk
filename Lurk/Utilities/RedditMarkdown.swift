@@ -44,6 +44,10 @@ enum RedditMarkdown {
     // stands for its "[", and `linkedImageMark` sits between the two.
     private static let linkedImageStartMark: Character = "\u{E005}"
     private static let linkedImageMark: Character = "\u{E004}"
+    // Stands for a revealed spoiler's ">!" and "!<", and goes after parsing. Unlike the marks above, it's
+    // punctuation (U+2E3F CAPITULUM), as those delimiters are on Reddit, so emphasis beside it closes and
+    // opens as it does there.
+    private static let delimiterMark: Character = "\u{2E3F}"
 
     // A top-level "#Title" line, which Reddit makes a heading and CommonMark doesn't. A line with a pipe
     // may be a table row, such as "#|Episode", so it's left alone.
@@ -109,76 +113,22 @@ enum RedditMarkdown {
 
     private static func markedSource(_ text: String, revealedSpoilers: Set<Int>, hidden: inout Set<Int>) -> String {
         var source = ""
-        // A revealed spoiler that ends at a line break leaves "!<" at the start of the next line on Reddit.
-        var nextLineFollowsSpoiler = false
-        // Whether the current line holds anything but whitespace and block syntax ("#", "- ", "1.", "|"), and
-        // whether it holds that syntax.
-        var lineHasContent = false
-        var lineHasSyntax = false
-        func isContent(_ character: Character) -> Bool {
-            !(character.isWhitespace || "#-+*=_.)>|:`~0123456789".contains(character) || character == mark)
-        }
-        // Whether the source ends with an emphasis or strikethrough closer, the "_" of "_1_", "**" of "**1.**",
-        // or "~~" of "~~1.~~", which a mark right after it would stop closing. Closers are at most three long,
-        // so this looks back four characters at most.
-        func endsWithEmphasisCloser() -> Bool {
-            guard let last = source.last, "*_~".contains(last) else { return false }
-            let tail = Array(source.suffix(4).reversed())
-            let run = tail.prefix { $0 == last }.count
-            return run < tail.count && run < 4 && !tail[run].isWhitespace
-        }
         for part in CommentSpoilers.parse(text) {
-            var piece: String
             switch part {
             case .text(let text):
-                piece = nextLineFollowsSpoiler && opensBlock(text) ? String(mark) + text : text
-                nextLineFollowsSpoiler = false
+                source += text
             case .spoiler(let id, let content) where revealedSpoilers.contains(id):
-                // On Reddit, ">!" sits before a spoiler's first line and "!<" after its last, so the first
-                // can't open a block, and the last can't underline a heading, draw a rule, or be a bare list
-                // marker. Lines between them are ordinary lines there too. The first line gets a mark only
-                // where it could open a block: alone on its line, or joining the block syntax before it, as
-                // "#" and "#1" or "-" and "    x" would. Never after text such as "**Source:**", or right
-                // after an emphasis closer, which the mark would stop closing.
-                let joinsSyntax = lineHasSyntax && content.first.map { first in
-                    first.isWhitespace || first == source.last || (source.last?.isNumber == true && ".)".contains(first))
-                } == true
-                let guardsFirstLine = !lineHasContent && !endsWithEmphasisCloser() && (opensBlock(content) || joinsSyntax)
-                piece = guardsFirstLine ? String(mark) + content : content
-                nextLineFollowsSpoiler = false
-                if let lastBreak = content.lastIndex(of: "\n") {
-                    let lastLine = content[content.index(after: lastBreak)...]
-                    let marker = lastLine.drop { $0 == " " || $0 == "\t" || $0 == ">" }
-                    let underline = !marker.isEmpty && marker.allSatisfy { "=-*_:| \t".contains($0) }
-                    let listMarker = marker.range(of: #"^(?:[-+*]|[0-9]{1,9}[.)])[ \t]*$"#, options: .regularExpression) != nil
-                    if underline || listMarker, let last = piece.lastIndex(where: { $0 != " " && $0 != "\t" }) {
-                        // Inside the line, so "_" or "*" after "!<" can still open emphasis; after a "*" or "_"
-                        // rather than before it, so the run itself stays whole.
-                        piece.insert(mark, at: "*_".contains(piece[last]) ? piece.index(after: last) : last)
-                    }
-                    nextLineFollowsSpoiler = lastLine.allSatisfy { $0.isWhitespace || $0 == ">" }
-                }
+                // On Reddit, ">!" and "!<" stay in the source around the spoiler, so its first line can't
+                // open or extend a block, its last line can't underline one, and the line after it can't
+                // start one; lines between are ordinary lines. `delimiterMark` stands in for both, except
+                // before a letter that starts a line or follows a space: nothing can open there, and a URL
+                // still links, as Foundation's autolinks need a space before them.
+                let opensWithWord = content.first?.isLetter == true && (source.last?.isWhitespace ?? true)
+                source += (opensWithWord ? "" : String(delimiterMark)) + content + String(delimiterMark)
             case .spoiler(let id, _):
                 // Only the id reaches the parser; an angle autolink can't be joined by a "!" or a URL before it.
                 hidden.insert(id)
-                nextLineFollowsSpoiler = false
-                piece = "<\(spoilerScheme):\(id)>"
-            }
-            // "!" before "[" would make an image, and a word glued to a revealed URL would stop it linking.
-            if let last = source.last, let first = piece.first,
-               (last == "!" && first == "[") || ((last.isLetter || last.isNumber) && (first.isLetter || first.isNumber)) {
-                source.append(mark)
-            }
-            source += piece
-            let lineStart = piece.lastIndex(of: "\n").map { piece.index(after: $0) }
-            if let lineStart {
-                lineHasContent = piece[lineStart...].contains(where: isContent)
-                lineHasSyntax = false
-            } else if !lineHasContent {
-                lineHasContent = piece.contains(where: isContent)
-            }
-            if !lineHasContent, !lineHasSyntax {
-                lineHasSyntax = piece[(lineStart ?? piece.startIndex)...].contains { !$0.isWhitespace && $0 != ">" && $0 != mark }
+                source += "<\(spoilerScheme):\(id)>"
             }
         }
         source = splittingLinkedImages(source)
@@ -201,19 +151,6 @@ enum RedditMarkdown {
         return compactHeadingPattern.stringByReplacingMatches(
             in: source, range: NSRange(source.startIndex..., in: source), withTemplate: "$1 " + String(headingMark)
         )
-    }
-
-    // Whether a spoiler's first line, or the line after it, would open a block: a heading, list, quote,
-    // fence, rule, setext underline, indented code, or link reference definition.
-    private static func opensBlock(_ text: String) -> Bool {
-        let line = text.prefix { $0 != "\n" }
-        let indent = line.prefix { $0 == " " || $0 == "\t" }
-        let rest = line.dropFirst(indent.count)
-        guard let first = rest.first else { return false }
-        if indent.count >= 4 || indent.contains("\t") { return true }
-        if "#-+*>=[|:".contains(first) || (first.isASCII && first.isNumber) { return true }
-        if rest.hasPrefix("```") || rest.hasPrefix("~~~") { return true }
-        return rest.allSatisfy { $0 == "_" || $0 == " " || $0 == "\t" } && rest.filter { $0 == "_" }.count >= 3
     }
 
     // Rewrites "[![alt](image)](page)" as "<start>![alt](image)<split>[<mark>](page)", the image and a link
@@ -321,6 +258,7 @@ enum RedditMarkdown {
                 continue
             }
             result += String(characters[copied..<index])
+            result.append(delimiterMark)
             result.append(linkedImageStartMark)
             result += String(characters[(index + 1)..<imageEnd])
             result += String(linkedImageMark) + "[" + String(mark) + "]("
@@ -358,7 +296,7 @@ enum RedditMarkdown {
 
     // Removes the marks, restoring the text as written.
     private static func unmarked(_ text: String) -> String {
-        guard text.contains(where: { [mark, pipeMark, headingMark, linkedImageMark, linkedImageStartMark].contains($0) }) else {
+        guard text.contains(where: { [mark, pipeMark, headingMark, linkedImageMark, linkedImageStartMark, delimiterMark].contains($0) }) else {
             return text
         }
         // Code holds a split linked image whole; parsed text has its pieces in separate runs.
@@ -371,18 +309,20 @@ enum RedditMarkdown {
             .replacingOccurrences(of: " " + String(headingMark), with: "")
             .replacingOccurrences(of: String(headingMark), with: "")
             .replacingOccurrences(of: String(mark), with: "")
+            .replacingOccurrences(of: String(delimiterMark), with: "")
             .replacingOccurrences(of: String(pipeMark), with: "|")
     }
 
     private static func unmarked(_ url: URL) -> URL {
         let text = url.absoluteString
-        guard text.contains("%EE%80%8") else { return url }
+        guard text.contains("%EE%80%8") || text.contains("%E2%B8%BF") else { return url }
         let restored = text
             .replacingOccurrences(of: "%20%EE%80%83", with: "")
             .replacingOccurrences(of: "%EE%80%83", with: "")
             .replacingOccurrences(of: "%EE%80%80", with: "")
             .replacingOccurrences(of: "%EE%80%84", with: "")
             .replacingOccurrences(of: "%EE%80%85", with: "")
+            .replacingOccurrences(of: "%E2%B8%BF", with: "")
             .replacingOccurrences(of: "%EE%80%81", with: "%7C")
         return URL(string: restored) ?? url
     }
@@ -426,6 +366,24 @@ enum RedditMarkdown {
             }
         }
         content = addressed
+        // Foundation's autolinks run on through a revealed spoiler's closing mark; they end there, as at "!<".
+        var ended = AttributedString()
+        for run in content.runs {
+            let runText = String(content[run.range].characters)
+            let lowered = runText.lowercased()
+            if run.link != nil, let cut = runText.firstIndex(of: delimiterMark), cut != runText.startIndex,
+               ["http://", "https://", "www."].contains(where: lowered.hasPrefix) {
+                let address = String(runText[..<cut])
+                var linked = AttributedString(address, attributes: run.attributes)
+                linked.link = URL(string: lowered.hasPrefix("www.") ? "http://" + address : address)
+                var rest = AttributedString(String(runText[cut...]), attributes: run.attributes)
+                rest.link = nil
+                ended += linked + rest
+            } else {
+                ended += AttributedString(content[run.range])
+            }
+        }
+        content = ended
         // "![clip](https://…)" keeps its target as a link; a media one is lifted out later.
         for (imageURL, range) in content.runs[\.imageURL].reversed() {
             guard let imageURL, content[range].link == nil, isWebURL(imageURL) else { continue }
