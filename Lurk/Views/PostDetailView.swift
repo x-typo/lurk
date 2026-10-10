@@ -986,34 +986,16 @@ struct CommentBodyView: View {
     private var renderedBody: some View {
         let parts = Self.displayParts(from: content, revealedSpoilers: activeRevealedSpoilers)
         return VStack(alignment: .leading, spacing: 6) {
-            ForEach(Array(parts.enumerated()), id: \.offset) { _, part in
+            ForEach(Array(parts.enumerated()), id: \.offset) { index, part in
                 switch part {
                 case .text(let text):
                     if !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                         nonInteractiveTextTarget {
-                            VStack(alignment: .leading, spacing: 2) {
-                                let lines = text.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
-                                let groups = Self.groupLines(lines)
-                                ForEach(Array(groups.enumerated()), id: \.offset) { _, group in
-                                    switch group {
-                                    case .line(let line):
-                                        renderLine(line)
-                                    case .quote(let qlines):
-                                        VStack(alignment: .leading, spacing: 2) {
-                                            ForEach(Array(qlines.enumerated()), id: \.offset) { _, ql in
-                                                renderLine(ql)
-                                            }
-                                        }
-                                        .padding(.leading, 10)
-                                        .overlay(alignment: .leading) {
-                                            Rectangle()
-                                                .fill(Theme.primary)
-                                                .frame(width: 3)
-                                        }
-                                    }
-                                }
-                            }
-                            .frame(maxWidth: .infinity, alignment: .leading)
+                            // Adjacent text merges, so a later text part always follows media or a spoiler.
+                            MarkdownBlocksView(
+                                blocks: RedditMarkdown.blocks(from: text, continuingLine: index > 0),
+                                font: textFont
+                            )
                         }
                     }
                 case .spoiler(let id, _):
@@ -1167,57 +1149,12 @@ struct CommentBodyView: View {
         }
     }
 
-    @ViewBuilder
-    private func renderLine(_ line: String) -> some View {
-        let trimmed = line.trimmingCharacters(in: .whitespaces)
-        if trimmed.isEmpty {
-            Spacer().frame(height: 8)
-        } else if Self.isHorizontalRule(trimmed) {
-            Divider().background(Theme.border).padding(.vertical, 4)
-        } else if let attr = Self.markdownString(Self.cleanLine(trimmed)) {
-            Text(attr)
-                .font(textFont)
-                .foregroundStyle(Theme.text)
-        }
-    }
-
     enum BodyPart {
         case text(String)
         case spoiler(Int, String)
         case image(URL)
         case gif(URL)
         case link(String, URL)
-    }
-
-    private enum LineGroup {
-        case line(String)
-        case quote([String])
-    }
-
-    private static func groupLines(_ lines: [String]) -> [LineGroup] {
-        var groups: [LineGroup] = []
-        var quoteBuffer: [String] = []
-        func flush() {
-            if !quoteBuffer.isEmpty {
-                groups.append(.quote(quoteBuffer))
-                quoteBuffer.removeAll()
-            }
-        }
-        for line in lines {
-            let trimmed = line.trimmingCharacters(in: .whitespaces)
-            var normalized = trimmed
-            while normalized.hasPrefix(">") { normalized.removeFirst() }
-            if trimmed.hasPrefix(">") && !normalized.hasPrefix("!") {
-                var body = normalized
-                if body.hasPrefix(" ") { body.removeFirst() }
-                quoteBuffer.append(body)
-            } else {
-                flush()
-                groups.append(.line(line))
-            }
-        }
-        flush()
-        return groups
     }
 
     static func parse(_ text: String, revealedSpoilers: Set<Int> = []) -> [BodyPart] {
@@ -1255,15 +1192,33 @@ struct CommentBodyView: View {
 
         var parts: [BodyPart] = []
         var lastEnd = 0
+        // Ordinary links stay in the prose, so Markdown blocks around them keep their structure.
+        func appendText(_ text: String) {
+            if case .text(let previous) = parts.last {
+                parts[parts.count - 1] = .text(previous + text)
+            } else {
+                parts.append(.text(text))
+            }
+        }
+        let hasTable = RedditMarkdown.tableDelimiterPattern.firstMatch(in: text, range: fullRange) != nil
 
         for match in matches {
             let range = match.range
             if range.location > lastEnd {
-                let before = nsText.substring(with: NSRange(location: lastEnd, length: range.location - lastEnd))
-                parts.append(.text(before))
+                appendText(nsText.substring(with: NSRange(location: lastEnd, length: range.location - lastEnd)))
             }
 
             let full = nsText.substring(with: range)
+            lastEnd = range.location + range.length
+
+            // Media inside a list item, heading, or table row stays a link rather than splitting its block.
+            let line = nsText.lineRange(for: range)
+            let lineStart = nsText.substring(with: NSRange(location: line.location, length: range.location - line.location))
+            if blockMarkerPattern.firstMatch(in: lineStart, range: NSRange(location: 0, length: (lineStart as NSString).length)) != nil
+                || (hasTable && nsText.substring(with: line).contains("|")) {
+                appendText(full)
+                continue
+            }
 
             if match.range(at: 1).location != NSNotFound {
                 // Giphy: ![gif](giphy|ID) or ![gif](giphy|ID|variant)
@@ -1276,14 +1231,12 @@ struct CommentBodyView: View {
                 // Markdown link: [text](url)
                 let linkText = nsText.substring(with: match.range(at: 2))
                 let urlStr = nsText.substring(with: match.range(at: 3))
-                if let url = URL(string: urlStr) {
-                    if isGIFURL(url) {
-                        parts.append(.gif(url))
-                    } else if isImageURL(url) {
-                        parts.append(.image(url))
-                    } else {
-                        parts.append(.link(linkText, url))
-                    }
+                if let url = URL(string: urlStr), isGIFURL(url) {
+                    parts.append(.gif(url))
+                } else if let url = URL(string: urlStr), isImageURL(url) {
+                    parts.append(.image(url))
+                } else {
+                    appendText(full)
                 }
             } else {
                 let (urlString, trailingText) = splitTrailingPunctuation(from: full)
@@ -1291,28 +1244,29 @@ struct CommentBodyView: View {
                     parts.append(.gif(url))
                 } else if let url = URL(string: urlString), isImageURL(url) {
                     parts.append(.image(url))
-                } else if let url = URL(string: urlString) {
-                    let display = urlString
-                        .replacingOccurrences(of: "https://", with: "")
-                        .replacingOccurrences(of: "http://", with: "")
-                    parts.append(.link(display, url))
                 } else {
-                    parts.append(.text(urlString))
+                    // Foundation autolinks it, by GFM rules: a bracketed IPv6 host stays plain text, and
+                    // a trailing "*", "_", or "~" is left out of the link so "**https://…**" works.
+                    appendText(urlString)
                 }
                 if !trailingText.isEmpty {
-                    parts.append(.text(trailingText))
+                    appendText(trailingText)
                 }
             }
-
-            lastEnd = range.location + range.length
         }
 
         if lastEnd < nsText.length {
-            parts.append(.text(nsText.substring(from: lastEnd)))
+            appendText(nsText.substring(from: lastEnd))
         }
 
         return parts
     }
+
+    // A list item, ordered item, or heading marker, after any quote markers.
+    private static let blockMarkerPattern = try! NSRegularExpression(
+        pattern: #"^\s*(?:>\s*)*(?:[*+-]\s|\d{1,9}[.)]\s|#)"#
+    )
+
 
     static func displayParts(from text: String, revealedSpoilers: Set<Int> = []) -> [BodyPart] {
         var inlineGIFCount = 0
@@ -1358,32 +1312,6 @@ struct CommentBodyView: View {
             return false
         }
         return true
-    }
-
-    private static func isHorizontalRule(_ line: String) -> Bool {
-        let stripped = line.replacingOccurrences(of: " ", with: "")
-        guard stripped.count >= 3 else { return false }
-        return stripped.allSatisfy({ $0 == "-" })
-            || stripped.allSatisfy({ $0 == "*" })
-            || stripped.allSatisfy({ $0 == "_" })
-    }
-
-    private static func cleanLine(_ line: String) -> String {
-        var result = line
-        if result.hasPrefix("#") {
-            let stripped = result.drop(while: { $0 == "#" })
-            if stripped.first == " " {
-                result = String(stripped.dropFirst())
-            }
-        }
-        return result
-    }
-
-    private static func markdownString(_ text: String) -> AttributedString? {
-        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return nil }
-        return (try? AttributedString(markdown: trimmed, options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace)))
-            ?? AttributedString(trimmed)
     }
 }
 

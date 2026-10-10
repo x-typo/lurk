@@ -431,37 +431,37 @@ struct GIFDecoderTests {
         }
 
         let punctuatedParts = CommentBodyView.parse("https://example.com/media/loop.gif, next")
-        guard punctuatedParts.count == 3,
+        guard punctuatedParts.count == 2,
               case .gif(let punctuatedURL) = punctuatedParts[0],
-              case .text(let punctuation) = punctuatedParts[1],
-              case .text(let remainder) = punctuatedParts[2] else {
+              case .text(let remainder) = punctuatedParts[1] else {
             Issue.record("Expected punctuation after a bare GIF URL to remain prose")
             return
         }
         #expect(punctuatedURL.pathExtension == "gif")
-        #expect(punctuation == ",")
-        #expect(remainder == " next")
+        #expect(remainder == ", next")
 
         for punctuation in ["]", "…", "”"] {
             let parts = CommentBodyView.parse(
                 "https://example.com/media/loop.gif\(punctuation) next"
             )
-            guard parts.count == 3,
+            guard parts.count == 2,
                   case .gif = parts[0],
-                  case .text(let parsedPunctuation) = parts[1] else {
+                  case .text(let prose) = parts[1] else {
                 Issue.record("Expected \(punctuation) after a GIF URL to remain prose")
                 continue
             }
-            #expect(parsedPunctuation == punctuation)
+            #expect(prose == "\(punctuation) next")
         }
 
+        // Ordinary links stay in the text for the Markdown renderer. Its GFM autolinking leaves a
+        // bracketed IPv6 host as plain text, an accepted trade for correct "**https://…**" links.
         let ipv6Parts = CommentBodyView.parse("https://[2001:db8::1]")
         guard ipv6Parts.count == 1,
-              case .link(_, let ipv6URL) = ipv6Parts[0] else {
-            Issue.record("Expected a valid bracketed IPv6 URL to remain a link")
+              case .text(let ipv6Text) = ipv6Parts[0] else {
+            Issue.record("Expected a bracketed IPv6 URL to remain in the prose")
             return
         }
-        #expect(ipv6URL.host?.contains(":") == true)
+        #expect(ipv6Text == "https://[2001:db8::1]")
 
         for unsafeURL in [
             "file:///private/tmp/loop.gif",

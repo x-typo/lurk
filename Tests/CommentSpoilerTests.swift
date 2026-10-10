@@ -36,7 +36,9 @@ struct CommentSpoilerTests {
             revealedSpoilers: [0]
         )
         #expect(parts.filter { if case .gif = $0 { true } else { false } }.count == 1)
-        #expect(parts.contains { if case .link("answer", _) = $0 { true } else { false } })
+        #expect(parts.contains {
+            if case .text(let text) = $0 { text.contains("[answer](https://example.com/answer)") } else { false }
+        })
         #expect(parts.contains {
             if case .link("Open GIF", let url) = $0 { url.lastPathComponent == "secret.gif" } else { false }
         })
