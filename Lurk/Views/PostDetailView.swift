@@ -1285,7 +1285,9 @@ struct CommentBodyView: View {
     // Foundation's parser joins a link's words across a line break and drops a link whose address has a
     // space, which the link buttons before block parsing kept.
     private static func inlineLink(_ text: String, _ url: String) -> String {
-        let address = url.contains(where: \.isWhitespace) && !url.contains("\"") && !url.contains("'") ? "<\(url)>" : url
+        // A title, as in `(https://… "title")` or `(https://… (title))`, keeps its original syntax.
+        let hasTitle = url.contains { "\"'(".contains($0) }
+        let address = url.contains(where: \.isWhitespace) && !hasTitle ? "<\(url)>" : url
         return "[\(text.replacingOccurrences(of: "\n", with: " "))](\(address))"
     }
 

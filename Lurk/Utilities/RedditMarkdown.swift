@@ -72,13 +72,15 @@ enum RedditMarkdown {
     // table rows such as "#|Episode" are left alone.
     static func normalized(_ text: String) -> String {
         let lines = text.split(separator: "\n", omittingEmptySubsequences: false)
-        let fenced = fencedLines(lines)
+        let fenced = fencedLines(lines, unclosedRunToEnd: true)
         let tables = tableLines(lines)
         return lines.enumerated().map { index, line in
             if fenced.contains(index) { return String(line) }
             // Foundation reads "^[text](url)" as its attribute syntax and drops the link; on Reddit it's a
-            // caret and a link.
-            let line = line.replacingOccurrences(of: "^[", with: "\\^[")
+            // caret and a link. Only that shape is escaped, so a regex such as "^[a-z]+" in code is untouched.
+            let line = line.replacingOccurrences(
+                of: #"\^\[(?=[^\]\n]*\]\(https?://)"#, with: #"\\^["#, options: .regularExpression
+            )
             return tables.contains(index) ? line : spacedHeading(Substring(line)) ?? line
         }
         .joined(separator: "\n")
@@ -110,15 +112,22 @@ enum RedditMarkdown {
         line.replacingOccurrences(of: #"!\[gif\]\(giphy\|[^)]*\)"#, with: "", options: .regularExpression).contains("|")
     }
 
-    // Indexes of closed fenced code blocks' lines, fences included. Quote and list containers aren't
-    // modeled, so a fence never closed is left out rather than read as covering the rest of the body.
-    static func fencedLines(_ lines: [Substring]) -> Set<Int> {
+    // Indexes of fenced code lines, fences included. Quote and list containers aren't modeled, so a fence
+    // never closed may have ended with its quote: media extraction leaves it out, while the heading
+    // normalizer (`unclosedRunToEnd`) treats it as code to the end, as CommonMark does at the top level.
+    static func fencedLines(_ lines: [Substring], unclosedRunToEnd: Bool = false) -> Set<Int> {
         var result: Set<Int> = []
         var index = 0
         while index < lines.count {
-            guard let open = openingFence(blockContent(of: lines[index])),
-                  let close = lines[(index + 1)...].firstIndex(where: { isClosingFence(blockContent(of: $0), of: open) })
-            else {
+            guard let open = openingFence(blockContent(of: lines[index])) else {
+                index += 1
+                continue
+            }
+            guard let close = lines[(index + 1)...].firstIndex(where: { isClosingFence(blockContent(of: $0), of: open) }) else {
+                if unclosedRunToEnd {
+                    result.formUnion(index..<lines.count)
+                    break
+                }
                 index += 1
                 continue
             }
@@ -206,17 +215,20 @@ enum RedditMarkdown {
         }
         // Full syntax leaves block HTML, such as a "<sarcasm>" line and the lines after it, as raw text; its
         // Markdown still renders inline, as before block parsing.
+        var content: AttributedString
         if intent?.contains(.blockHTML) == true {
             var html = String(slice.characters)
             if html.hasSuffix("\n") { html.removeLast() }
-            return (try? AttributedString(markdown: html, options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace)))
+            content = (try? AttributedString(markdown: html, options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace)))
                 ?? AttributedString(html)
+        } else {
+            content = AttributedString(slice)
+            content.presentationIntent = nil
         }
-        var content = AttributedString(slice)
-        content.presentationIntent = nil
         // "![clip](https://…)" to a page that isn't an image keeps its target as a link.
-        if content.link == nil, let imageURL = slice.imageURL, ["http", "https"].contains(imageURL.scheme?.lowercased()) {
-            content.link = imageURL
+        for (imageURL, range) in content.runs[\.imageURL].reversed() {
+            guard let imageURL, content[range].link == nil, ["http", "https"].contains(imageURL.scheme?.lowercased()) else { continue }
+            content[range].link = imageURL
         }
         return content
     }

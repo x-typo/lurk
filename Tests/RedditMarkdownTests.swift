@@ -155,10 +155,22 @@ struct RedditMarkdownTests {
         #expect(String(caret.characters) == "Sources say so^1 and more")
         #expect(caret.runs.contains { $0.link?.absoluteString == "https://example.com/src" })
 
-        // A link keeps its target across a line break in its text and with a space in its address.
+        // A regex in code keeps its caret, and an unclosed top-level fence still shelters "#!/bin/sh".
+        #expect(RedditMarkdown.normalized("Use `^[a-z]+` here") == "Use `^[a-z]+` here")
+        #expect(RedditMarkdown.normalized("```sh\n#!/bin/sh") == "```sh\n#!/bin/sh")
+
+        // An image-style link to a page in block HTML stays tappable.
+        guard case .paragraph(let htmlImage) = RedditMarkdown.blocks(from: "<rant>\n![clip](https://example.com/watch)\n</rant>").first else {
+            Issue.record("Expected a paragraph")
+            return
+        }
+        #expect(htmlImage.runs.contains { $0.link?.absoluteString == "https://example.com/watch" })
+
+        // A link keeps its target across a line break in its text, with a space in its address, and with a title.
         for (body, words, address) in [
             ("Read [the full\nannouncement](https://example.com/news) here", "the full announcement", "https://example.com/news"),
             ("[y](https://example.com/c d)", "y", "https://example.com/c%20d"),
+            ("[label](https://example.com/page (title))", "label", "https://example.com/page"),
         ] {
             let parts = CommentBodyView.parse(body)
             guard parts.count == 1, case .text(let text) = parts[0],
