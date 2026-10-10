@@ -121,7 +121,7 @@ struct RedditMarkdownTests {
             == "P(Sources say so^[1](https://example.com/src) and more, `^[a-z]+`)")
     }
 
-    @Test("Images and GIFs lift out of prose and quotes, and stay links in lists, headings, and tables")
+    @Test("Images and GIFs lift out of prose, quotes, and headings, and stay links in lists and tables")
     func media() {
         #expect(outline("Look https://example.com/shot.png wow") == "P(Look) IMG(https://example.com/shot.png) P(wow)")
         #expect(outline("Here:\nhttps://example.com/x.png\nCool right?") == "P(Here:) IMG(https://example.com/x.png) P(Cool right?)")
@@ -213,6 +213,7 @@ struct RedditMarkdownTests {
     func firstApproachReviewInputs() {
         let gif = "GIF(https://media.giphy.com/media/abc/giphy.gif)"
         #expect(outline("before >!secret!< **important** and *italic*") == "P(before) SPOILER(0) P(**important** and _italic_)")
+        #expect(outline("before >!secret!< *italic* after") == "P(before) SPOILER(0) P(_italic_ after)")
         // Fences end where CommonMark ends them, inside or after their quote or list, and code keeps its bytes.
         #expect(outline("  ~~~\n  code\n~~~\n![gif](giphy|abc)") == "CODE(code) \(gif)")
         #expect(outline("- > ~~~\n  > ![gif](giphy|abc)\n  > ~~~") == "UL[1:Q[CODE(![gif](giphy|abc))]]")
