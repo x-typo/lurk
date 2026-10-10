@@ -217,13 +217,30 @@ struct RedditMarkdownTests {
         #expect(elapsed < .seconds(0.2))
     }
 
-    @Test("Long runs of unclosed linked images or giphy embeds parse in linear time")
-    func unclosedPatternRuns() {
-        for unit in ["[![", "[![x](y", "![gif](giphy|"] {
-            let body = String(repeating: unit, count: 8000)
+    @Test("Linked images keep their image and link at any length, with brackets in the address")
+    func linkedImages() {
+        let alt = String(repeating: "a", count: 300)
+        #expect(outline("[![\(alt)](https://i.imgur.com/t.png)](https://example.com/full)")
+            == "IMG(https://i.imgur.com/t.png) P([https://example.com/full](https://example.com/full))")
+        #expect(outline("Poster: [![](https://example.com/p.jpg?size[]=large)](https://example.com/show) nice")
+            == "P(Poster:) IMG(https://example.com/p.jpg?size%5B%5D=large) P([https://example.com/show](https://example.com/show) nice)")
+        let page = "https://example.com/" + String(repeating: "b", count: 1100)
+        #expect(outline("x [![](https://i.imgur.com/t.png)](\(page)) y") == "P(x) IMG(https://i.imgur.com/t.png) P([\(page)](\(page)) y)")
+        #expect(outline("[![a](https://i.imgur.com/t.png)](https://en.wikipedia.org/wiki/Foo_(bar))")
+            == "IMG(https://i.imgur.com/t.png) P([https://en.wikipedia.org/wiki/Foo_(bar)](https://en.wikipedia.org/wiki/Foo_(bar)))")
+        #expect(outline("```\n[![](https://e.com/p.jpg?s[]=1)](https://e.com/s)\n```") == "CODE([![](https://e.com/p.jpg?s[]=1)](https://e.com/s))")
+    }
+
+    @Test("Long runs of linked images, giphy embeds, and fence-like runs parse in linear time")
+    func patternRuns() {
+        for (unit, count) in [
+            ("[![", 8000), ("[![x](y", 8000), ("![gif](giphy|", 8000),
+            ("![gif](giphy|a) ", 2000), ("[![a](https://i.imgur.com/t.png)](https://e.com/p) ", 1000), ("~~~ x ", 8000),
+        ] {
+            let body = String(repeating: unit, count: count)
             let elapsed = ContinuousClock().measure { _ = RedditMarkdown.blocks(from: body) }
-            // Unbounded patterns took 0.9 to 3.2 s on a Mac at this size.
-            #expect(elapsed < .seconds(0.3), "\(unit) took \(elapsed)")
+            // Rescanning took 0.9 to 4.6 s at these sizes; linear passes take well under a second in Debug.
+            #expect(elapsed < .seconds(1), "\(unit) ×\(count) took \(elapsed)")
         }
     }
 

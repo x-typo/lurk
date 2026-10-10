@@ -40,23 +40,16 @@ enum RedditMarkdown {
     private static let pipeMark: Character = "\u{E001}"
     // Follows the space added after a "#Title" heading's hashes, so code can drop that space again.
     private static let headingMark: Character = "\u{E003}"
-    // Sits between a linked image, "[![alt](image)](page)", split into the image and a link to the page.
+    // A linked image, "[![alt](image)](page)", is split into the image and a link to the page: this mark
+    // stands for its "[", and `linkedImageMark` sits between the two.
+    private static let linkedImageStartMark: Character = "\u{E005}"
     private static let linkedImageMark: Character = "\u{E004}"
 
     // A top-level "#Title" line, which Reddit makes a heading and CommonMark doesn't. A line with a pipe
     // may be a table row, such as "#|Episode", so it's left alone.
     private static let compactHeadingPattern = try! NSRegularExpression(pattern: #"(?m)^( {0,3}#{1,6})(?=[^#\s])(?![^\n]*\|)"#)
-    // Patterns scanning to a closing character are capped, so a long line without one stays linear: an
-    // unbounded scan from every "[![" or "![gif](giphy|" took seconds on a few thousand repeats.
+    // Capped, so a long line of "![gif](giphy|" without a closing ")" doesn't rescan to its end each time.
     private static let giphyPattern = try! NSRegularExpression(pattern: #"!\[gif\]\(giphy\|[^)\s]{0,100}\)"#, options: .caseInsensitive)
-    // Foundation flattens an image inside a link, losing the image.
-    private static let linkedImagePattern = try! NSRegularExpression(
-        pattern: #"\[(!\[[^\]\n]{0,200}\]\([^()\[\]\s]{1,1024}\))\]\(([^)\s]{1,1024})\)"#
-    )
-    private static let linkedImageRestorePattern = try! NSRegularExpression(
-        pattern: #"(!\[[^\]\n]{0,200}\]\([^()\[\]\s]{1,1024}\))"# + String(linkedImageMark) + #"\["# + String(mark)
-            + #"?\]\(([^)\s]{1,1024})\)"#
-    )
     // A hidden spoiler's placeholder that ended up as text, inside a link's label or a code span.
     private static let nestedSpoilerPattern = try! NSRegularExpression(pattern: #"<?lurk-spoiler:(\d+)>?"#)
     private static let bareURLPattern = try! NSRegularExpression(pattern: #"https?://[^\s)"]+"#)
@@ -66,13 +59,15 @@ enum RedditMarkdown {
         var hidden: Set<Int> = []
         let source = markedSource(text, revealedSpoilers: revealedSpoilers, hidden: &hidden)
         // Hidden spoilers stay hidden in every fallback.
-        let visibleText = CommentSpoilers.selectionText(from: text, revealed: revealedSpoilers)
-            .trimmingCharacters(in: .whitespacesAndNewlines)
+        func visibleText() -> String {
+            CommentSpoilers.selectionText(from: text, revealed: revealedSpoilers).trimmingCharacters(in: .whitespacesAndNewlines)
+        }
         guard let parsed = try? AttributedString(
             markdown: source,
             options: .init(interpretedSyntax: .full, failurePolicy: .returnPartiallyParsedIfPossible)
         ) else {
-            return visibleText.isEmpty ? [] : [.paragraph(AttributedString(visibleText))]
+            let visible = visibleText()
+            return visible.isEmpty ? [] : [.paragraph(AttributedString(visible))]
         }
         let root = Node(intent: nil)
         var looseParagraph: (container: [PresentationIntent.IntentType], identity: Int)?
@@ -97,8 +92,9 @@ enum RedditMarkdown {
         limitInlineGIFs(&blocks)
         // A body that parses to nothing, such as a lone "-" or "#", shows as written; one that parses to
         // only spaces, such as "&nbsp;", shows nothing.
-        if blocks.isEmpty, parsed.characters.isEmpty, !visibleText.isEmpty {
-            return [.paragraph(AttributedString(visibleText))]
+        if blocks.isEmpty, parsed.characters.isEmpty {
+            let visible = visibleText()
+            return visible.isEmpty ? [] : [.paragraph(AttributedString(visible))]
         }
         return blocks
     }
@@ -135,23 +131,83 @@ enum RedditMarkdown {
             }
             source += piece
         }
-        source = linkedImagePattern.stringByReplacingMatches(
-            in: source, range: NSRange(source.startIndex..., in: source),
-            withTemplate: "$1" + String(linkedImageMark) + "[" + String(mark) + "]($2)"
-        )
+        source = splittingLinkedImages(source)
         // An empty-text link, "[](url)", gets text to show; its address replaces it after parsing.
         source = source.replacingOccurrences(of: #"(?<!!)\[\]\("#, with: "[" + String(mark) + "](", options: .regularExpression)
         // Foundation reads "^[text](url)" as its attribute syntax and drops the link; on Reddit it's a caret
         // and a link.
         source = source.replacingOccurrences(of: "^[", with: "^" + String(mark) + "[")
-        for match in giphyPattern.matches(in: source, range: NSRange(source.startIndex..., in: source)).reversed() {
+        // One forward pass, so many embeds don't each shift the rest of the body.
+        var piped = ""
+        var copied = source.startIndex
+        for match in giphyPattern.matches(in: source, range: NSRange(source.startIndex..., in: source)) {
             guard let range = Range(match.range, in: source) else { continue }
-            source.replaceSubrange(range, with: source[range].replacingOccurrences(of: "|", with: String(pipeMark)))
+            piped += source[copied..<range.lowerBound]
+            piped += source[range].replacingOccurrences(of: "|", with: String(pipeMark))
+            copied = range.upperBound
         }
+        source = piped + source[copied...]
         source = markingHTMLLines(source)
         return compactHeadingPattern.stringByReplacingMatches(
             in: source, range: NSRange(source.startIndex..., in: source), withTemplate: "$1 " + String(headingMark)
         )
+    }
+
+    // Rewrites "[![alt](image)](page)" as "<start>![alt](image)<split>[<mark>](page)", the image and a link
+    // to the page, since Foundation flattens an image inside a link. In code, <start> becomes "[" again and
+    // "<split>[<mark>" goes. One forward scan: a failed match resumes where it failed, so each character is
+    // read at most twice, whatever the lengths.
+    private static func splittingLinkedImages(_ source: String) -> String {
+        guard source.contains("[![") else { return source }
+        let characters = Array(source)
+        var result = ""
+        var copied = 0
+        var index = 0
+        while index + 2 < characters.count {
+            guard characters[index] == "[", characters[index + 1] == "!", characters[index + 2] == "[" else {
+                index += 1
+                continue
+            }
+            var cursor = index + 3
+            while cursor < characters.count, !"[]\n".contains(characters[cursor]) { cursor += 1 }
+            guard cursor + 1 < characters.count, characters[cursor] == "]", characters[cursor + 1] == "(" else {
+                index = max(cursor, index + 1)
+                continue
+            }
+            cursor += 2
+            let imageStart = cursor
+            while cursor < characters.count, characters[cursor] != ")", !characters[cursor].isWhitespace { cursor += 1 }
+            guard cursor > imageStart, cursor + 2 < characters.count,
+                  characters[cursor] == ")", characters[cursor + 1] == "]", characters[cursor + 2] == "(" else {
+                index = max(cursor, index + 1)
+                continue
+            }
+            let imageEnd = cursor + 1
+            cursor += 3
+            let pageStart = cursor
+            var depth = 0
+            while cursor < characters.count, !characters[cursor].isWhitespace {
+                if characters[cursor] == "(" {
+                    depth += 1
+                } else if characters[cursor] == ")" {
+                    if depth == 0 { break }
+                    depth -= 1
+                }
+                cursor += 1
+            }
+            guard cursor > pageStart, cursor < characters.count, characters[cursor] == ")" else {
+                index = max(cursor, index + 1)
+                continue
+            }
+            result += String(characters[copied..<index])
+            result.append(linkedImageStartMark)
+            result += String(characters[(index + 1)..<imageEnd])
+            result += String(linkedImageMark) + "[" + String(mark) + "]("
+            result += String(characters[pageStart..<cursor]) + ")"
+            index = cursor + 1
+            copied = index
+        }
+        return result + String(characters[copied...])
     }
 
     // A line starting with "<", after any quote markers, gets a mark: CommonMark could open an HTML block
@@ -181,16 +237,15 @@ enum RedditMarkdown {
 
     // Removes the marks, restoring the text as written.
     private static func unmarked(_ text: String) -> String {
-        guard text.contains(where: { $0 == mark || $0 == pipeMark || $0 == headingMark || $0 == linkedImageMark }) else {
+        guard text.contains(where: { [mark, pipeMark, headingMark, linkedImageMark, linkedImageStartMark].contains($0) }) else {
             return text
         }
-        var text = text
-        if text.contains(linkedImageMark) {
-            text = linkedImageRestorePattern.stringByReplacingMatches(
-                in: text, range: NSRange(text.startIndex..., in: text), withTemplate: "[$1]($2)"
-            )
-        }
+        // Code holds a split linked image whole; parsed text has its pieces in separate runs.
+        let split = String(linkedImageMark) + "[" + String(mark)
+        let isWholeLinkedImage = text.contains(split)
         return text
+            .replacingOccurrences(of: split, with: "")
+            .replacingOccurrences(of: String(linkedImageStartMark), with: isWholeLinkedImage ? "[" : "")
             .replacingOccurrences(of: String(linkedImageMark), with: "")
             .replacingOccurrences(of: " " + String(headingMark), with: "")
             .replacingOccurrences(of: String(headingMark), with: "")
@@ -206,6 +261,7 @@ enum RedditMarkdown {
             .replacingOccurrences(of: "%EE%80%83", with: "")
             .replacingOccurrences(of: "%EE%80%80", with: "")
             .replacingOccurrences(of: "%EE%80%84", with: "")
+            .replacingOccurrences(of: "%EE%80%85", with: "")
             .replacingOccurrences(of: "%EE%80%81", with: "%7C")
         return URL(string: restored) ?? url
     }
