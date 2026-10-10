@@ -272,6 +272,10 @@ struct RedditMarkdownTests {
         // A title that closes on the next linked image's own title doesn't hide that image either.
         #expect(outline("[![a](https://i.imgur.com/a.png \"t)](https://p.com/x) and [![b](https://i.imgur.com/b.png \"w\")](https://q.com/y) end")
             .hasSuffix("IMG(https://i.imgur.com/b.png) P([https://q.com/y](https://q.com/y) end)"))
+        for prefix in ["`[![a](<`", "`[![a](i)](<x`"] {
+            #expect(outline("\(prefix) [![b](https://example.com/b.png)](https://example.com/page) >")
+                == "P(\(prefix)) IMG(https://example.com/b.png) P([https://example.com/page](https://example.com/page) >)")
+        }
         for prefix in ["`[![a]((x)](y)`", "`[![a](i)](x(y)`"] {
             for opener in ["\"", "'", "("] {
                 #expect(outline("\(prefix)[![b](https://example.com/b.png)](https://example.com/page) \(opener)")
@@ -293,6 +297,9 @@ struct RedditMarkdownTests {
         #expect(outline(">!a\n!<- b", revealed: [0]) == "P(a⏎- b)")
         #expect(outline("> >!a\n> !<- b", revealed: [0]) == "Q[P(a⏎- b)]")
         #expect(outline("x >!a\n1.!< b", revealed: [0]) == "P(x a⏎1. b)")
+        // Block syntax before the spoiler on its line still can't join with what it reveals.
+        #expect(outline("#>!#1 pick!<", revealed: [0]) == "H1(#1 pick)")
+        #expect(outline("->!    secret!<", revealed: [0]) == "P(-    secret)")
         // Lines between ">!" and "!<" are ordinary lines on Reddit, where these spoilers don't even form.
         #expect(outline(">!\n# secret!<") == "SPOILER(0)")
         #expect(outline(">!\n# secret!<", revealed: [0]) == "H1(secret)")

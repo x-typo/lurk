@@ -111,6 +111,11 @@ enum RedditMarkdown {
         var source = ""
         // A revealed spoiler that ends at a line break leaves "!<" at the start of the next line on Reddit.
         var nextLineFollowsSpoiler = false
+        // Whether the current line holds anything but whitespace and block syntax ("#", "- ", "1.", "> ").
+        var lineHasContent = false
+        func isContent(_ character: Character) -> Bool {
+            !(character.isWhitespace || "#-+*=_.)>0123456789".contains(character) || character == mark)
+        }
         for part in CommentSpoilers.parse(text) {
             var piece: String
             switch part {
@@ -120,10 +125,9 @@ enum RedditMarkdown {
             case .spoiler(let id, let content) where revealedSpoilers.contains(id):
                 // On Reddit, ">!" sits before a spoiler's first line and "!<" after its last, so the first
                 // can't open a block, and the last can't underline a heading, draw a rule, or be a bare list
-                // marker. Lines between them are ordinary lines there too. A mark goes only where a block
-                // could start: glued to "**" or "_", it would stop that emphasis closing or opening.
-                let startsLine = source.last.map { $0.isWhitespace || $0 == ">" } ?? true
-                piece = startsLine && opensBlock(content) ? String(mark) + content : content
+                // marker. Lines between them are ordinary lines there too. A mark goes only where the line
+                // holds no content yet: after "**Source:**", it would stop that emphasis closing.
+                piece = !lineHasContent && opensBlock(content) ? String(mark) + content : content
                 nextLineFollowsSpoiler = false
                 if let lastBreak = content.lastIndex(of: "\n") {
                     let lastLine = content[content.index(after: lastBreak)...]
@@ -149,6 +153,11 @@ enum RedditMarkdown {
                 source.append(mark)
             }
             source += piece
+            if let lastBreak = piece.lastIndex(of: "\n") {
+                lineHasContent = piece[piece.index(after: lastBreak)...].contains(where: isContent)
+            } else if !lineHasContent {
+                lineHasContent = piece.contains(where: isContent)
+            }
         }
         source = splittingLinkedImages(source)
         // An empty-text link, "[](url)", gets text to show; its address replaces it after parsing.
@@ -215,7 +224,7 @@ enum RedditMarkdown {
             var cursor = start
             if cursor < characters.count, characters[cursor] == "<" {
                 cursor += 1
-                while cursor < characters.count, !"<>\n".contains(characters[cursor]) { cursor = step(cursor) }
+                while cursor < characters.count, !"<>\n".contains(characters[cursor]), !startsLinkedImage(at: cursor) { cursor = step(cursor) }
                 guard cursor < characters.count, characters[cursor] == ">" else { return .unclosed(resume: start) }
                 cursor += 1
             } else {
