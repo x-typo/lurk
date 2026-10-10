@@ -118,12 +118,14 @@ enum RedditMarkdown {
         func isContent(_ character: Character) -> Bool {
             !(character.isWhitespace || "#-+*=_.)>|:`~0123456789".contains(character) || character == mark)
         }
-        // Whether the source ends with an emphasis closer, the "_" of "_1_" or "**" of "**1.**", which a mark
-        // right after it would stop closing.
+        // Whether the source ends with an emphasis or strikethrough closer, the "_" of "_1_", "**" of "**1.**",
+        // or "~~" of "~~1.~~", which a mark right after it would stop closing. Closers are at most three long,
+        // so this looks back four characters at most.
         func endsWithEmphasisCloser() -> Bool {
-            guard let last = source.last, last == "*" || last == "_" else { return false }
-            let beforeRun = source[..<source.endIndex].reversed().drop { $0 == last }.first
-            return beforeRun.map { !$0.isWhitespace } ?? false
+            guard let last = source.last, "*_~".contains(last) else { return false }
+            let tail = Array(source.suffix(4).reversed())
+            let run = tail.prefix { $0 == last }.count
+            return run < tail.count && run < 4 && !tail[run].isWhitespace
         }
         for part in CommentSpoilers.parse(text) {
             var piece: String
@@ -209,7 +211,7 @@ enum RedditMarkdown {
         let rest = line.dropFirst(indent.count)
         guard let first = rest.first else { return false }
         if indent.count >= 4 || indent.contains("\t") { return true }
-        if "#-+*>=[".contains(first) || (first.isASCII && first.isNumber) { return true }
+        if "#-+*>=[|:".contains(first) || (first.isASCII && first.isNumber) { return true }
         if rest.hasPrefix("```") || rest.hasPrefix("~~~") { return true }
         return rest.allSatisfy { $0 == "_" || $0 == " " || $0 == "\t" } && rest.filter { $0 == "_" }.count >= 3
     }

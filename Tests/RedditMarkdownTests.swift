@@ -303,6 +303,9 @@ struct RedditMarkdownTests {
         #expect(outline("->! secret!<", revealed: [0]) == "P(- secret)")
         let table = outline("A | B\n| >!---!< | --- |\na | b | lost", revealed: [0])
         #expect(table.contains("lost") && !table.contains("TABLE"), "\(table)")
+        let aligned = outline("A|B\n| >!:---!< | --- |\na|b|lost", revealed: [0])
+        #expect(aligned.contains("lost") && !aligned.contains("TABLE"), "\(aligned)")
+        #expect(emphasized("~~1.~~>![x](https://example.com)!<", revealed: [0], intent: .strikethrough) == ["1."])
         #expect(emphasized("- >!_it_ y!<", revealed: [0]) == ["it"])
         #expect(emphasized("_1_>![x](https://example.com)!<", revealed: [0]) == ["1"])
         #expect(emphasized("**1.**>![x](https://example.com)!<", revealed: [0], intent: .stronglyEmphasized) == ["1."])
@@ -360,6 +363,12 @@ struct RedditMarkdownTests {
             // Rescanning took 0.9 to 4.6 s at these sizes; linear passes take well under a second in Debug.
             #expect(elapsed < .seconds(1), "\(unit) ×\(count) took \(elapsed)")
         }
+        // Many revealed spoilers, each checking for an emphasis closer before it.
+        let revealedRun = "-*" + String(repeating: ">!*!<", count: 8000)
+        let revealedElapsed = ContinuousClock().measure {
+            _ = RedditMarkdown.blocks(from: revealedRun, revealedSpoilers: Set(0..<8000))
+        }
+        #expect(revealedElapsed < .seconds(1), "revealed spoiler run took \(revealedElapsed)")
         // Many nested addresses sharing one title that never closes.
         for opener in ["\"", "'", "("] {
             let body = String(repeating: "[![a](x", count: 8000) + " " + opener
