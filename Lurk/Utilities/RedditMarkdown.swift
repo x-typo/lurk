@@ -160,6 +160,12 @@ enum RedditMarkdown {
     private static func splittingLinkedImages(_ source: String) -> String {
         guard source.contains("[![") else { return source }
         let characters = Array(source)
+        // A backslash escape, such as "\[" or "\(", reads as one ordinary character.
+        func step(_ cursor: Int) -> Int {
+            let isEscape = characters[cursor] == "\\" && cursor + 1 < characters.count
+                && ##"!"#$%&'()*+,-./:;<=>?@[\]^_`{|}~"##.contains(characters[cursor + 1])
+            return cursor + (isEscape ? 2 : 1)
+        }
         var result = ""
         var copied = 0
         var index = 0
@@ -169,14 +175,14 @@ enum RedditMarkdown {
                 continue
             }
             var cursor = index + 3
-            while cursor < characters.count, !"[]\n".contains(characters[cursor]) { cursor += 1 }
+            while cursor < characters.count, !"[]\n".contains(characters[cursor]) { cursor = step(cursor) }
             guard cursor + 1 < characters.count, characters[cursor] == "]", characters[cursor + 1] == "(" else {
                 index = max(cursor, index + 1)
                 continue
             }
             cursor += 2
             let imageStart = cursor
-            while cursor < characters.count, characters[cursor] != ")", !characters[cursor].isWhitespace { cursor += 1 }
+            while cursor < characters.count, characters[cursor] != ")", !characters[cursor].isWhitespace { cursor = step(cursor) }
             guard cursor > imageStart, cursor + 2 < characters.count,
                   characters[cursor] == ")", characters[cursor + 1] == "]", characters[cursor + 2] == "(" else {
                 index = max(cursor, index + 1)
@@ -193,7 +199,7 @@ enum RedditMarkdown {
                     if depth == 0 { break }
                     depth -= 1
                 }
-                cursor += 1
+                cursor = step(cursor)
             }
             guard cursor > pageStart, cursor < characters.count, characters[cursor] == ")" else {
                 index = max(cursor, index + 1)

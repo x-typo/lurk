@@ -229,6 +229,11 @@ struct RedditMarkdownTests {
         #expect(outline("[![a](https://i.imgur.com/t.png)](https://en.wikipedia.org/wiki/Foo_(bar))")
             == "IMG(https://i.imgur.com/t.png) P([https://en.wikipedia.org/wiki/Foo_(bar)](https://en.wikipedia.org/wiki/Foo_(bar)))")
         #expect(outline("```\n[![](https://e.com/p.jpg?s[]=1)](https://e.com/s)\n```") == "CODE([![](https://e.com/p.jpg?s[]=1)](https://e.com/s))")
+        // Backslash escapes in the alt text or page address don't end the scan.
+        #expect(outline("[![a \\[b](https://i.imgur.com/t.png)](https://example.com/p)")
+            == "IMG(https://i.imgur.com/t.png) P([https://example.com/p](https://example.com/p))")
+        #expect(outline("[![a](https://i.imgur.com/t.png)](https://example.com/p\\(x)")
+            .hasPrefix("IMG(https://i.imgur.com/t.png) P("))
     }
 
     @Test("Long runs of linked images, giphy embeds, and fence-like runs parse in linear time")
