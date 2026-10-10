@@ -398,6 +398,32 @@ struct RedditMarkdownTests {
         #expect(elapsed < .seconds(1))
     }
 
+    @Test("A table too large to lay out shows as text rows, alone or across a body")
+    func tableBudget() {
+        let sparse = String(repeating: "a|", count: 400) + "\n" + String(repeating: "-|", count: 400) + "\n"
+            + String(repeating: "x|\n", count: 400)
+        let elapsed = ContinuousClock().measure { #expect(outline(sparse).hasPrefix("P(a | a | ")) }
+        #expect(elapsed < .seconds(1), "sparse table took \(elapsed)")
+        // 20 columns by 60 rows is 1,220 cells; the third such table passes the body's 3,000.
+        let table = String(repeating: "h|", count: 20) + "\n" + String(repeating: "-|", count: 20) + "\n"
+            + String(repeating: String(repeating: "c|", count: 20) + "\n", count: 60)
+        let outlines = outline([table, table, table].joined(separator: "\n\n"))
+        #expect(outlines.components(separatedBy: "TABLE(").count == 3)
+        #expect(outlines.contains("P(h | h | "))
+        #expect(outline("x|y\n-|-\n[a](https://example.com/a)|b") == "TABLE(x|y / [a](https://example.com/a)|b)")
+    }
+
+    @Test("A literal capitulum, the character standing in for >! and !<, stays in text, code, and links")
+    func literalDelimiter() {
+        #expect(outline("`a⸿b` and [capitulum](https://example.com/wiki/%E2%B8%BF) ⸿")
+            == "P(`a⸿b` and [capitulum](https://example.com/wiki/%E2%B8%BF) ⸿)")
+        #expect(outline("[c](https://example.com/wiki/⸿) >!x⸿y!<", revealed: [0])
+            == "P([c](https://example.com/wiki/%E2%B8%BF) x⸿y)")
+        // A revealed spoiler inside an explicit link's label keeps the link's own target.
+        #expect(outline("[https://label.example/>!secret!<](https://target.example/page)", revealed: [0])
+            == "P([https://label.example/secret](https://target.example/page))")
+    }
+
     @Test("A body that parses to nothing shows as written")
     func loneMarkers() {
         for marker in ["-", "#", "2."] {

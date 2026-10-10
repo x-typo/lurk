@@ -48,6 +48,8 @@ enum RedditMarkdown {
     // punctuation (U+2E3F CAPITULUM), as those delimiters are on Reddit, so emphasis beside it closes and
     // opens as it does there.
     private static let delimiterMark: Character = "\u{2E3F}"
+    // A capitulum the body itself holds, kept apart from the injected ones until they're gone.
+    private static let literalDelimiterMark: Character = "\u{E006}"
 
     // A top-level "#Title" line, which Reddit makes a heading and CommonMark doesn't. A line with a pipe
     // may be a table row, such as "#|Episode", so it's left alone.
@@ -94,6 +96,7 @@ enum RedditMarkdown {
         }
         var blocks = lifted(root.children.compactMap(\.block), hidden: hidden, liftsMedia: true)
         limitInlineGIFs(&blocks)
+        limitTableCells(&blocks)
         // A body that parses to nothing, such as a lone "-" or "#", shows as written; one that parses to
         // only spaces, such as "&nbsp;", shows nothing.
         if blocks.isEmpty, parsed.characters.isEmpty {
@@ -113,6 +116,7 @@ enum RedditMarkdown {
 
     private static func markedSource(_ text: String, revealedSpoilers: Set<Int>, hidden: inout Set<Int>) -> String {
         var source = ""
+        let text = text.replacingOccurrences(of: String(delimiterMark), with: String(literalDelimiterMark))
         for part in CommentSpoilers.parse(text) {
             switch part {
             case .text(let text):
@@ -296,7 +300,8 @@ enum RedditMarkdown {
 
     // Removes the marks, restoring the text as written.
     private static func unmarked(_ text: String) -> String {
-        guard text.contains(where: { [mark, pipeMark, headingMark, linkedImageMark, linkedImageStartMark, delimiterMark].contains($0) }) else {
+        let marks = [mark, pipeMark, headingMark, linkedImageMark, linkedImageStartMark, delimiterMark, literalDelimiterMark]
+        guard text.contains(where: marks.contains) else {
             return text
         }
         // Code holds a split linked image whole; parsed text has its pieces in separate runs.
@@ -310,19 +315,20 @@ enum RedditMarkdown {
             .replacingOccurrences(of: String(headingMark), with: "")
             .replacingOccurrences(of: String(mark), with: "")
             .replacingOccurrences(of: String(delimiterMark), with: "")
+            .replacingOccurrences(of: String(literalDelimiterMark), with: String(delimiterMark))
             .replacingOccurrences(of: String(pipeMark), with: "|")
     }
 
     private static func unmarked(_ url: URL) -> URL {
         let text = url.absoluteString
-        guard text.contains("%EE%80%8") || text.contains("%E2%B8%BF") else { return url }
+        guard text.contains("%EE%80%8") else { return url }
         let restored = text
             .replacingOccurrences(of: "%20%EE%80%83", with: "")
             .replacingOccurrences(of: "%EE%80%83", with: "")
             .replacingOccurrences(of: "%EE%80%80", with: "")
             .replacingOccurrences(of: "%EE%80%84", with: "")
             .replacingOccurrences(of: "%EE%80%85", with: "")
-            .replacingOccurrences(of: "%E2%B8%BF", with: "")
+            .replacingOccurrences(of: "%EE%80%86", with: "%E2%B8%BF")
             .replacingOccurrences(of: "%EE%80%81", with: "%7C")
         return URL(string: restored) ?? url
     }
@@ -371,8 +377,9 @@ enum RedditMarkdown {
         for run in content.runs {
             let runText = String(content[run.range].characters)
             let lowered = runText.lowercased()
-            if run.link != nil, let cut = runText.firstIndex(of: delimiterMark), cut != runText.startIndex,
-               ["http://", "https://", "www."].contains(where: lowered.hasPrefix) {
+            if let link = run.link, let cut = runText.firstIndex(of: delimiterMark), cut != runText.startIndex,
+               ["http://", "https://", "www."].contains(where: lowered.hasPrefix),
+               URL(string: lowered.hasPrefix("www.") ? "http://" + runText : runText) == link {
                 let address = String(runText[..<cut])
                 var linked = AttributedString(address, attributes: run.attributes)
                 linked.link = URL(string: lowered.hasPrefix("www.") ? "http://" + address : address)
@@ -740,6 +747,45 @@ enum RedditMarkdown {
     }
 
     // The first GIF in reading order plays inline; later ones become links.
+    // Tables past these bounds, in one table or across a body, show as text rows instead.
+    static let maxTableColumns = 24
+    static let maxTableCells = 1_500
+    static let maxBodyTableCells = 3_000
+
+    static func tableText(_ rows: [[AttributedString]]) -> AttributedString {
+        var text = AttributedString()
+        for (index, row) in rows.enumerated() {
+            if index > 0 { text += AttributedString("\n") }
+            for (column, cell) in row.enumerated() {
+                if column > 0 { text += AttributedString(" | ") }
+                text += cell
+            }
+        }
+        return text
+    }
+
+    private static func limitTableCells(_ blocks: inout [MarkdownBlock]) {
+        var budget = maxBodyTableCells
+        func visit(_ blocks: [MarkdownBlock]) -> [MarkdownBlock] {
+            blocks.map { block in
+                switch block {
+                case .table(let table):
+                    let cells = (table.rows.count + 1) * table.alignments.count
+                    guard cells <= budget else { return .paragraph(tableText([table.header] + table.rows)) }
+                    budget -= cells
+                    return block
+                case .quote(let inner):
+                    return .quote(visit(inner))
+                case .list(let ordered, let items):
+                    return .list(ordered: ordered, items: items.map { MarkdownListItem(ordinal: $0.ordinal, blocks: visit($0.blocks)) })
+                default:
+                    return block
+                }
+            }
+        }
+        blocks = visit(blocks)
+    }
+
     private static func limitInlineGIFs(_ blocks: inout [MarkdownBlock]) {
         var seenGIF = false
         func visit(_ blocks: [MarkdownBlock]) -> [MarkdownBlock] {
@@ -809,6 +855,11 @@ enum RedditMarkdown {
             case .thematicBreak:
                 return .rule
             case .table(let columns):
+                // Grid builds every cell up front, and a short body of pipes can ask for a vast sparse table.
+                guard columns.count <= RedditMarkdown.maxTableColumns,
+                      columns.count * children.count <= RedditMarkdown.maxTableCells else {
+                    return .paragraph(RedditMarkdown.tableText(children.map { $0.children.map(\.content) }))
+                }
                 var header: [AttributedString] = []
                 var rows: [[AttributedString]] = []
                 for row in children {
