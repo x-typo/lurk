@@ -159,6 +159,49 @@ struct RedditMarkdownTests {
         #expect(outline("Look!>![here](https://example.com/page)!<", revealed: [0]) == "P(Look![here](https://example.com/page))")
     }
 
+    @Test("Regressions from the sweep of the redesign against main stay fixed")
+    func redesignSweep() {
+        // A spoiler inside a link's label or a stray code span can still be revealed.
+        #expect(outline("Read [the thread >!where he dies!<](https://redd.it/abc) after")
+            == "P(Read [the thread](https://redd.it/abc)) SPOILER(0) P(after)")
+        #expect(outline("[>!only!<](https://example.com/o)") == "SPOILER(0)")
+        #expect(outline("A|B\n-|-\n[cell >!x!<](https://example.com/c)|y")
+            == "TABLE(A|B / [cell ](https://example.com/c)[Spoiler](lurk-spoiler:0)|y)")
+        #expect(outline("Press the ` key.\n\nThen type `god >!it makes you invincible!< ` and enter.")
+            == "P(Press the ` key.) P(Then type `god`) SPOILER(0) P(and enter.)")
+        // A bare URL ends at any space and leaves closing punctuation as prose.
+        #expect(outline("He said “https://example.com/page” and 参考https://example.com/page。 ok")
+            == "P(He said “[https://example.com/page](https://example.com/page)” and 参考[https://example.com/page](https://example.com/page)。 ok)")
+        #expect(outline("画像 https://i.imgur.com/a.png\u{3000}かわいい") == "P(画像) IMG(https://i.imgur.com/a.png) P(かわいい)")
+        #expect(outline("see https://example.com/page\u{00A0}and more")
+            == "P(see [https://example.com/page](https://example.com/page)\u{00A0}and more)")
+        #expect(outline("https://en.wikipedia.org/wiki/Foo_(bar)")
+            == "P([https://en.wikipedia.org/wiki/Foo_(bar)](https://en.wikipedia.org/wiki/Foo_(bar)))")
+        // A URL after an unclosed "[" still links, and a media one embeds.
+        #expect(outline("sad :[ see https://example.com/page") == "P(sad :[ see [https://example.com/page](https://example.com/page))")
+        #expect(outline("[Source: https://i.imgur.com/s.jpg]") == "P([Source:) IMG(https://i.imgur.com/s.jpg) P(])")
+        // Linked images keep the image, and empty-text links show their address; code keeps its bytes.
+        #expect(outline("Poster: [![](https://i.imgur.com/p.jpg)](https://example.com/show) nice")
+            == "P(Poster:) IMG(https://i.imgur.com/p.jpg) P([https://example.com/show](https://example.com/show) nice)")
+        #expect(outline("Look [](https://i.imgur.com/a.png) and [](https://example.com/page) more")
+            == "P(Look) IMG(https://i.imgur.com/a.png) P(and [https://example.com/page](https://example.com/page) more)")
+        #expect(outline("* ![](https://i.imgur.com/q.jpg)") == "UL[1:P([https://i.imgur.com/q.jpg](https://i.imgur.com/q.jpg))]")
+        #expect(outline("```\n[![img](https://i.imgur.com/t.png)](https://example.com/full)\n[](x)\n<div>\n```")
+            == "CODE([![img](https://i.imgur.com/t.png)](https://example.com/full)⏎[](x)⏎<div>)")
+        // A revealed spoiler glued to a word or URL keeps its media.
+        #expect(outline("Here>!https://i.redd.it/a.png!<", revealed: [0]) == "P(Here) IMG(https://i.redd.it/a.png)")
+        #expect(outline(">!x!<https://i.redd.it/a.gif", revealed: [0]) == "P(x) GIF(https://i.redd.it/a.gif)")
+        // Media in a heading lifts out of it.
+        #expect(outline("## Look at this https://i.redd.it/a.gif") == "H2(Look at this) GIF(https://i.redd.it/a.gif)")
+        // A tag-only line is text, so it can't swallow the quote or heading below it.
+        #expect(outline("<rant>\n# Why I quit\n</rant>") == "P(<rant>) H1(Why I quit) P(</rant>)")
+        #expect(outline("<rant>\nI hate this\n</rant>\n\n<edit>\nfixed typo\n</edit>")
+            == "P(<rant>⏎I hate this⏎</rant>) P(<edit>⏎fixed typo⏎</edit>)")
+        #expect(outline("<sarcasm>\n> Nobody could have predicted this").hasPrefix("P(<sarcasm>) Q["))
+        // A body of only spaces, such as "&nbsp;", shows nothing.
+        #expect(outline("&nbsp;").isEmpty)
+    }
+
     @Test("A body that parses to nothing shows as written")
     func loneMarkers() {
         for marker in ["-", "#", "2."] {

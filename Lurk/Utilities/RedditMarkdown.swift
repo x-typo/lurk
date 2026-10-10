@@ -40,11 +40,24 @@ enum RedditMarkdown {
     private static let pipeMark: Character = "\u{E001}"
     // Follows the space added after a "#Title" heading's hashes, so code can drop that space again.
     private static let headingMark: Character = "\u{E003}"
+    // Sits between a linked image, "[![alt](image)](page)", split into the image and a link to the page.
+    private static let linkedImageMark: Character = "\u{E004}"
 
     // A top-level "#Title" line, which Reddit makes a heading and CommonMark doesn't. A line with a pipe
     // may be a table row, such as "#|Episode", so it's left alone.
     private static let compactHeadingPattern = try! NSRegularExpression(pattern: #"(?m)^( {0,3}#{1,6})(?=[^#\s])(?![^\n]*\|)"#)
     private static let giphyPattern = try! NSRegularExpression(pattern: #"!\[gif\]\(giphy\|[^)\s]*\)"#, options: .caseInsensitive)
+    // Foundation flattens an image inside a link, losing the image.
+    private static let linkedImagePattern = try! NSRegularExpression(pattern: #"\[(!\[[^\]\n]*\]\([^)\s]+\))\]\(([^)\s]+)\)"#)
+    private static let linkedImageRestorePattern = try! NSRegularExpression(
+        pattern: #"(!\[[^\]\n]*\]\([^)\s]+\))"# + String(linkedImageMark) + #"\["# + String(mark) + #"?\]\(([^)\s]+)\)"#
+    )
+    // A line starting with "<", which CommonMark may start an HTML block on. Reddit shows HTML as text, and
+    // an HTML block would swallow the quote or heading below it.
+    private static let htmlLinePattern = try! NSRegularExpression(pattern: #"(?m)^((?:[ \t]{0,3}>[ \t]?)*[ \t]{0,3})(?=<)"#)
+    // A hidden spoiler's placeholder that ended up as text, inside a link's label or a code span.
+    private static let nestedSpoilerPattern = try! NSRegularExpression(pattern: #"<?lurk-spoiler:(\d+)>?"#)
+    private static let bareURLPattern = try! NSRegularExpression(pattern: #"https?://[^\s)"]+"#)
     private static let imageExtensions = ["jpg", "jpeg", "png", "gif", "webp"]
 
     static func blocks(from text: String, revealedSpoilers: Set<Int> = []) -> [MarkdownBlock] {
@@ -80,8 +93,9 @@ enum RedditMarkdown {
         }
         var blocks = lifted(root.children.compactMap(\.block), hidden: hidden, liftsMedia: true)
         limitInlineGIFs(&blocks)
-        // A body that parses to nothing, such as a lone "-" or "#", shows as written.
-        if blocks.isEmpty, !visibleText.isEmpty {
+        // A body that parses to nothing, such as a lone "-" or "#", shows as written; one that parses to
+        // only spaces, such as "&nbsp;", shows nothing.
+        if blocks.isEmpty, parsed.characters.isEmpty, !visibleText.isEmpty {
             return [.paragraph(AttributedString(visibleText))]
         }
         return blocks
@@ -112,11 +126,19 @@ enum RedditMarkdown {
                 hidden.insert(id)
                 piece = "<\(spoilerScheme):\(id)>"
             }
-            if source.hasSuffix("!"), piece.hasPrefix("[") {
+            // "!" before "[" would make an image, and a word glued to a revealed URL would stop it linking.
+            if let last = source.last, let first = piece.first,
+               (last == "!" && first == "[") || ((last.isLetter || last.isNumber) && (first.isLetter || first.isNumber)) {
                 source.append(mark)
             }
             source += piece
         }
+        source = linkedImagePattern.stringByReplacingMatches(
+            in: source, range: NSRange(source.startIndex..., in: source),
+            withTemplate: "$1" + String(linkedImageMark) + "[" + String(mark) + "]($2)"
+        )
+        // An empty-text link, "[](url)", gets text to show; its address replaces it after parsing.
+        source = source.replacingOccurrences(of: #"(?<!!)\[\]\("#, with: "[" + String(mark) + "](", options: .regularExpression)
         // Foundation reads "^[text](url)" as its attribute syntax and drops the link; on Reddit it's a caret
         // and a link.
         source = source.replacingOccurrences(of: "^[", with: "^" + String(mark) + "[")
@@ -124,6 +146,9 @@ enum RedditMarkdown {
             guard let range = Range(match.range, in: source) else { continue }
             source.replaceSubrange(range, with: source[range].replacingOccurrences(of: "|", with: String(pipeMark)))
         }
+        source = htmlLinePattern.stringByReplacingMatches(
+            in: source, range: NSRange(source.startIndex..., in: source), withTemplate: "$1" + String(mark)
+        )
         return compactHeadingPattern.stringByReplacingMatches(
             in: source, range: NSRange(source.startIndex..., in: source), withTemplate: "$1 " + String(headingMark)
         )
@@ -131,8 +156,17 @@ enum RedditMarkdown {
 
     // Removes the marks, restoring the text as written.
     private static func unmarked(_ text: String) -> String {
-        guard text.contains(where: { $0 == mark || $0 == pipeMark || $0 == headingMark }) else { return text }
+        guard text.contains(where: { $0 == mark || $0 == pipeMark || $0 == headingMark || $0 == linkedImageMark }) else {
+            return text
+        }
+        var text = text
+        if text.contains(linkedImageMark) {
+            text = linkedImageRestorePattern.stringByReplacingMatches(
+                in: text, range: NSRange(text.startIndex..., in: text), withTemplate: "[$1]($2)"
+            )
+        }
         return text
+            .replacingOccurrences(of: String(linkedImageMark), with: "")
             .replacingOccurrences(of: " " + String(headingMark), with: "")
             .replacingOccurrences(of: String(headingMark), with: "")
             .replacingOccurrences(of: String(mark), with: "")
@@ -146,6 +180,7 @@ enum RedditMarkdown {
             .replacingOccurrences(of: "%20%EE%80%83", with: "")
             .replacingOccurrences(of: "%EE%80%83", with: "")
             .replacingOccurrences(of: "%EE%80%80", with: "")
+            .replacingOccurrences(of: "%EE%80%84", with: "")
             .replacingOccurrences(of: "%EE%80%81", with: "%7C")
         return URL(string: restored) ?? url
     }
@@ -178,12 +213,69 @@ enum RedditMarkdown {
             content = AttributedString(slice)
             content.presentationIntent = nil
         }
+        // "[](url)", and an empty-alt image that stays a link, show their address.
+        var addressed = AttributedString()
+        for run in content.runs {
+            let runText = String(content[run.range].characters)
+            if runText == String(mark) || runText == "\u{FFFC}", let target = run.link ?? run.imageURL {
+                addressed += AttributedString(unmarked(target).absoluteString, attributes: run.attributes)
+            } else {
+                addressed += AttributedString(content[run.range])
+            }
+        }
+        content = addressed
         // "![clip](https://…)" keeps its target as a link; a media one is lifted out later.
         for (imageURL, range) in content.runs[\.imageURL].reversed() {
             guard let imageURL, content[range].link == nil, isWebURL(imageURL) else { continue }
             content[range].link = imageURL
         }
-        return unmarked(content)
+        return normalizedLinks(unmarked(content))
+    }
+
+    // An autolink ends at any space, including a no-break one, and leaves closing punctuation such as "”" or
+    // "。" as prose. A URL Foundation didn't link, such as one after an unclosed "[", is linked as before.
+    private static func normalizedLinks(_ text: AttributedString) -> AttributedString {
+        var result = AttributedString()
+        for run in text.runs {
+            let runText = String(text[run.range].characters)
+            if run.inlinePresentationIntent?.contains(.code) == true {
+                result += AttributedString(text[run.range])
+            } else if let link = run.link {
+                let cut = runText.firstIndex(where: \.isWhitespace) ?? runText.endIndex
+                let (address, punctuation) = splitTrailingPunctuation(from: String(runText[..<cut]))
+                guard isWebURL(link), URL(string: runText) == link, address != runText, let url = URL(string: address) else {
+                    result += AttributedString(text[run.range])
+                    continue
+                }
+                var linked = AttributedString(address, attributes: run.attributes)
+                linked.link = url
+                var rest = AttributedString(punctuation + runText[cut...], attributes: run.attributes)
+                rest.link = nil
+                result += linked + rest
+            } else {
+                result += linkedURLs(in: runText, attributes: run.attributes)
+            }
+        }
+        return result
+    }
+
+    private static func linkedURLs(in text: String, attributes: AttributeContainer) -> AttributedString {
+        var plain = attributes
+        plain.link = nil
+        let nsText = text as NSString
+        var result = AttributedString()
+        var last = 0
+        for match in bareURLPattern.matches(in: text, range: NSRange(location: 0, length: nsText.length)) {
+            let (address, _) = splitTrailingPunctuation(from: nsText.substring(with: match.range))
+            guard let url = URL(string: address) else { continue }
+            result += AttributedString(nsText.substring(with: NSRange(location: last, length: match.range.location - last)), attributes: plain)
+            var linked = AttributedString(address, attributes: plain)
+            linked.link = url
+            result += linked
+            last = match.range.location + (address as NSString).length
+        }
+        result += AttributedString(nsText.substring(from: last), attributes: plain)
+        return result
     }
 
     // MARK: Lifting
@@ -192,9 +284,9 @@ enum RedditMarkdown {
         blocks.flatMap { block -> [MarkdownBlock] in
             switch block {
             case .paragraph(let text):
-                return lifted(text, hidden: hidden, liftsMedia: liftsMedia)
+                return lifted(text, hidden: hidden, liftsMedia: liftsMedia, spoilersInline: false) { .paragraph($0) }
             case .heading(let level, let text):
-                return [.heading(level: level, inline(text, hidden: hidden))]
+                return lifted(text, hidden: hidden, liftsMedia: liftsMedia, spoilersInline: true) { .heading(level: level, $0) }
             case .quote(let blocks):
                 return [.quote(lifted(blocks, hidden: hidden, liftsMedia: liftsMedia))]
             case .list(let ordered, let items):
@@ -216,20 +308,29 @@ enum RedditMarkdown {
         }
     }
 
-    // Splits a paragraph around its hidden spoilers and, where blocks can sit, its images and GIFs.
-    private static func lifted(_ text: AttributedString, hidden: Set<Int>, liftsMedia: Bool) -> [MarkdownBlock] {
+    // Splits a paragraph or heading around its hidden spoilers and, where blocks can sit, its images and GIFs.
+    // In a heading a hidden spoiler stays an inline "Spoiler" link.
+    private static func lifted(
+        _ text: AttributedString, hidden: Set<Int>, liftsMedia: Bool, spoilersInline: Bool,
+        wrap: (AttributedString) -> MarkdownBlock
+    ) -> [MarkdownBlock] {
+        let text = separatingNestedSpoilers(text, hidden: hidden)
         var blocks: [MarkdownBlock] = []
         var pending = AttributedString()
         func flush() {
             let piece = trimmed(pending)
-            if !piece.characters.isEmpty { blocks.append(.paragraph(piece)) }
+            if !piece.characters.isEmpty { blocks.append(wrap(piece)) }
             pending = AttributedString()
         }
         for run in text.runs {
             let piece = AttributedString(text[run.range])
             if let id = hiddenSpoiler(run.link, hidden: hidden) {
-                flush()
-                blocks.append(.spoiler(id))
+                if spoilersInline {
+                    pending += linked(AttributedString("Spoiler"), to: run.link)
+                } else {
+                    flush()
+                    blocks.append(.spoiler(id))
+                }
             } else if run.inlinePresentationIntent?.contains(.code) == true {
                 pending += piece
             } else if let giphy = giphyURL(run.imageURL) {
@@ -254,6 +355,7 @@ enum RedditMarkdown {
     // Headings and table cells can't hold blocks: a hidden spoiler stays an inline "Spoiler" link that
     // reveals it, and a giphy embed links to its GIF.
     private static func inline(_ text: AttributedString, hidden: Set<Int>) -> AttributedString {
+        let text = separatingNestedSpoilers(text, hidden: hidden)
         var result = AttributedString()
         for run in text.runs {
             let piece = AttributedString(text[run.range])
@@ -263,6 +365,38 @@ enum RedditMarkdown {
                 result += linked(piece, to: giphy)
             } else {
                 result += piece
+            }
+        }
+        return result
+    }
+
+    // A hidden spoiler inside a link's label can't be a link of its own, so Foundation leaves its placeholder
+    // as text in the outer link; one in a code span CommentSpoilers paired differently stays raw. Either
+    // becomes its own spoiler link again, and the text around it keeps its link.
+    private static func separatingNestedSpoilers(_ text: AttributedString, hidden: Set<Int>) -> AttributedString {
+        guard !hidden.isEmpty, String(text.characters).contains("\(spoilerScheme):") else { return text }
+        var result = AttributedString()
+        for run in text.runs {
+            let runText = String(text[run.range].characters)
+            let nsText = runText as NSString
+            var pieces = AttributedString()
+            var last = 0
+            if hiddenSpoiler(run.link, hidden: hidden) == nil {
+                for match in nestedSpoilerPattern.matches(in: runText, range: NSRange(location: 0, length: nsText.length)) {
+                    guard let id = Int(nsText.substring(with: match.range(at: 1))), hidden.contains(id) else { continue }
+                    pieces += AttributedString(
+                        nsText.substring(with: NSRange(location: last, length: match.range.location - last)), attributes: run.attributes
+                    )
+                    var spoiler = AttributedString("\(spoilerScheme):\(id)", attributes: run.attributes)
+                    spoiler.link = URL(string: "\(spoilerScheme):\(id)")
+                    pieces += spoiler
+                    last = match.range.location + match.range.length
+                }
+            }
+            if last == 0 {
+                result += AttributedString(text[run.range])
+            } else {
+                result += pieces + AttributedString(nsText.substring(from: last), attributes: run.attributes)
             }
         }
         return result
@@ -346,7 +480,8 @@ enum RedditMarkdown {
         let preservedURLCharacters = CharacterSet(charactersIn: "/-_~%+=&#@$*")
         while let scalar = urlString.unicodeScalars.last,
               punctuation.contains(scalar),
-              !preservedURLCharacters.contains(scalar) {
+              !preservedURLCharacters.contains(scalar),
+              scalar != ")" || urlString.filter({ $0 == ")" }).count > urlString.filter({ $0 == "(" }).count {
             let character = urlString.removeLast()
             trailingText.insert(character, at: trailingText.startIndex)
         }
