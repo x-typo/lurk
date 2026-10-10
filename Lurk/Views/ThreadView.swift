@@ -52,12 +52,7 @@ struct ThreadView: View {
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .background(Theme.background)
-                .toolbar {
-                    ToolbarItem(placement: .status) {
-                        Button("Close") { dismiss() }
-                            .foregroundStyle(Theme.primary)
-                    }
-                }
+                .bottomCloseButton { dismiss() }
             }
             .preferredColorScheme(.dark)
             .task(id: attempt) { await load() }

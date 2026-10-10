@@ -66,12 +66,7 @@ struct UserCommentsView: View {
             .task { await loadComments() }
             .navigationTitle("Comments")
             .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .status) {
-                    Button("Done") { dismiss() }
-                        .font(.body.weight(.medium))
-                }
-            }
+            .bottomCloseButton("Done") { dismiss() }
             .toolbarColorScheme(.dark, for: .navigationBar)
         }
         .preferredColorScheme(.dark)
