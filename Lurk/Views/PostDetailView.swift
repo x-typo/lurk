@@ -956,19 +956,6 @@ struct CommentBodyView: View {
     @Environment(\.openURL) private var openURL
     @Environment(\.openCommentGIF) private var openGIF
 
-    // Matches in priority order: giphy embeds, markdown links, image URLs, plain URLs
-    private static let tokenPattern = try! NSRegularExpression(
-        pattern: """
-        !\\[gif\\]\\(giphy\\|([^)]+)\\)\
-        |\\[([^\\]]+)\\]\\((https?://[^)]+)\\)\
-        |https?://[^\\s)\"]+\\.(?:jpg|jpeg|png|gif|webp)(?:[^\\s)\"]*)\
-        |https?://[^\\s)\"]+
-        """,
-        options: [.caseInsensitive, .allowCommentsAndWhitespace]
-    )
-
-    private static let imageExtensions = ["jpg", "jpeg", "png", "gif", "webp"]
-
     var body: some View {
         Group {
             if isSelecting {
@@ -984,100 +971,112 @@ struct CommentBodyView: View {
     }
 
     private var renderedBody: some View {
-        let parts = Self.displayParts(from: content, revealedSpoilers: activeRevealedSpoilers)
-        return VStack(alignment: .leading, spacing: 6) {
-            ForEach(Array(parts.enumerated()), id: \.offset) { index, part in
-                switch part {
-                case .text(let text):
-                    if !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                        nonInteractiveTextTarget {
-                            // Adjacent text merges, so a later text part always follows media or a spoiler.
-                            MarkdownBlocksView(
-                                blocks: RedditMarkdown.blocks(from: text, continuingLine: index > 0),
-                                font: textFont
-                            )
-                        }
-                    }
-                case .spoiler(let id, _):
-                    Button {
-                        if revealedContent != content {
-                            revealedContent = content
-                            revealedSpoilers = []
-                        }
-                        revealedSpoilers.insert(id)
-                    } label: {
-                        Label("Reveal spoiler", systemImage: "eye.slash")
-                            .font(textFont)
-                            .foregroundStyle(Theme.textSecondary)
-                            .padding(.horizontal, 12)
-                            .padding(.vertical, 10)
-                            .background(Theme.surfaceElevated)
-                            .clipShape(RoundedRectangle(cornerRadius: 6))
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel("Reveal spoiler")
-                    .accessibilityHint("Double-tap to reveal hidden content.")
-                case .image(let url):
-                    nonInteractiveMediaTarget {
-                        AsyncImage(url: url) { phase in
-                            switch phase {
-                            case .success(let image):
-                                image
-                                    .resizable()
-                                    .aspectRatio(contentMode: .fit)
-                                    .clipShape(RoundedRectangle(cornerRadius: 8))
-                            case .failure:
-                                EmptyView()
-                            default:
-                                RoundedRectangle(cornerRadius: 8)
-                                    .fill(Theme.surfaceElevated)
-                                    .aspectRatio(16/9, contentMode: .fit)
-                                    .overlay { ProgressView().tint(Theme.textMuted) }
-                            }
-                        }
-                    }
-                case .gif(let url):
-                    let video = CommentGIFVideo.matching(url, in: gifVideos)
-                    let openFullScreen = openGIF.map { openGIF in
-                        { openGIF(GalleryMedia(id: 0, url: url, isAnimated: true, posterURL: video?.posterURL, videoURL: video?.url)) }
-                    }
-                    let tap = openFullScreen ?? nonInteractiveTapAction?.perform
-                    let tapAccessibility = openFullScreen == nil
-                        ? nonInteractiveTapAction?.mediaAccessibility ?? .openGIF
-                        : .openGIF
-                    if let video {
-                        InlineLoopingVideoView(url: video.url, posterURL: video.posterURL, aspectRatio: video.aspectRatio)
-                            .frame(maxHeight: 250)
-                            .clipShape(RoundedRectangle(cornerRadius: 8))
-                            .modifier(MediaActionsModifier(
-                                isEnabled: true,
-                                onTap: tap,
-                                onLongPress: onNonInteractiveLongPress,
-                                accessibility: tapAccessibility
-                            ))
-                    } else {
-                        AnimatedGIFView(
-                            url: url,
-                            onMediaTap: tap,
-                            onMediaLongPress: onNonInteractiveLongPress,
-                            mediaActionAccessibility: tapAccessibility
-                        )
+        nonInteractiveTextTarget {
+            MarkdownBlocksView(
+                blocks: RedditMarkdown.blocks(from: content, revealedSpoilers: activeRevealedSpoilers),
+                font: textFont
+            ) { block in
+                media(block)
+            }
+        }
+        // A spoiler shown inline, in a heading or table cell, reveals on tap; other links open as before.
+        .environment(\.openURL, OpenURLAction { url in
+            if let id = RedditMarkdown.spoilerID(in: url) {
+                reveal(id)
+            } else {
+                openURL(url)
+            }
+            return .handled
+        })
+    }
+
+    private func reveal(_ id: Int) {
+        if revealedContent != content {
+            revealedContent = content
+            revealedSpoilers = []
+        }
+        revealedSpoilers.insert(id)
+    }
+
+    @ViewBuilder
+    private func media(_ block: MarkdownBlock) -> some View {
+        switch block {
+        case .spoiler(let id):
+            Button {
+                reveal(id)
+            } label: {
+                Label("Reveal spoiler", systemImage: "eye.slash")
+                    .font(textFont)
+                    .foregroundStyle(Theme.textSecondary)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 10)
+                    .background(Theme.surfaceElevated)
+                    .clipShape(RoundedRectangle(cornerRadius: 6))
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Reveal spoiler")
+            .accessibilityHint("Double-tap to reveal hidden content.")
+        case .image(let url):
+            nonInteractiveMediaTarget {
+                AsyncImage(url: url) { phase in
+                    switch phase {
+                    case .success(let image):
+                        image
+                            .resizable()
                             .aspectRatio(contentMode: .fit)
-                            .frame(maxHeight: 250)
                             .clipShape(RoundedRectangle(cornerRadius: 8))
+                    case .failure:
+                        EmptyView()
+                    default:
+                        RoundedRectangle(cornerRadius: 8)
+                            .fill(Theme.surfaceElevated)
+                            .aspectRatio(16/9, contentMode: .fit)
+                            .overlay { ProgressView().tint(Theme.textMuted) }
                     }
-                case .link(let title, let url):
-                    Button {
-                        openURL(url)
-                    } label: {
-                        Text(title)
-                            .font(textFont)
-                            .foregroundStyle(Theme.primary)
-                            .underline()
-                    }
-                    .buttonStyle(.plain)
                 }
             }
+        case .gif(let url):
+            let video = CommentGIFVideo.matching(url, in: gifVideos)
+            let openFullScreen = openGIF.map { openGIF in
+                { openGIF(GalleryMedia(id: 0, url: url, isAnimated: true, posterURL: video?.posterURL, videoURL: video?.url)) }
+            }
+            let tap = openFullScreen ?? nonInteractiveTapAction?.perform
+            let tapAccessibility = openFullScreen == nil
+                ? nonInteractiveTapAction?.mediaAccessibility ?? .openGIF
+                : .openGIF
+            if let video {
+                InlineLoopingVideoView(url: video.url, posterURL: video.posterURL, aspectRatio: video.aspectRatio)
+                    .frame(maxHeight: 250)
+                    .clipShape(RoundedRectangle(cornerRadius: 8))
+                    .modifier(MediaActionsModifier(
+                        isEnabled: true,
+                        onTap: tap,
+                        onLongPress: onNonInteractiveLongPress,
+                        accessibility: tapAccessibility
+                    ))
+            } else {
+                AnimatedGIFView(
+                    url: url,
+                    onMediaTap: tap,
+                    onMediaLongPress: onNonInteractiveLongPress,
+                    mediaActionAccessibility: tapAccessibility
+                )
+                    .aspectRatio(contentMode: .fit)
+                    .frame(maxHeight: 250)
+                    .clipShape(RoundedRectangle(cornerRadius: 8))
+            }
+        case .gifLink(let url):
+            Button {
+                openURL(url)
+            } label: {
+                Text("Open GIF")
+                    .font(textFont)
+                    .foregroundStyle(Theme.primary)
+                    .underline()
+            }
+            .buttonStyle(.plain)
+        default:
+            EmptyView()
         }
     }
 
@@ -1147,200 +1146,6 @@ struct CommentBodyView: View {
         } else {
             content()
         }
-    }
-
-    enum BodyPart {
-        case text(String)
-        case spoiler(Int, String)
-        case image(URL)
-        case gif(URL)
-        case link(String, URL)
-    }
-
-    static func parse(_ text: String, revealedSpoilers: Set<Int> = []) -> [BodyPart] {
-        guard !text.isEmpty else { return [.text(text)] }
-        var parts: [BodyPart] = []
-        var visibleText = ""
-        for part in CommentSpoilers.parse(text) {
-            switch part {
-            case .text(let text):
-                visibleText += text
-            case .spoiler(let id, let content):
-                if revealedSpoilers.contains(id) {
-                    // A spoiler is inline, so at a line start its "#1" or "- " stays prose.
-                    let startsLine = visibleText.isEmpty || visibleText.hasSuffix("\n")
-                    visibleText += startsLine ? RedditMarkdown.escapingLeadingBlockMarker(content) : content
-                } else {
-                    if !visibleText.isEmpty {
-                        parts += parseVisibleText(visibleText)
-                        visibleText = ""
-                    }
-                    parts.append(.spoiler(id, content))
-                }
-            }
-        }
-        if !visibleText.isEmpty {
-            parts += parseVisibleText(visibleText)
-        }
-        return parts
-    }
-
-    private static func parseVisibleText(_ text: String) -> [BodyPart] {
-        let nsText = text as NSString
-        let fullRange = NSRange(location: 0, length: nsText.length)
-        let matches = tokenPattern.matches(in: text, range: fullRange)
-
-        guard !matches.isEmpty else { return [.text(text)] }
-
-        var parts: [BodyPart] = []
-        var lastEnd = 0
-        // Ordinary links stay in the prose, so Markdown blocks around them keep their structure.
-        func appendText(_ text: String) {
-            if case .text(let previous) = parts.last {
-                parts[parts.count - 1] = .text(previous + text)
-            } else {
-                parts.append(.text(text))
-            }
-        }
-        let lines = text.split(separator: "\n", omittingEmptySubsequences: false)
-        let tableLines = RedditMarkdown.tableLines(lines)
-        let fencedLines = RedditMarkdown.fencedLines(lines)
-        var lineStarts: [Int] = []
-        var offset = 0
-        for line in lines {
-            lineStarts.append(offset)
-            offset += line.utf16.count + 1
-        }
-
-        for match in matches {
-            let range = match.range
-            if range.location > lastEnd {
-                appendText(nsText.substring(with: NSRange(location: lastEnd, length: range.location - lastEnd)))
-            }
-
-            let full = nsText.substring(with: range)
-            lastEnd = range.location + range.length
-
-            let lineIndex = lineStarts.lastIndex { $0 <= range.location } ?? 0
-            // Fenced code shows its text as written; splitting it would turn the text after it into code.
-            if fencedLines.contains(lineIndex) {
-                appendText(full)
-                continue
-            }
-            // Media inside a list item, heading, or table row stays a link rather than splitting its block.
-            let lineStart = nsText.substring(with: NSRange(location: lineStarts[lineIndex], length: range.location - lineStarts[lineIndex]))
-            let keepsBlock = tableLines.contains(lineIndex)
-                || blockMarkerPattern.firstMatch(in: lineStart, range: NSRange(location: 0, length: (lineStart as NSString).length)) != nil
-
-            if match.range(at: 1).location != NSNotFound {
-                // Giphy: ![gif](giphy|ID) or ![gif](giphy|ID|variant)
-                let giphyParts = nsText.substring(with: match.range(at: 1)).components(separatedBy: "|")
-                let giphyID = giphyParts.first ?? ""
-                if let url = URL(string: "https://media.giphy.com/media/\(giphyID)/giphy.gif") {
-                    if keepsBlock {
-                        appendText("[gif](\(url.absoluteString))")
-                    } else {
-                        parts.append(.gif(url))
-                    }
-                }
-            } else if keepsBlock {
-                appendText(match.range(at: 2).location == NSNotFound
-                    ? full
-                    : inlineLink(nsText.substring(with: match.range(at: 2)), nsText.substring(with: match.range(at: 3))))
-            } else if match.range(at: 2).location != NSNotFound {
-                // Markdown link: [text](url)
-                let linkText = nsText.substring(with: match.range(at: 2))
-                let urlStr = nsText.substring(with: match.range(at: 3))
-                if let url = URL(string: urlStr), isGIFURL(url) {
-                    parts.append(.gif(url))
-                } else if let url = URL(string: urlStr), isImageURL(url) {
-                    parts.append(.image(url))
-                } else {
-                    appendText(inlineLink(linkText, urlStr))
-                }
-            } else {
-                let (urlString, trailingText) = splitTrailingPunctuation(from: full)
-                if let url = URL(string: urlString), isGIFURL(url) {
-                    parts.append(.gif(url))
-                } else if let url = URL(string: urlString), isImageURL(url) {
-                    parts.append(.image(url))
-                } else {
-                    // Foundation autolinks it, by GFM rules: a bracketed IPv6 host stays plain text, and
-                    // a trailing "*", "_", or "~" is left out of the link so "**https://…**" works.
-                    appendText(urlString)
-                }
-                if !trailingText.isEmpty {
-                    appendText(trailingText)
-                }
-            }
-        }
-
-        if lastEnd < nsText.length {
-            appendText(nsText.substring(from: lastEnd))
-        }
-
-        return parts
-    }
-
-    // Foundation's parser joins a link's words across a line break and drops a link whose address has a
-    // space, which the link buttons before block parsing kept.
-    private static func inlineLink(_ text: String, _ url: String) -> String {
-        // A title, as in `(https://… "title")` or `(https://… (title))`, keeps its original syntax.
-        let hasTitle = url.contains { "\"'(".contains($0) }
-        let address = url.contains(where: \.isWhitespace) && !hasTitle ? "<\(url)>" : url
-        return "[\(text.replacingOccurrences(of: "\n", with: " "))](\(address))"
-    }
-
-    // A list item, ordered item, or heading marker, after any quote markers.
-    private static let blockMarkerPattern = try! NSRegularExpression(
-        pattern: #"^\s*(?:>\s*)*(?:[*+-]\s|\d{1,9}[.)]\s|#)"#
-    )
-
-
-    static func displayParts(from text: String, revealedSpoilers: Set<Int> = []) -> [BodyPart] {
-        var inlineGIFCount = 0
-        return parse(text, revealedSpoilers: revealedSpoilers).map { part in
-            guard case .gif(let url) = part else { return part }
-            defer { inlineGIFCount += 1 }
-            return inlineGIFCount == 0 ? part : .link("Open GIF", url)
-        }
-    }
-
-    private static func isImageURL(_ url: URL) -> Bool {
-        imageExtensions.contains(url.pathExtension.lowercased())
-    }
-
-    private static func isGIFURL(_ url: URL) -> Bool {
-        url.pathExtension.caseInsensitiveCompare("gif") == .orderedSame
-    }
-
-    private static func splitTrailingPunctuation(from token: String) -> (String, String) {
-        var urlString = token
-        var trailingText = ""
-        let punctuation = CharacterSet.punctuationCharacters
-        let preservedURLCharacters = CharacterSet(charactersIn: "/-_~%+=&#@$*")
-
-        while let scalar = urlString.unicodeScalars.last,
-              punctuation.contains(scalar),
-              !preservedURLCharacters.contains(scalar),
-              !isIPv6AuthorityClosingBracket(scalar, in: urlString) {
-            let character = urlString.removeLast()
-            trailingText.insert(character, at: trailingText.startIndex)
-        }
-        return (urlString, trailingText)
-    }
-
-    private static func isIPv6AuthorityClosingBracket(
-        _ scalar: UnicodeScalar,
-        in urlString: String
-    ) -> Bool {
-        guard scalar == "]",
-              let url = URL(string: urlString),
-              url.path.isEmpty,
-              url.host?.contains(":") == true else {
-            return false
-        }
-        return true
     }
 }
 

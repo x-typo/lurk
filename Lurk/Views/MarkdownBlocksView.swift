@@ -1,22 +1,25 @@
 import SwiftUI
 
-struct MarkdownBlocksView: View {
+// Draws a body's Markdown blocks; `media` draws its images, GIFs, and spoilers, wherever they sit.
+struct MarkdownBlocksView<Media: View>: View {
     let blocks: [MarkdownBlock]
     let font: Font
+    @ViewBuilder let media: (MarkdownBlock) -> Media
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             ForEach(Array(blocks.enumerated()), id: \.offset) { _, block in
-                MarkdownBlockView(block: block, font: font)
+                MarkdownBlockView(block: block, font: font, media: media)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
 
-private struct MarkdownBlockView: View {
+private struct MarkdownBlockView<Media: View>: View {
     let block: MarkdownBlock
     let font: Font
+    let media: (MarkdownBlock) -> Media
 
     var body: some View {
         switch block {
@@ -25,7 +28,7 @@ private struct MarkdownBlockView: View {
         case .heading(let level, let text):
             MarkdownText(text: text, font: Self.headingFont(level: level, body: font))
         case .quote(let blocks):
-            MarkdownBlocksView(blocks: blocks, font: font)
+            MarkdownBlocksView(blocks: blocks, font: font, media: media)
                 .padding(.leading, 10)
                 .overlay(alignment: .leading) {
                     Rectangle()
@@ -39,7 +42,7 @@ private struct MarkdownBlockView: View {
                         Text(verbatim: ordered ? "\(item.ordinal)." : "•")
                             .font(font)
                             .foregroundStyle(Theme.textSecondary)
-                        MarkdownBlocksView(blocks: item.blocks, font: font)
+                        MarkdownBlocksView(blocks: item.blocks, font: font, media: media)
                     }
                 }
             }
@@ -55,6 +58,8 @@ private struct MarkdownBlockView: View {
             MarkdownTableView(table: table, font: font)
         case .rule:
             Divider().background(Theme.border).padding(.vertical, 4)
+        case .image, .gif, .gifLink, .spoiler:
+            media(block)
         }
     }
 

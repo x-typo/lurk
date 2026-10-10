@@ -1,7 +1,7 @@
 import Foundation
 
-// One block of a Reddit body: headings, lists, tables, quotes, and code keep their structure, and
-// inline styling and links stay in each block's text.
+// One block of a Reddit body. Headings, lists, tables, quotes, and code keep their structure; images, GIFs,
+// and hidden spoilers are lifted out of the text around them.
 indirect enum MarkdownBlock: Equatable {
     case paragraph(AttributedString)
     case heading(level: Int, AttributedString)
@@ -10,6 +10,11 @@ indirect enum MarkdownBlock: Equatable {
     case code(String)
     case table(MarkdownTable)
     case rule
+    case image(URL)
+    case gif(URL)
+    // A GIF after the body's first, offered as a link instead of playing inline.
+    case gifLink(URL)
+    case spoiler(Int)
 }
 
 struct MarkdownListItem: Equatable {
@@ -23,21 +28,36 @@ struct MarkdownTable: Equatable {
     let rows: [[AttributedString]]
 }
 
+// Foundation's full Markdown parse decides a body's structure. Lurk adds only Reddit's own syntax, through
+// private-use marks that Foundation reads as text and that are removed after parsing, so code keeps its
+// bytes without Lurk having to find the code first.
 enum RedditMarkdown {
-    // A GFM table's delimiter row, such as ":-:|:-:" or "|---|---|".
-    private static let tableDelimiterPattern = try! NSRegularExpression(
-        pattern: #"^\s*\|?\s*:?-+:?\s*(?:\|\s*:?-+:?\s*)+\|?\s*$"#,
-        options: .anchorsMatchLines
-    )
+    static let spoilerScheme = "lurk-spoiler"
 
-    // `continuingLine` marks text that follows media or a hidden spoiler on the same source line.
-    static func blocks(from text: String, continuingLine: Bool = false) -> [MarkdownBlock] {
-        let source = continuingLine ? escapingLeadingBlockMarker(text) : text
+    // Breaks the syntax it sits in: "^[", a revealed spoiler's leading "#" or "- ", "!" before "[".
+    private static let mark: Character = "\u{E000}"
+    // A giphy embed's "|", so a table doesn't split its cell there.
+    private static let pipeMark: Character = "\u{E001}"
+    // Follows the space added after a "#Title" heading's hashes, so code can drop that space again.
+    private static let headingMark: Character = "\u{E003}"
+
+    // A top-level "#Title" line, which Reddit makes a heading and CommonMark doesn't. A line with a pipe
+    // may be a table row, such as "#|Episode", so it's left alone.
+    private static let compactHeadingPattern = try! NSRegularExpression(pattern: #"(?m)^( {0,3}#{1,6})(?=[^#\s])(?![^\n]*\|)"#)
+    private static let giphyPattern = try! NSRegularExpression(pattern: #"!\[gif\]\(giphy\|[^)\s]*\)"#, options: .caseInsensitive)
+    private static let imageExtensions = ["jpg", "jpeg", "png", "gif", "webp"]
+
+    static func blocks(from text: String, revealedSpoilers: Set<Int> = []) -> [MarkdownBlock] {
+        var hidden: Set<Int> = []
+        let source = markedSource(text, revealedSpoilers: revealedSpoilers, hidden: &hidden)
+        // Hidden spoilers stay hidden in every fallback.
+        let visibleText = CommentSpoilers.selectionText(from: text, revealed: revealedSpoilers)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
         guard let parsed = try? AttributedString(
-            markdown: normalized(source),
+            markdown: source,
             options: .init(interpretedSyntax: .full, failurePolicy: .returnPartiallyParsedIfPossible)
         ) else {
-            return [.paragraph(AttributedString(text))]
+            return visibleText.isEmpty ? [] : [.paragraph(AttributedString(visibleText))]
         }
         let root = Node(intent: nil)
         var looseParagraph: (container: [PresentationIntent.IntentType], identity: Int)?
@@ -58,154 +78,87 @@ enum RedditMarkdown {
             }
             root.insert(inlineContent(parsed[run.range], intent: run.inlinePresentationIntent), along: path[...])
         }
-        let blocks = root.children.compactMap(\.block)
-        // A lone marker, such as "2." before a hidden spoiler, parses to nothing; show it as written. A lone
-        // quote marker before media stays out of sight, as its empty quote was before.
-        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        if blocks.isEmpty, !trimmed.isEmpty, !trimmed.allSatisfy({ $0 == ">" || $0.isWhitespace }) {
-            return [.paragraph(AttributedString(trimmed))]
+        var blocks = lifted(root.children.compactMap(\.block), hidden: hidden, liftsMedia: true)
+        limitInlineGIFs(&blocks)
+        // A body that parses to nothing, such as a lone "-" or "#", shows as written.
+        if blocks.isEmpty, !visibleText.isEmpty {
+            return [.paragraph(AttributedString(visibleText))]
         }
         return blocks
     }
 
-    // Reddit makes "#Title" a heading; CommonMark needs a space after the marker. Fenced code and
-    // table rows such as "#|Episode" are left alone.
-    static func normalized(_ text: String) -> String {
-        let lines = text.split(separator: "\n", omittingEmptySubsequences: false)
-        let fenced = fencedLines(lines, unclosedRunToEnd: true)
-        let tables = tableLines(lines)
-        return lines.enumerated().map { index, line in
-            if fenced.contains(index) { return String(line) }
-            // Foundation reads "^[text](url)" as its attribute syntax and drops the link; on Reddit it's a
-            // caret and a link. Only that shape is escaped, so a regex such as "^[a-z]+" in code is untouched.
-            let line = line.replacingOccurrences(
-                of: #"\^\[(?=[^\]\n]*\]\(https?://)"#, with: #"\\^["#, options: .regularExpression
-            )
-            return tables.contains(index) ? line : spacedHeading(Substring(line)) ?? line
-        }
-        .joined(separator: "\n")
+    // The spoiler a "lurk-spoiler:<id>" link stands for.
+    static func spoilerID(in url: URL) -> Int? {
+        guard url.scheme == spoilerScheme else { return nil }
+        return Int(url.absoluteString.dropFirst(spoilerScheme.count + 1))
     }
 
-    // Indexes of the lines in tables: each header row, its delimiter row, and the rows after it. As on
-    // Reddit, a row carries a pipe, so a line without one, such as "#Next" or a closing code fence, ends
-    // the table. A table-shaped example in code counts too, which keeps its links from becoming media.
-    static func tableLines(_ lines: [Substring]) -> Set<Int> {
-        var result: Set<Int> = []
-        var index = 1
-        while index < lines.count {
-            guard isTableDelimiter(lines[index]), hasCellPipe(lines[index - 1]) else {
-                index += 1
-                continue
+    // MARK: Source
+
+    private static func markedSource(_ text: String, revealedSpoilers: Set<Int>, hidden: inout Set<Int>) -> String {
+        var source = ""
+        for part in CommentSpoilers.parse(text) {
+            var piece: String
+            switch part {
+            case .text(let text):
+                piece = text
+            case .spoiler(let id, let content) where revealedSpoilers.contains(id):
+                // A spoiler is inline on Reddit, so its own "#1" or "- " can't open a block.
+                let first = content.first { !$0.isWhitespace }
+                let opensBlock = first.map { "#-+*>=".contains($0) || ($0.isASCII && $0.isNumber) } ?? false
+                piece = opensBlock ? String(mark) + content : content
+            case .spoiler(let id, _):
+                // Only the id reaches the parser; an angle autolink can't be joined by a "!" or a URL before it.
+                hidden.insert(id)
+                piece = "<\(spoilerScheme):\(id)>"
             }
-            result.formUnion([index - 1, index])
-            index += 1
-            while index < lines.count, hasCellPipe(lines[index]) {
-                result.insert(index)
-                index += 1
+            if source.hasSuffix("!"), piece.hasPrefix("[") {
+                source.append(mark)
             }
+            source += piece
+        }
+        // Foundation reads "^[text](url)" as its attribute syntax and drops the link; on Reddit it's a caret
+        // and a link.
+        source = source.replacingOccurrences(of: "^[", with: "^" + String(mark) + "[")
+        for match in giphyPattern.matches(in: source, range: NSRange(source.startIndex..., in: source)).reversed() {
+            guard let range = Range(match.range, in: source) else { continue }
+            source.replaceSubrange(range, with: source[range].replacingOccurrences(of: "|", with: String(pipeMark)))
+        }
+        return compactHeadingPattern.stringByReplacingMatches(
+            in: source, range: NSRange(source.startIndex..., in: source), withTemplate: "$1 " + String(headingMark)
+        )
+    }
+
+    // Removes the marks, restoring the text as written.
+    private static func unmarked(_ text: String) -> String {
+        guard text.contains(where: { $0 == mark || $0 == pipeMark || $0 == headingMark }) else { return text }
+        return text
+            .replacingOccurrences(of: " " + String(headingMark), with: "")
+            .replacingOccurrences(of: String(headingMark), with: "")
+            .replacingOccurrences(of: String(mark), with: "")
+            .replacingOccurrences(of: String(pipeMark), with: "|")
+    }
+
+    private static func unmarked(_ url: URL) -> URL {
+        let text = url.absoluteString
+        guard text.contains("%EE%80%8") else { return url }
+        let restored = text
+            .replacingOccurrences(of: "%20%EE%80%83", with: "")
+            .replacingOccurrences(of: "%EE%80%83", with: "")
+            .replacingOccurrences(of: "%EE%80%80", with: "")
+            .replacingOccurrences(of: "%EE%80%81", with: "%7C")
+        return URL(string: restored) ?? url
+    }
+
+    private static func unmarked(_ text: AttributedString) -> AttributedString {
+        var result = AttributedString()
+        for run in text.runs {
+            var attributes = run.attributes
+            if let link = run.link { attributes.link = unmarked(link) }
+            if let imageURL = run.imageURL { attributes.imageURL = unmarked(imageURL) }
+            result += AttributedString(unmarked(String(text[run.range].characters)), attributes: attributes)
         }
         return result
-    }
-
-    // A giphy embed's own "|", as in "![gif](giphy|abc)", doesn't make a line a table row.
-    private static func hasCellPipe(_ line: Substring) -> Bool {
-        line.replacingOccurrences(of: #"!\[gif\]\(giphy\|[^)]*\)"#, with: "", options: .regularExpression).contains("|")
-    }
-
-    // Indexes of fenced code lines, fences included. Quote and list containers aren't modeled, so a fence
-    // never closed may have ended with its quote: media extraction leaves it out, while the heading
-    // normalizer (`unclosedRunToEnd`) treats it as code to the end, as CommonMark does at the top level.
-    static func fencedLines(_ lines: [Substring], unclosedRunToEnd: Bool = false) -> Set<Int> {
-        var result: Set<Int> = []
-        var index = 0
-        while index < lines.count {
-            guard let open = openingFence(blockContent(of: lines[index])) else {
-                index += 1
-                continue
-            }
-            guard let close = lines[(index + 1)...].firstIndex(where: { isClosingFence(blockContent(of: $0), of: open) }) else {
-                if unclosedRunToEnd {
-                    result.formUnion(index..<lines.count)
-                    break
-                }
-                index += 1
-                continue
-            }
-            result.formUnion(index...close)
-            index = close + 1
-        }
-        return result
-    }
-
-    private static func spacedHeading(_ line: Substring) -> String? {
-        let indent = line.prefix(while: { $0 == " " })
-        guard indent.count <= 3 else { return nil }
-        let body = line.dropFirst(indent.count)
-        let hashes = body.prefix(while: { $0 == "#" })
-        let rest = body.dropFirst(hashes.count)
-        guard (1...6).contains(hashes.count), let next = rest.first, !next.isWhitespace else { return nil }
-        return String(indent) + hashes + " " + rest
-    }
-
-    // A line's text after its quote and list markers, where a code fence can start.
-    private static func blockContent(of line: Substring) -> Substring {
-        var content = line.drop(while: { $0 == " " || $0 == "\t" })
-        while true {
-            if content.first == ">" {
-                content = content.dropFirst().drop(while: { $0 == " " })
-            } else if let marker = content.first, "*+-".contains(marker), content.dropFirst().first == " " {
-                content = content.dropFirst().drop(while: { $0 == " " })
-            } else if let afterDigits = orderedMarkerEnd(content), content[afterDigits...].first == " " {
-                content = content[afterDigits...].drop(while: { $0 == " " })
-            } else {
-                return content
-            }
-        }
-    }
-
-    // The index after an ordered-list marker such as "12." or "3)".
-    private static func orderedMarkerEnd(_ text: Substring) -> Substring.Index? {
-        let digits = text.prefix(while: { $0.isASCII && $0.isNumber })
-        guard (1...9).contains(digits.count), digits.endIndex < text.endIndex,
-              text[digits.endIndex] == "." || text[digits.endIndex] == ")" else { return nil }
-        return text.index(after: digits.endIndex)
-    }
-
-    private static func openingFence(_ content: Substring) -> (marker: Character, length: Int)? {
-        guard let marker = content.first, marker == "`" || marker == "~" else { return nil }
-        let length = content.prefix(while: { $0 == marker }).count
-        // A backtick fence's info string can't hold a backtick, so "```npm i```" is inline code.
-        guard length >= 3, marker == "~" || !content.dropFirst(length).contains("`") else { return nil }
-        return (marker, length)
-    }
-
-    private static func isClosingFence(_ content: Substring, of open: (marker: Character, length: Int)) -> Bool {
-        let length = content.prefix(while: { $0 == open.marker }).count
-        return length >= open.length && content.dropFirst(length).allSatisfy(\.isWhitespace)
-    }
-
-    private static func isTableDelimiter(_ line: Substring) -> Bool {
-        let text = String(line)
-        return tableDelimiterPattern.firstMatch(in: text, range: NSRange(text.startIndex..., in: text)) != nil
-    }
-
-    // Text after media or a hidden spoiler is mid-line in the source, so a leading "-", "#", or "1."
-    // there is prose, not a list or heading.
-    static func escapingLeadingBlockMarker(_ text: String) -> String {
-        let start = text.drop(while: { $0 == " " || $0 == "\t" })
-        guard let first = start.first, first != "\n" else { return text }
-        let firstLine = start.prefix(while: { $0 != "\n" })
-        // "*" opens a block only as a list marker or a "***" rule; "**bold**" is inline.
-        let opensBlock = "-+#>".contains(first) || (first == "*"
-            && ((firstLine.dropFirst().first?.isWhitespace ?? true) || firstLine.allSatisfy { $0 == "*" || $0 == " " }))
-        if opensBlock {
-            return "\\" + start
-        }
-        if let afterMarker = orderedMarkerEnd(start) {
-            let delimiter = start.index(before: afterMarker)
-            return String(start[..<delimiter]) + "\\" + start[delimiter...]
-        }
-        return String(start)
     }
 
     private static func inlineContent(_ slice: AttributedSubstring, intent: InlinePresentationIntent?) -> AttributedString {
@@ -225,13 +178,204 @@ enum RedditMarkdown {
             content = AttributedString(slice)
             content.presentationIntent = nil
         }
-        // "![clip](https://…)" to a page that isn't an image keeps its target as a link.
+        // "![clip](https://…)" keeps its target as a link; a media one is lifted out later.
         for (imageURL, range) in content.runs[\.imageURL].reversed() {
-            guard let imageURL, content[range].link == nil, ["http", "https"].contains(imageURL.scheme?.lowercased()) else { continue }
+            guard let imageURL, content[range].link == nil, isWebURL(imageURL) else { continue }
             content[range].link = imageURL
         }
-        return content
+        return unmarked(content)
     }
+
+    // MARK: Lifting
+
+    private static func lifted(_ blocks: [MarkdownBlock], hidden: Set<Int>, liftsMedia: Bool) -> [MarkdownBlock] {
+        blocks.flatMap { block -> [MarkdownBlock] in
+            switch block {
+            case .paragraph(let text):
+                return lifted(text, hidden: hidden, liftsMedia: liftsMedia)
+            case .heading(let level, let text):
+                return [.heading(level: level, inline(text, hidden: hidden))]
+            case .quote(let blocks):
+                return [.quote(lifted(blocks, hidden: hidden, liftsMedia: liftsMedia))]
+            case .list(let ordered, let items):
+                // Media in a list item stays a link, so the item's marker keeps its text beside it.
+                return [.list(ordered: ordered, items: items.map {
+                    MarkdownListItem(ordinal: $0.ordinal, blocks: lifted($0.blocks, hidden: hidden, liftsMedia: false))
+                })]
+            case .table(let table):
+                return [.table(MarkdownTable(
+                    alignments: table.alignments,
+                    header: table.header.map { inline($0, hidden: hidden) },
+                    rows: table.rows.map { $0.map { inline($0, hidden: hidden) } }
+                ))]
+            case .code(let code):
+                return liftedSpoilers(fromCode: code, hidden: hidden)
+            default:
+                return [block]
+            }
+        }
+    }
+
+    // Splits a paragraph around its hidden spoilers and, where blocks can sit, its images and GIFs.
+    private static func lifted(_ text: AttributedString, hidden: Set<Int>, liftsMedia: Bool) -> [MarkdownBlock] {
+        var blocks: [MarkdownBlock] = []
+        var pending = AttributedString()
+        func flush() {
+            let piece = trimmed(pending)
+            if !piece.characters.isEmpty { blocks.append(.paragraph(piece)) }
+            pending = AttributedString()
+        }
+        for run in text.runs {
+            let piece = AttributedString(text[run.range])
+            if let id = hiddenSpoiler(run.link, hidden: hidden) {
+                flush()
+                blocks.append(.spoiler(id))
+            } else if run.inlinePresentationIntent?.contains(.code) == true {
+                pending += piece
+            } else if let giphy = giphyURL(run.imageURL) {
+                if liftsMedia {
+                    flush()
+                    blocks.append(.gif(giphy))
+                } else {
+                    pending += linked(piece, to: giphy)
+                }
+            } else if liftsMedia, let found = media(in: run, text: String(text[run.range].characters)) {
+                flush()
+                blocks.append(found.block)
+                pending += AttributedString(found.trailing)
+            } else {
+                pending += piece
+            }
+        }
+        flush()
+        return blocks
+    }
+
+    // Headings and table cells can't hold blocks: a hidden spoiler stays an inline "Spoiler" link that
+    // reveals it, and a giphy embed links to its GIF.
+    private static func inline(_ text: AttributedString, hidden: Set<Int>) -> AttributedString {
+        var result = AttributedString()
+        for run in text.runs {
+            let piece = AttributedString(text[run.range])
+            if hiddenSpoiler(run.link, hidden: hidden) != nil {
+                result += linked(AttributedString("Spoiler"), to: run.link)
+            } else if let giphy = giphyURL(run.imageURL) {
+                result += linked(piece, to: giphy)
+            } else {
+                result += piece
+            }
+        }
+        return result
+    }
+
+    // A spoiler that CommentSpoilers found inside code it doesn't recognize, such as an indented block.
+    private static func liftedSpoilers(fromCode code: String, hidden: Set<Int>) -> [MarkdownBlock] {
+        let opener = "<\(spoilerScheme):"
+        guard !hidden.isEmpty, code.contains(opener) else { return [.code(code)] }
+        var blocks: [MarkdownBlock] = []
+        func appendCode(_ text: Substring) {
+            let code = text.trimmingCharacters(in: .newlines)
+            if !code.trimmingCharacters(in: .whitespaces).isEmpty { blocks.append(.code(code)) }
+        }
+        var rest = code[...]
+        while let open = rest.range(of: opener),
+              let close = rest[open.upperBound...].firstIndex(of: ">"),
+              let id = Int(rest[open.upperBound..<close]), hidden.contains(id) {
+            appendCode(rest[..<open.lowerBound])
+            blocks.append(.spoiler(id))
+            rest = rest[rest.index(after: close)...]
+        }
+        appendCode(rest)
+        return blocks
+    }
+
+    // An image or GIF a run stands for: image syntax, a Markdown link, or a bare URL, whose trailing
+    // punctuation such as "…" stays prose.
+    private static func media(in run: AttributedString.Runs.Run, text: String) -> (block: MarkdownBlock, trailing: String)? {
+        if let imageURL = run.imageURL, let block = mediaBlock(imageURL) {
+            return (block, "")
+        }
+        guard let link = run.link, isWebURL(link), !text.lowercased().hasPrefix("www.") else { return nil }
+        if URL(string: text) == link {
+            let (address, trailing) = splitTrailingPunctuation(from: text)
+            guard let url = URL(string: address), let block = mediaBlock(url) else { return nil }
+            return (block, trailing)
+        }
+        return mediaBlock(link).map { ($0, "") }
+    }
+
+    private static func mediaBlock(_ url: URL) -> MarkdownBlock? {
+        guard isWebURL(url), imageExtensions.contains(url.pathExtension.lowercased()) else { return nil }
+        return url.pathExtension.lowercased() == "gif" ? .gif(url) : .image(url)
+    }
+
+    private static func hiddenSpoiler(_ link: URL?, hidden: Set<Int>) -> Int? {
+        guard let link, let id = spoilerID(in: link), hidden.contains(id) else { return nil }
+        return id
+    }
+
+    // "![gif](giphy|ID)" or "![gif](giphy|ID|variant)", Reddit's giphy embed.
+    private static func giphyURL(_ imageURL: URL?) -> URL? {
+        guard let decoded = imageURL?.absoluteString.removingPercentEncoding,
+              decoded.lowercased().hasPrefix("giphy|") else { return nil }
+        let id = decoded.dropFirst("giphy|".count).split(separator: "|").first ?? ""
+        return URL(string: "https://media.giphy.com/media/\(id)/giphy.gif")
+    }
+
+    private static func linked(_ text: AttributedString, to url: URL?) -> AttributedString {
+        var text = text
+        text.link = url
+        text.imageURL = nil
+        return text
+    }
+
+    private static func trimmed(_ text: AttributedString) -> AttributedString {
+        guard let first = text.characters.firstIndex(where: { !$0.isWhitespace }),
+              let last = text.characters.lastIndex(where: { !$0.isWhitespace }) else { return AttributedString() }
+        return AttributedString(text[first...last])
+    }
+
+    private static func isWebURL(_ url: URL) -> Bool {
+        ["http", "https"].contains(url.scheme?.lowercased())
+    }
+
+    private static func splitTrailingPunctuation(from token: String) -> (String, String) {
+        var urlString = token
+        var trailingText = ""
+        let punctuation = CharacterSet.punctuationCharacters
+        let preservedURLCharacters = CharacterSet(charactersIn: "/-_~%+=&#@$*")
+        while let scalar = urlString.unicodeScalars.last,
+              punctuation.contains(scalar),
+              !preservedURLCharacters.contains(scalar) {
+            let character = urlString.removeLast()
+            trailingText.insert(character, at: trailingText.startIndex)
+        }
+        return (urlString, trailingText)
+    }
+
+    // The first GIF in reading order plays inline; later ones become links.
+    private static func limitInlineGIFs(_ blocks: inout [MarkdownBlock]) {
+        var seenGIF = false
+        func visit(_ blocks: [MarkdownBlock]) -> [MarkdownBlock] {
+            blocks.map { block in
+                switch block {
+                case .gif(let url):
+                    if seenGIF { return .gifLink(url) }
+                    seenGIF = true
+                    return block
+                case .quote(let inner):
+                    return .quote(visit(inner))
+                case .list(let ordered, let items):
+                    return .list(ordered: ordered, items: items.map { MarkdownListItem(ordinal: $0.ordinal, blocks: visit($0.blocks)) })
+                default:
+                    return block
+                }
+            }
+        }
+        blocks = visit(blocks)
+    }
+
+    // MARK: Tree
 
     private final class Node {
         let intent: PresentationIntent.IntentType?

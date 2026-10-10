@@ -320,6 +320,14 @@ struct ReadingSimulatorFixtureView: View {
     1|[Link](https://example.com/ep1)|[9.07](https://example.com/ep1-score)
     2|[Link](https://example.com/ep2)|[9.24](https://example.com/ep2-score)
     3|[Link](https://example.com/ep3)|[9.41](https://example.com/ep3-score)
+
+    **Spoilers**
+
+    The ending: >!a friendly dragon!<
+
+    Arc|Twist
+    :--|:--
+    Banmon|>!Tahomaru returns!<
     """
 
     private static let markdownComments: [CommentNode] = [
