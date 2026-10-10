@@ -209,6 +209,24 @@ struct RedditMarkdownTests {
             == "P([https://example.com/search?q=why?](https://example.com/search?q=why?))")
     }
 
+    @Test("A long run of closing parentheses in a link is trimmed in linear time")
+    func parenthesisRun() {
+        let body = "[" + String(repeating: ")", count: 8000) + "”](https://example.com/x)"
+        let elapsed = ContinuousClock().measure { _ = RedditMarkdown.blocks(from: body) }
+        // Rescanning for every trimmed character took 0.62 s on a Mac; one pass takes milliseconds.
+        #expect(elapsed < .seconds(0.2))
+    }
+
+    @Test("Long runs of unclosed linked images or giphy embeds parse in linear time")
+    func unclosedPatternRuns() {
+        for unit in ["[![", "[![x](y", "![gif](giphy|"] {
+            let body = String(repeating: unit, count: 8000)
+            let elapsed = ContinuousClock().measure { _ = RedditMarkdown.blocks(from: body) }
+            // Unbounded patterns took 0.9 to 3.2 s on a Mac at this size.
+            #expect(elapsed < .seconds(0.3), "\(unit) took \(elapsed)")
+        }
+    }
+
     @Test("A long run of quote markers parses in linear time")
     func quoteMarkerRun() {
         let body = String(repeating: "> ", count: 60) + "x"

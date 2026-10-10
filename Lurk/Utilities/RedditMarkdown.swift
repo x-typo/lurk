@@ -46,11 +46,16 @@ enum RedditMarkdown {
     // A top-level "#Title" line, which Reddit makes a heading and CommonMark doesn't. A line with a pipe
     // may be a table row, such as "#|Episode", so it's left alone.
     private static let compactHeadingPattern = try! NSRegularExpression(pattern: #"(?m)^( {0,3}#{1,6})(?=[^#\s])(?![^\n]*\|)"#)
-    private static let giphyPattern = try! NSRegularExpression(pattern: #"!\[gif\]\(giphy\|[^)\s]*\)"#, options: .caseInsensitive)
+    // Patterns scanning to a closing character are capped, so a long line without one stays linear: an
+    // unbounded scan from every "[![" or "![gif](giphy|" took seconds on a few thousand repeats.
+    private static let giphyPattern = try! NSRegularExpression(pattern: #"!\[gif\]\(giphy\|[^)\s]{0,100}\)"#, options: .caseInsensitive)
     // Foundation flattens an image inside a link, losing the image.
-    private static let linkedImagePattern = try! NSRegularExpression(pattern: #"\[(!\[[^\]\n]*\]\([^)\s]+\))\]\(([^)\s]+)\)"#)
+    private static let linkedImagePattern = try! NSRegularExpression(
+        pattern: #"\[(!\[[^\]\n]{0,200}\]\([^()\[\]\s]{1,1024}\))\]\(([^)\s]{1,1024})\)"#
+    )
     private static let linkedImageRestorePattern = try! NSRegularExpression(
-        pattern: #"(!\[[^\]\n]*\]\([^)\s]+\))"# + String(linkedImageMark) + #"\["# + String(mark) + #"?\]\(([^)\s]+)\)"#
+        pattern: #"(!\[[^\]\n]{0,200}\]\([^()\[\]\s]{1,1024}\))"# + String(linkedImageMark) + #"\["# + String(mark)
+            + #"?\]\(([^)\s]{1,1024})\)"#
     )
     // A hidden spoiler's placeholder that ended up as text, inside a link's label or a code span.
     private static let nestedSpoilerPattern = try! NSRegularExpression(pattern: #"<?lurk-spoiler:(\d+)>?"#)
@@ -261,9 +266,13 @@ enum RedditMarkdown {
             if run.inlinePresentationIntent?.contains(.code) == true {
                 result += AttributedString(text[run.range])
             } else if let link = run.link {
+                guard isWebURL(link), URL(string: runText) == link else {
+                    result += AttributedString(text[run.range])
+                    continue
+                }
                 let cut = runText.firstIndex(where: \.isWhitespace) ?? runText.endIndex
                 let (address, punctuation) = splitAutolinkTrailing(from: String(runText[..<cut]), cutAtSpace: cut != runText.endIndex)
-                guard isWebURL(link), URL(string: runText) == link, address != runText, let url = URL(string: address) else {
+                guard address != runText, let url = URL(string: address) else {
                     result += AttributedString(text[run.range])
                     continue
                 }
@@ -498,34 +507,49 @@ enum RedditMarkdown {
     // (`cutAtSpace`). Otherwise Foundation already leaves ASCII punctuation out, and an explicit link such as
     // "[https://x/?q=why?](https://x/?q=why?)", which looks the same, keeps its own.
     private static func splitAutolinkTrailing(from token: String, cutAtSpace: Bool = false) -> (String, String) {
-        var address = token
-        var trailing = ""
+        let scalars = Array(token.unicodeScalars)
+        var unclosed = unclosedParentheses(scalars)
+        var end = scalars.endIndex
         var overran = cutAtSpace
-        let preservedURLCharacters = CharacterSet(charactersIn: "/-_~%+=&#@$*")
-        while let scalar = address.unicodeScalars.last, CharacterSet.punctuationCharacters.contains(scalar) {
+        while end > 0, CharacterSet.punctuationCharacters.contains(scalars[end - 1]) {
+            let scalar = scalars[end - 1]
             let keptByFoundation = !scalar.isASCII || scalar == "]"
-            let partOfURL = preservedURLCharacters.contains(scalar)
-                || (scalar == ")" && address.filter({ $0 == ")" }).count <= address.filter({ $0 == "(" }).count)
+            let partOfURL = preservedURLCharacters.contains(scalar) || (scalar == ")" && unclosed >= 0)
             guard keptByFoundation || (overran && !partOfURL) else { break }
             if keptByFoundation { overran = true }
-            trailing.insert(address.removeLast(), at: trailing.startIndex)
+            unclosed += scalar == ")" ? 1 : scalar == "(" ? -1 : 0
+            end -= 1
         }
-        return (address, trailing)
+        return split(scalars, at: end)
     }
 
     private static func splitTrailingPunctuation(from token: String) -> (String, String) {
-        var urlString = token
-        var trailingText = ""
-        let punctuation = CharacterSet.punctuationCharacters
-        let preservedURLCharacters = CharacterSet(charactersIn: "/-_~%+=&#@$*")
-        while let scalar = urlString.unicodeScalars.last,
-              punctuation.contains(scalar),
-              !preservedURLCharacters.contains(scalar),
-              scalar != ")" || urlString.filter({ $0 == ")" }).count > urlString.filter({ $0 == "(" }).count {
-            let character = urlString.removeLast()
-            trailingText.insert(character, at: trailingText.startIndex)
+        let scalars = Array(token.unicodeScalars)
+        var unclosed = unclosedParentheses(scalars)
+        var end = scalars.endIndex
+        while end > 0, CharacterSet.punctuationCharacters.contains(scalars[end - 1]),
+              !preservedURLCharacters.contains(scalars[end - 1]),
+              scalars[end - 1] != ")" || unclosed < 0 {
+            unclosed += scalars[end - 1] == ")" ? 1 : scalars[end - 1] == "(" ? -1 : 0
+            end -= 1
         }
-        return (urlString, trailingText)
+        return split(scalars, at: end)
+    }
+
+    // Both splitters walk back once, keeping a running count, so a long run of ")" stays linear.
+    private static let preservedURLCharacters = CharacterSet(charactersIn: "/-_~%+=&#@$*")
+
+    // "(" minus ")"; below zero means a ")" closes nothing.
+    private static func unclosedParentheses(_ scalars: [Unicode.Scalar]) -> Int {
+        scalars.reduce(0) { $0 + ($1 == "(" ? 1 : $1 == ")" ? -1 : 0) }
+    }
+
+    private static func split(_ scalars: [Unicode.Scalar], at end: Int) -> (String, String) {
+        var head = String.UnicodeScalarView()
+        head.append(contentsOf: scalars[..<end])
+        var tail = String.UnicodeScalarView()
+        tail.append(contentsOf: scalars[end...])
+        return (String(head), String(tail))
     }
 
     // The first GIF in reading order plays inline; later ones become links.
