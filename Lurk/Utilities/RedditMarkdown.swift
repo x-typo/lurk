@@ -190,12 +190,15 @@ enum RedditMarkdown {
                 && ##"!"#$%&'()*+,-./:;<=>?@[\]^_`{|}~"##.contains(characters[cursor + 1])
             return cursor + (isEscape ? 2 : 1)
         }
+        func startsLinkedImage(at cursor: Int) -> Bool {
+            cursor + 2 < characters.count && characters[cursor] == "[" && characters[cursor + 1] == "!" && characters[cursor + 2] == "["
+        }
         // Where a link's address and optional title end: `.end` at the ")" that closes them, or where the
         // scan gave up. An address is "<…>", which may hold spaces and parentheses, or runs to whitespace past
-        // any balanced "(…)". A "<…>" or title that never closes is `.unclosed`: the scan resumes at its
-        // opener, so a linked image inside it still counts, while the address before it isn't read again.
-        // Each of those scans stops at its own opener too, as CommonMark requires, so scans of one kind
-        // never overlap and the pass stays linear.
+        // any balanced "(…)", stopping at the next "[![" so a failed scan never hides the next linked image.
+        // A "<…>" or title that never closes is `.unclosed`: the scan resumes at its opener, so a linked
+        // image inside it still counts. Each of those scans stops at its own opener too, as CommonMark
+        // requires, so scans of one kind never overlap and the pass stays linear.
         enum Destination {
             case end(Int)
             case unclosed(resume: Int)
@@ -209,7 +212,7 @@ enum RedditMarkdown {
                 cursor += 1
             } else {
                 var depth = 0
-                while cursor < characters.count, !characters[cursor].isWhitespace {
+                while cursor < characters.count, !characters[cursor].isWhitespace, !startsLinkedImage(at: cursor) {
                     if characters[cursor] == "(" {
                         depth += 1
                     } else if characters[cursor] == ")" {
@@ -241,7 +244,7 @@ enum RedditMarkdown {
         var copied = 0
         var index = 0
         while index + 2 < characters.count {
-            guard characters[index] == "[", characters[index + 1] == "!", characters[index + 2] == "[" else {
+            guard startsLinkedImage(at: index) else {
                 index += 1
                 continue
             }

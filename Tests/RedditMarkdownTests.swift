@@ -263,10 +263,17 @@ struct RedditMarkdownTests {
             == "P(Poster:) IMG(https://i.imgur.com/p.jpg) P([https://example.com/full](https://example.com/full) nice)")
         #expect(outline("Poster: [![](<https://example.com/a b.png>)](<https://example.com/c)d>) nice")
             == "P(Poster:) IMG(https://example.com/a%20b.png) P([https://example.com/c)d](https://example.com/c)d) nice)")
-        // A "<…>" or title that never closes doesn't hide a linked image after it.
+        // A "<…>" or title that never closes, or an address that runs into the next "[![", doesn't hide the
+        // linked image after it.
         for unclosed in ["`[![a](<`", "`[![a](x \"`", "`[![a](x (`"] {
             #expect(outline("\(unclosed) [![b](https://example.com/b.png)](https://example.com/page)")
                 == "P(\(unclosed)) IMG(https://example.com/b.png) P([https://example.com/page](https://example.com/page))")
+        }
+        for prefix in ["`[![a]((x)](y)`", "`[![a](i)](x(y)`"] {
+            for opener in ["\"", "'", "("] {
+                #expect(outline("\(prefix)[![b](https://example.com/b.png)](https://example.com/page) \(opener)")
+                    == "P(\(prefix)) IMG(https://example.com/b.png) P([https://example.com/page](https://example.com/page) \(opener))")
+            }
         }
     }
 
