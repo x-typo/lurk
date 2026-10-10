@@ -86,6 +86,9 @@ struct RedditMarkdownTests {
         ] {
             #expect(RedditMarkdown.normalized(unchanged) == unchanged)
         }
+        // A row needs a pipe, so a heading right after a table, or after a fenced table example, still counts.
+        #expect(RedditMarkdown.normalized("A|B\n-|-\n#Next") == "A|B\n-|-\n# Next")
+        #expect(RedditMarkdown.normalized("```\nA|B\n-|-\n```\n#Next") == "```\nA|B\n-|-\n```\n# Next")
     }
 
     @Test("Block HTML keeps its place, including inside quotes and list items")
@@ -176,6 +179,14 @@ struct RedditMarkdownTests {
         ] {
             expectOneTextPart(body)
         }
+
+        // CRLF line breaks still mark a list item's line.
+        let crlf = CommentBodyView.parse("intro\r\n* [pic](https://example.com/p.png)")
+        guard crlf.count == 1, case .text(let crlfText) = crlf[0] else {
+            Issue.record("Expected one text part, got \(crlf)")
+            return
+        }
+        #expect(crlfText == "intro\n* [pic](https://example.com/p.png)")
 
         // A giphy embed kept in a list becomes a link to the GIF.
         let listGiphy = CommentBodyView.parse("* ![gif](giphy|abc)")

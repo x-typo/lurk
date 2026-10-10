@@ -1159,6 +1159,8 @@ struct CommentBodyView: View {
 
     static func parse(_ text: String, revealedSpoilers: Set<Int> = []) -> [BodyPart] {
         guard !text.isEmpty else { return [.text(text)] }
+        // Swift reads "\r\n" as one Character, so line scanning below needs plain "\n" breaks.
+        let text = text.replacingOccurrences(of: "\r\n", with: "\n").replacingOccurrences(of: "\r", with: "\n")
         var parts: [BodyPart] = []
         var visibleText = ""
         for part in CommentSpoilers.parse(text) {

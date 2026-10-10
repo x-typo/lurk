@@ -71,39 +71,46 @@ enum RedditMarkdown {
     // table rows such as "#|Episode" are left alone.
     static func normalized(_ text: String) -> String {
         let lines = text.split(separator: "\n", omittingEmptySubsequences: false)
-        let tableRows = tableLines(lines)
-        var fence: (marker: Character, length: Int)?
-        var result: [String] = []
-        for (index, line) in lines.enumerated() {
-            let content = blockContent(of: line)
-            if let open = fence {
-                if isClosingFence(content, of: open) { fence = nil }
-                result.append(String(line))
-                continue
-            }
-            if let opened = openingFence(content) {
-                fence = opened
-                result.append(String(line))
-                continue
-            }
-            result.append(tableRows.contains(index) ? String(line) : spacedHeading(line) ?? String(line))
-        }
-        return result.joined(separator: "\n")
+        let untouched = fencedLines(lines).union(tableLines(lines))
+        return lines.enumerated()
+            .map { index, line in untouched.contains(index) ? String(line) : spacedHeading(line) ?? String(line) }
+            .joined(separator: "\n")
     }
 
-    // Indexes of the lines in GFM tables: each header row, its delimiter row, and the rows up to a blank line.
+    // Indexes of the lines in tables outside code: each header row, its delimiter row, and the rows
+    // after it. As on Reddit, a row carries a pipe, so a line without one, such as "#Next", ends the table.
     static func tableLines(_ lines: [Substring]) -> Set<Int> {
+        let fenced = fencedLines(lines)
         var result: Set<Int> = []
         var index = 1
         while index < lines.count {
-            guard isTableDelimiter(lines[index]), lines[index - 1].contains("|") else {
+            guard !fenced.contains(index - 1), !fenced.contains(index),
+                  isTableDelimiter(lines[index]), lines[index - 1].contains("|") else {
                 index += 1
                 continue
             }
-            result.insert(index - 1)
-            while index < lines.count, !lines[index].allSatisfy(\.isWhitespace) {
+            result.formUnion([index - 1, index])
+            index += 1
+            while index < lines.count, !fenced.contains(index), lines[index].contains("|") {
                 result.insert(index)
                 index += 1
+            }
+        }
+        return result
+    }
+
+    // Indexes of fenced code lines, fences included.
+    private static func fencedLines(_ lines: [Substring]) -> Set<Int> {
+        var result: Set<Int> = []
+        var fence: (marker: Character, length: Int)?
+        for (index, line) in lines.enumerated() {
+            let content = blockContent(of: line)
+            if let open = fence {
+                result.insert(index)
+                if isClosingFence(content, of: open) { fence = nil }
+            } else if let opened = openingFence(content) {
+                result.insert(index)
+                fence = opened
             }
         }
         return result
