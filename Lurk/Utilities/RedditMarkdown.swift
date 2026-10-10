@@ -31,7 +31,8 @@ struct MarkdownTable: Equatable {
 // Foundation's full Markdown parse decides a body's structure. Lurk adds only Reddit's own syntax, through
 // private-use marks that Foundation reads as text and that are removed after parsing, so code keeps its
 // bytes without Lurk having to find the code first. A body's own copies of those characters, such as the
-// private-use glyphs some games' players paste, are escaped first and restored after.
+// private-use glyphs some games' players paste, are escaped first and restored after; one written as an
+// HTML character reference, such as "&#xE000;", isn't.
 enum RedditMarkdown {
     static let spoilerScheme = "lurk-spoiler"
 
@@ -407,6 +408,11 @@ enum RedditMarkdown {
     }
 
     private static func unmarked(_ url: URL) -> URL {
+        let stripped = withoutInjectedMarks(url)
+        return URL(string: restoringEncodedReserved(stripped.absoluteString)) ?? stripped
+    }
+
+    private static func withoutInjectedMarks(_ url: URL) -> URL {
         let text = url.absoluteString
         guard text.contains("%EE%80%8") else { return url }
         let restored = text
@@ -416,7 +422,7 @@ enum RedditMarkdown {
             .replacingOccurrences(of: "%EE%80%84", with: "")
             .replacingOccurrences(of: "%EE%80%85", with: "")
             .replacingOccurrences(of: "%EE%80%81", with: "%7C")
-        return URL(string: restoringEncodedReserved(restored)) ?? url
+        return URL(string: restored) ?? url
     }
 
     private static func unmarked(_ text: AttributedString) -> AttributedString {
@@ -452,7 +458,8 @@ enum RedditMarkdown {
         for run in content.runs {
             let runText = String(content[run.range].characters)
             if runText == String(mark) || runText == "\u{FFFC}", let target = run.link ?? run.imageURL {
-                addressed += AttributedString(unmarked(target).absoluteString, attributes: run.attributes)
+                // Restored with the rest of the text below, so only the injected marks go here.
+                addressed += AttributedString(withoutInjectedMarks(target).absoluteString, attributes: run.attributes)
             } else {
                 addressed += AttributedString(content[run.range])
             }
@@ -467,13 +474,7 @@ enum RedditMarkdown {
                ["http://", "https://", "www."].contains(where: lowered.hasPrefix),
                URL(string: lowered.hasPrefix("www.") ? "http://" + runText : runText) == link {
                 // The mark hid any trailing punctuation from Foundation, so trim it here as Foundation would.
-                var (address, trailing) = splitTrailingPunctuation(from: String(runText[..<cut]))
-                while let last = address.last, "*_~".contains(last) {
-                    trailing = String(address.removeLast()) + trailing
-                    let (head, tail) = splitTrailingPunctuation(from: address)
-                    address = head
-                    trailing = tail + trailing
-                }
+                let (address, trailing) = splitTrailingPunctuation(from: String(runText[..<cut]), includingEmphasis: true)
                 var linked = AttributedString(address, attributes: run.attributes)
                 linked.link = URL(string: lowered.hasPrefix("www.") ? "http://" + address : address)
                 var rest = AttributedString(trailing + String(runText[cut...]), attributes: run.attributes)
@@ -787,13 +788,17 @@ enum RedditMarkdown {
         return split(scalars, at: end)
     }
 
-    private static func splitTrailingPunctuation(from token: String) -> (String, String) {
+    // `includingEmphasis` also trims GFM's trailing "*", "_", and "~", which a URL otherwise keeps.
+    private static func splitTrailingPunctuation(from token: String, includingEmphasis: Bool = false) -> (String, String) {
         let scalars = Array(token.unicodeScalars)
         var unclosed = Unclosed(scalars)
         var end = scalars.endIndex
-        while end > 0, CharacterSet.punctuationCharacters.contains(scalars[end - 1]),
-              !preservedURLCharacters.contains(scalars[end - 1]), !unclosed.closesOpener(scalars[end - 1]) {
-            unclosed.drop(scalars[end - 1])
+        while end > 0 {
+            let scalar = scalars[end - 1]
+            let isEmphasis = includingEmphasis && (scalar == "*" || scalar == "_" || scalar == "~")
+            guard isEmphasis || (CharacterSet.punctuationCharacters.contains(scalar)
+                && !preservedURLCharacters.contains(scalar) && !unclosed.closesOpener(scalar)) else { break }
+            unclosed.drop(scalar)
             end -= 1
         }
         return split(scalars, at: end)

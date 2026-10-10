@@ -388,6 +388,10 @@ struct RedditMarkdownTests {
             _ = RedditMarkdown.blocks(from: revealedRun, revealedSpoilers: Set(0..<8000))
         }
         #expect(revealedElapsed < .seconds(1), "revealed spoiler run took \(revealedElapsed)")
+        // A revealed URL followed by a long run of trailing emphasis characters.
+        let underscores = "x >!https://example.com/a" + String(repeating: "_", count: 8000) + "!<"
+        let trimElapsed = ContinuousClock().measure { _ = RedditMarkdown.blocks(from: underscores, revealedSpoilers: [0]) }
+        #expect(trimElapsed < .seconds(1), "revealed URL trim took \(trimElapsed)")
         // Many nested addresses sharing one title that never closes.
         for opener in ["\"", "'", "("] {
             let body = String(repeating: "[![a](x", count: 8000) + " " + opener
@@ -434,6 +438,9 @@ struct RedditMarkdownTests {
         #expect(outline("[x](https://example.com/\u{E000}\u{E00F}⸿)") == "P([x](https://example.com/%EE%80%80%EE%80%8F%E2%B8%BF))")
         #expect(outline("A|B\n-|-\n\u{E001}|x") == "TABLE(A|B / \u{E001}|x)")
         #expect(outline("`%EE%80%80 %EE%80%8F%EF%9C%80` %ee%80%80") == "P(`%EE%80%80 %EE%80%8F%EF%9C%80` %ee%80%80)")
+        // An empty label shows its address restored once.
+        #expect(outline("[](https://example.com/%EE%80%8F%EF%9C%80)")
+            == "P([https://example.com/%EE%80%8F%EF%9C%80](https://example.com/%EE%80%8F%EF%9C%80))")
         #expect(outline("`a⸿b` and [capitulum](https://example.com/wiki/%E2%B8%BF) ⸿")
             == "P(`a⸿b` and [capitulum](https://example.com/wiki/%E2%B8%BF) ⸿)")
         #expect(outline("[c](https://example.com/wiki/⸿) >!x⸿y!<", revealed: [0])
