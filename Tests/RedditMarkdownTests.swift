@@ -209,6 +209,22 @@ struct RedditMarkdownTests {
             == "P([https://example.com/search?q=why?](https://example.com/search?q=why?))")
     }
 
+    @Test("Inputs that broke the first, line-guessing approach still render as Reddit shows them")
+    func firstApproachReviewInputs() {
+        let gif = "GIF(https://media.giphy.com/media/abc/giphy.gif)"
+        #expect(outline("before >!secret!< **important** and *italic*") == "P(before) SPOILER(0) P(**important** and _italic_)")
+        // Fences end where CommonMark ends them, inside or after their quote or list, and code keeps its bytes.
+        #expect(outline("  ~~~\n  code\n~~~\n![gif](giphy|abc)") == "CODE(code) \(gif)")
+        #expect(outline("- > ~~~\n  > ![gif](giphy|abc)\n  > ~~~") == "UL[1:Q[CODE(![gif](giphy|abc))]]")
+        #expect(outline("- ~~~\n\t![gif](giphy|abc)\n  ~~~") == "UL[1:CODE(  ![gif](giphy|abc))]")
+        #expect(outline("```sh\n#!/bin/sh") == "CODE(#!/bin/sh)")
+        #expect(outline("```\nA|B\n-|-\nx|[pic](https://example.com/p.png)\n```") == "CODE(A|B⏎-|-⏎x|[pic](https://example.com/p.png))")
+        // Caret links keep their target with any scheme case, in angle brackets, and after quoted code.
+        #expect(outline("Sources^[1](HTTPS://example.com/src)") == "P(Sources^[1](HTTPS://example.com/src))")
+        #expect(outline("Sources^[1](<https://example.com/src>)") == "P(Sources^[1](https://example.com/src))")
+        #expect(outline("> ~~~\n> code\n\nSources^[1](https://example.com/src)") == "Q[CODE(code)] P(Sources^[1](https://example.com/src))")
+    }
+
     @Test("A long run of closing parentheses in a link is trimmed in linear time")
     func parenthesisRun() {
         let body = "[" + String(repeating: ")", count: 8000) + "”](https://example.com/x)"
