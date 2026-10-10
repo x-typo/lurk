@@ -18,29 +18,14 @@ struct CommentSpoilerTests {
     func concealsMediaAndLinks() {
         let hidden = "[answer](https://example.com/answer) https://example.com/reveal.png "
             + "https://example.com/reveal.gif ![gif](giphy|secret)"
-        let parts = CommentBodyView.displayParts(from: "Before >!\(hidden)!< after")
-        #expect(parts.count == 3)
-        guard parts.count == 3, case .text("Before ") = parts[0],
-              case .spoiler(0, let content) = parts[1], case .text(" after") = parts[2] else {
-            Issue.record("Hidden content escaped into the visible body parser")
-            return
-        }
-        #expect(content == hidden)
+        #expect(outline("Before >!\(hidden)!< after") == "P(Before) SPOILER(0) P(after)")
     }
 
     @Test("Reveal enables links and keeps the whole body's single inline GIF budget")
     func revealUsesExistingMediaPolicy() {
-        let parts = CommentBodyView.displayParts(
-            from: "https://example.com/first.gif >![answer](https://example.com/answer) "
-                + "https://example.com/secret.gif!<",
-            revealedSpoilers: [0]
-        )
-        #expect(parts.filter { if case .gif = $0 { true } else { false } }.count == 1)
-        #expect(parts.contains { if case .link("answer", _) = $0 { true } else { false } })
-        #expect(parts.contains {
-            if case .link("Open GIF", let url) = $0 { url.lastPathComponent == "secret.gif" } else { false }
-        })
-        #expect(!parts.contains { if case .spoiler = $0 { true } else { false } })
+        let body = "https://example.com/first.gif >![answer](https://example.com/answer) https://example.com/secret.gif!<"
+        #expect(outline(body, revealed: [0])
+            == "GIF(https://example.com/first.gif) P([answer](https://example.com/answer)) GIFLINK(https://example.com/secret.gif)")
     }
 
     @Test("Selective reveal and selection cannot expose another hidden spoiler")
@@ -50,34 +35,16 @@ struct CommentSpoilerTests {
             == "visible [Spoiler hidden] and [Spoiler hidden]")
         #expect(CommentSpoilers.selectionText(from: body, revealed: [0])
             == "visible first secret and [Spoiler hidden]")
-        let parts = CommentBodyView.parse(body, revealedSpoilers: [0])
-        #expect(parts.contains { if case .spoiler(1, _) = $0 { true } else { false } })
-        #expect(!parts.contains { if case .image = $0 { true } else { false } })
+        #expect(outline(body, revealed: [0]) == "P(visible first secret and) SPOILER(1)")
     }
 
     @Test("Revealed text rejoins its sentence and Markdown before rendering")
     func revealRestoresSurroundingText() {
-        for (body, expected) in [
-            ("Before >!secret!< after", "Before secret after"),
-            ("**Before >!secret!< after**", "**Before secret after**"),
-        ] {
-            let parts = CommentBodyView.parse(body, revealedSpoilers: [0])
-            guard parts.count == 1, case .text(let text) = parts[0] else {
-                Issue.record("Revealing a spoiler should restore one continuous text segment")
-                continue
-            }
-            #expect(text == expected)
-        }
-
-        let partial = CommentBodyView.parse(
-            "Before >!secret!< after >!https://example.com/hidden.png!< end",
-            revealedSpoilers: [0]
-        )
-        guard partial.count == 3, case .text("Before secret after ") = partial[0],
-              case .spoiler(1, _) = partial[1], case .text(" end") = partial[2] else {
-            Issue.record("An unrevealed spoiler must remain a barrier between visible segments")
-            return
-        }
+        #expect(outline("Before >!secret!< after", revealed: [0]) == "P(Before secret after)")
+        #expect(outline("**Before >!secret!< after**", revealed: [0]) == "P(**Before secret after**)")
+        // An unrevealed spoiler stays a barrier between the visible text around it.
+        #expect(outline("Before >!secret!< after >!https://example.com/hidden.png!< end", revealed: [0])
+            == "P(Before secret after) SPOILER(1) P(end)")
     }
 
     @Test("Escaped delimiters stay literal; escaped closing markers do not disclose the suffix")
@@ -112,13 +79,8 @@ struct CommentSpoilerTests {
         #expect(CommentSpoilers.parse("👩🏽‍🚀 >!👨‍👩‍👧‍👦 secret!< café") == [
             .text("👩🏽‍🚀 "), .spoiler(id: 0, content: "👨‍👩‍👧‍👦 secret"), .text(" café"),
         ])
-        let ordinary = "# Heading\n> quote\n**bold** and `code`\n---"
-        let parts = CommentBodyView.parse(ordinary)
-        guard parts.count == 1, case .text(let text) = parts[0] else {
-            Issue.record("Ordinary Markdown was unexpectedly split")
-            return
-        }
-        #expect(text == ordinary)
+        #expect(outline("# Heading\n> quote\n**bold** and `code`\n---")
+            == "H1(Heading) Q[P(quote⏎**bold** and `code`)] RULE")
     }
 
     @Test("Literal spoiler markers in inline code and fenced code stay literal")
@@ -139,6 +101,18 @@ struct CommentSpoilerTests {
         ])
     }
 
+    @Test("CRLF bodies number spoilers the same for rendering and selection")
+    func crlfFences() {
+        let body = "intro\r\n~~~\r\n>!literal!<\r\n~~~\r\n>!first!<\r\n>!second!<"
+        let spoilers = CommentSpoilers.parse(body).compactMap { part -> String? in
+            if case .spoiler(_, let content) = part { content } else { nil }
+        }
+        #expect(spoilers == ["first", "second"])
+        let selection = CommentSpoilers.selectionText(from: body, revealed: [1])
+        #expect(selection.contains("second"))
+        #expect(!selection.contains("first"))
+    }
+
     @Test("An unmatched backtick run cannot become a shorter code opener and expose a spoiler")
     func unmatchedCodeRuns() {
         let body = "`` >!https://example.com/secret.gif!< `"
@@ -146,8 +120,6 @@ struct CommentSpoilerTests {
             .text("`` "), .spoiler(id: 0, content: "https://example.com/secret.gif"), .text(" `"),
         ])
         #expect(CommentSpoilers.selectionText(from: body, revealed: []) == "`` [Spoiler hidden] `")
-        let parts = CommentBodyView.displayParts(from: body)
-        #expect(!parts.contains { if case .gif = $0 { true } else { false } })
-        #expect(parts.contains { if case .spoiler = $0 { true } else { false } })
+        #expect(outline(body) == "P(``) SPOILER(0) P(`)")
     }
 }

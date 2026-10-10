@@ -7,6 +7,9 @@ enum CommentSpoilers {
     }
 
     static func parse(_ text: String) -> [Part] {
+        // Swift reads "\r\n" as one Character, which hides line starts from the fence check and the
+        // body's later line scanning. Rendering and selection both parse here, so they number alike.
+        let text = text.replacingOccurrences(of: "\r\n", with: "\n").replacingOccurrences(of: "\r", with: "\n")
         var parts: [Part] = []
         var plainStart = text.startIndex
         var cursor = text.startIndex
@@ -79,9 +82,9 @@ enum CommentSpoilers {
             let runEnd = text[next...].firstIndex(where: { $0 != marker }) ?? text.endIndex
             let runWidth = text.distance(from: next, to: runEnd)
             if fenced {
-                let lineEnd = text[runEnd...].firstIndex(of: "\n") ?? text.endIndex
+                // The cheap checks go first, so a line is scanned to its end only for a run that could close.
                 if runWidth >= width, isFenceStart(next, in: text),
-                   text[runEnd..<lineEnd].allSatisfy({ $0 == " " || $0 == "\t" || $0 == "\r" }) {
+                   text[runEnd...].prefix(while: { $0 != "\n" }).allSatisfy({ $0 == " " || $0 == "\t" || $0 == "\r" }) {
                     return runEnd
                 }
             } else if runWidth == width {
@@ -92,10 +95,17 @@ enum CommentSpoilers {
         return fenced ? text.endIndex : nil
     }
 
+    // At most three spaces since the line start. Looks back only that far, so a long line of "~~~" runs
+    // stays linear.
     private static func isFenceStart(_ index: String.Index, in text: String) -> Bool {
-        let lineStart = text[..<index].lastIndex(of: "\n").map { text.index(after: $0) } ?? text.startIndex
-        let prefix = text[lineStart..<index]
-        return prefix.count <= 3 && prefix.allSatisfy { $0 == " " }
+        var position = index
+        for _ in 0...3 {
+            guard position > text.startIndex else { return true }
+            position = text.index(before: position)
+            if text[position] == "\n" { return true }
+            if text[position] != " " { return false }
+        }
+        return false
     }
 
     static func selectionText(from text: String, revealed: Set<Int>) -> String {

@@ -3,7 +3,7 @@ import SwiftUI
 
 struct ReadingSimulatorFixtureView: View {
     private enum Sample: String, Identifiable {
-        case comments, empty, crosspost, collapseScroll
+        case comments, empty, crosspost, collapseScroll, markdown
         var id: String { rawValue }
     }
 
@@ -80,9 +80,15 @@ struct ReadingSimulatorFixtureView: View {
                     }
                 }
             }
-            Button("Collapse scroll") {
-                lastBrowserURL = nil
-                selectedSample = .collapseScroll
+            HStack {
+                Button("Collapse scroll") {
+                    lastBrowserURL = nil
+                    selectedSample = .collapseScroll
+                }
+                Button("Markdown") {
+                    lastBrowserURL = nil
+                    selectedSample = .markdown
+                }
             }
             Text("Feed requests: \(requests)")
                 .font(.caption)
@@ -111,8 +117,9 @@ struct ReadingSimulatorFixtureView: View {
             blocks.unblock(Self.sampleSubreddit)
         }
         .sheet(item: $selectedSample) { sample in
-            PostDetailView(post: sample == .crosspost ? Self.crosspost : Self.posts[0], commentsFetch: {
+            PostDetailView(post: Self.post(for: sample), commentsFetch: {
                 if sample == .collapseScroll { return Self.collapseScrollComments }
+                if sample == .markdown { return Self.markdownComments }
                 if sample != .comments { return [] }
                 attempts += 1
                 try await Task.sleep(for: .milliseconds(300))
@@ -154,13 +161,21 @@ struct ReadingSimulatorFixtureView: View {
         })
     }
 
-    private static func makePost(id: String, title: String) -> Post {
+    private static func post(for sample: Sample) -> Post {
+        switch sample {
+        case .crosspost: crosspost
+        case .markdown: makePost(id: "readingqa_markdown", title: "Dororo - Episode 17 discussion", selftext: markdownBody)
+        default: posts[0]
+        }
+    }
+
+    private static func makePost(id: String, title: String, selftext: String = "") -> Post {
         Post(
             id: id, title: title, author: "sample_reader",
             subreddit: sampleSubreddit, subredditNamePrefixed: "r/\(sampleSubreddit)",
             score: 12, numComments: 4, createdUtc: Date().timeIntervalSince1970,
             permalink: "/r/readingqa/comments/\(id)/sample/",
-            url: "https://www.reddit.com/r/readingqa/", selftext: "",
+            url: "https://www.reddit.com/r/readingqa/", selftext: selftext,
             isSelf: true, isVideo: false, stickied: false, over18: false,
             postHint: nil, media: nil, secureMedia: nil, preview: nil,
             galleryData: nil, mediaMetadata: nil
@@ -270,6 +285,61 @@ struct ReadingSimulatorFixtureView: View {
             score: index, replies: replies
         )
     }
+
+    // r/anime's episode-discussion template: a heading link, link lists, and a table of links.
+    private static let markdownBody = """
+    *Dororo*, episode 17
+
+    #[Rate this episode here.](https://example.com/rate)
+
+    ---
+
+    **Reminder:** Please do not discuss plot points not yet seen or skipped in the show.
+    Failing to follow the rules may result in a ban.
+
+    ---
+
+    **Streams**
+
+    * [Amazon US](https://example.com/amazon-us)
+    * [Amazon UK](https://example.com/amazon-uk)
+    * [Prime Video International](https://example.com/prime)
+
+    **Show information**
+
+    * [MyAnimeList](https://example.com/mal)
+    * [AniList](https://example.com/anilist)
+    * /r/Dororo
+
+    ---
+
+    **Previous discussions**
+
+    Episode|Link|Score
+    :-:|:-:|:-:
+    1|[Link](https://example.com/ep1)|[9.07](https://example.com/ep1-score)
+    2|[Link](https://example.com/ep2)|[9.24](https://example.com/ep2-score)
+    3|[Link](https://example.com/ep3)|[9.41](https://example.com/ep3-score)
+
+    **Spoilers**
+
+    The ending: >!a friendly dragon!<
+
+    Arc|Twist
+    :--|:--
+    Banmon|>!Tahomaru returns!<
+    """
+
+    private static let markdownComments: [CommentNode] = [
+        comment(
+            "markdownlist", "list_reader",
+            "## Ranking\n\n1. [First pick](https://example.com/first)\n2. Second pick\n\nTap the comment text to collapse it; tap a link to open it."
+        ),
+        comment(
+            "markdowntable", "table_reader",
+            "Arc|Episodes\n:--|--:\nOpening|1-6\n[Banmon](https://example.com/banmon)|7-8"
+        ),
+    ]
 
     private static let crosspost: Post = {
         let data = Data("""

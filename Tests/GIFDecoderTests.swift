@@ -407,89 +407,33 @@ struct GIFDecoderTests {
 
     @Test("Bare and Markdown GIF URLs use the bounded GIF renderer")
     func routesDirectGIFURLsThroughGIFRenderer() {
-        let bareParts = CommentBodyView.parse("https://example.com/media/loop.gif?size=large")
-        guard let barePart = bareParts.first, case .gif(let bareURL) = barePart else {
-            Issue.record("Expected bare GIF URL to produce a GIF body part")
-            return
-        }
-        #expect(bareURL.pathExtension == "gif")
+        #expect(outline("https://example.com/media/loop.gif?size=large") == "GIF(https://example.com/media/loop.gif?size=large)")
+        #expect(outline("[animation](https://example.com/media/loop.GIF?source=comment)")
+            == "GIF(https://example.com/media/loop.GIF?source=comment)")
+        #expect(outline("https://example.com/media/still.png") == "IMG(https://example.com/media/still.png)")
 
-        let markdownParts = CommentBodyView.parse(
-            "[animation](https://example.com/media/loop.GIF?source=comment)"
-        )
-        guard let markdownPart = markdownParts.first,
-              case .gif(let markdownURL) = markdownPart else {
-            Issue.record("Expected Markdown GIF URL to produce a GIF body part")
-            return
-        }
-        #expect(markdownURL.pathExtension == "GIF")
-
-        let imageParts = CommentBodyView.parse("https://example.com/media/still.png")
-        guard let imagePart = imageParts.first, case .image = imagePart else {
-            Issue.record("Expected a non-GIF image to remain a static image body part")
-            return
+        // Punctuation after a bare GIF URL stays prose.
+        for punctuation in [",", "]", "…", "”"] {
+            #expect(outline("https://example.com/media/loop.gif\(punctuation) next")
+                == "GIF(https://example.com/media/loop.gif) P(\(punctuation) next)")
         }
 
-        let punctuatedParts = CommentBodyView.parse("https://example.com/media/loop.gif, next")
-        guard punctuatedParts.count == 3,
-              case .gif(let punctuatedURL) = punctuatedParts[0],
-              case .text(let punctuation) = punctuatedParts[1],
-              case .text(let remainder) = punctuatedParts[2] else {
-            Issue.record("Expected punctuation after a bare GIF URL to remain prose")
-            return
-        }
-        #expect(punctuatedURL.pathExtension == "gif")
-        #expect(punctuation == ",")
-        #expect(remainder == " next")
+        // GFM doesn't autolink a bracketed IPv6 host; Lurk's own matcher does, keeping the balanced "]".
+        #expect(outline("https://[2001:db8::1]") == "P([https://[2001:db8::1]](https://[2001:db8::1]))")
 
-        for punctuation in ["]", "…", "”"] {
-            let parts = CommentBodyView.parse(
-                "https://example.com/media/loop.gif\(punctuation) next"
-            )
-            guard parts.count == 3,
-                  case .gif = parts[0],
-                  case .text(let parsedPunctuation) = parts[1] else {
-                Issue.record("Expected \(punctuation) after a GIF URL to remain prose")
-                continue
-            }
-            #expect(parsedPunctuation == punctuation)
-        }
-
-        let ipv6Parts = CommentBodyView.parse("https://[2001:db8::1]")
-        guard ipv6Parts.count == 1,
-              case .link(_, let ipv6URL) = ipv6Parts[0] else {
-            Issue.record("Expected a valid bracketed IPv6 URL to remain a link")
-            return
-        }
-        #expect(ipv6URL.host?.contains(":") == true)
-
+        // Only http and https media load.
         for unsafeURL in [
             "file:///private/tmp/loop.gif",
             "ftp://example.com/loop.gif",
             "data:image/gif;base64,R0lGODlh",
             "[animation](file:///private/tmp/loop.gif)",
         ] {
-            let unsafeParts = CommentBodyView.parse(unsafeURL)
-            guard unsafeParts.count == 1,
-                  case .text(let parsedText) = unsafeParts[0] else {
-                Issue.record("Expected non-HTTP media URL to remain plain text")
-                continue
-            }
-            #expect(parsedText == unsafeURL)
+            let body = outline(unsafeURL)
+            #expect(!body.contains("GIF(") && !body.contains("IMG("), "\(unsafeURL) became media: \(body)")
         }
 
-        let multipleGIFParts = CommentBodyView.displayParts(
-            from: "https://example.com/first.gif https://example.com/second.gif"
-        )
-        guard multipleGIFParts.count == 3,
-              case .gif = multipleGIFParts[0],
-              case .text = multipleGIFParts[1],
-              case .link(let overflowTitle, let overflowURL) = multipleGIFParts[2] else {
-            Issue.record("Expected only the first GIF in a body to render inline")
-            return
-        }
-        #expect(overflowTitle == "Open GIF")
-        #expect(overflowURL.lastPathComponent == "second.gif")
+        #expect(outline("https://example.com/first.gif https://example.com/second.gif")
+            == "GIF(https://example.com/first.gif) GIFLINK(https://example.com/second.gif)")
         #expect(GIFDecoder.Limits.inline.maximumTotalDecodedPixels == 8_000_000)
     }
 
