@@ -200,6 +200,10 @@ struct RedditMarkdownTests {
         #expect(outline("<sarcasm>\n> Nobody could have predicted this").hasPrefix("P(<sarcasm>) Q["))
         // A body of only spaces, such as "&nbsp;", shows nothing.
         #expect(outline("&nbsp;").isEmpty)
+        // ASCII punctuation hidden behind a non-ASCII mark or a no-break space leaves the URL too.
+        #expect(outline("https://example.com/a.png.”") == "IMG(https://example.com/a.png) P(.”)")
+        #expect(outline("see https://example.com/page.\u{00A0}and more")
+            == "P(see [https://example.com/page](https://example.com/page).\u{00A0}and more)")
         // An explicit link that looks like an autolink keeps its own punctuation.
         #expect(outline("[https://example.com/search?q=why?](https://example.com/search?q=why?)")
             == "P([https://example.com/search?q=why?](https://example.com/search?q=why?))")

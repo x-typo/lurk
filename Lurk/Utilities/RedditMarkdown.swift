@@ -262,7 +262,7 @@ enum RedditMarkdown {
                 result += AttributedString(text[run.range])
             } else if let link = run.link {
                 let cut = runText.firstIndex(where: \.isWhitespace) ?? runText.endIndex
-                let (address, punctuation) = splitAutolinkTrailing(from: String(runText[..<cut]))
+                let (address, punctuation) = splitAutolinkTrailing(from: String(runText[..<cut]), cutAtSpace: cut != runText.endIndex)
                 guard isWebURL(link), URL(string: runText) == link, address != runText, let url = URL(string: address) else {
                     result += AttributedString(text[run.range])
                     continue
@@ -494,14 +494,20 @@ enum RedditMarkdown {
     }
 
     // What Foundation's autolinks keep that Reddit leaves as prose: non-ASCII punctuation such as "…", "”",
-    // or "。", and "]". ASCII punctuation Foundation already leaves out, and an explicit link such as
+    // or "。", "]", and any ASCII punctuation they hid, as in "a.png.”" or "page." before a no-break space
+    // (`cutAtSpace`). Otherwise Foundation already leaves ASCII punctuation out, and an explicit link such as
     // "[https://x/?q=why?](https://x/?q=why?)", which looks the same, keeps its own.
-    private static func splitAutolinkTrailing(from token: String) -> (String, String) {
+    private static func splitAutolinkTrailing(from token: String, cutAtSpace: Bool = false) -> (String, String) {
         var address = token
         var trailing = ""
-        while let scalar = address.unicodeScalars.last,
-              CharacterSet.punctuationCharacters.contains(scalar),
-              !scalar.isASCII || scalar == "]" {
+        var overran = cutAtSpace
+        let preservedURLCharacters = CharacterSet(charactersIn: "/-_~%+=&#@$*")
+        while let scalar = address.unicodeScalars.last, CharacterSet.punctuationCharacters.contains(scalar) {
+            let keptByFoundation = !scalar.isASCII || scalar == "]"
+            let partOfURL = preservedURLCharacters.contains(scalar)
+                || (scalar == ")" && address.filter({ $0 == ")" }).count <= address.filter({ $0 == "(" }).count)
+            guard keptByFoundation || (overran && !partOfURL) else { break }
+            if keptByFoundation { overran = true }
             trailing.insert(address.removeLast(), at: trailing.startIndex)
         }
         return (address, trailing)
