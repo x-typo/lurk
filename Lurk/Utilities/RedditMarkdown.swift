@@ -30,7 +30,8 @@ struct MarkdownTable: Equatable {
 
 // Foundation's full Markdown parse decides a body's structure. Lurk adds only Reddit's own syntax, through
 // private-use marks that Foundation reads as text and that are removed after parsing, so code keeps its
-// bytes without Lurk having to find the code first.
+// bytes without Lurk having to find the code first. A body's own U+E000–U+E006, which Reddit text doesn't
+// use, are taken for those marks.
 enum RedditMarkdown {
     static let spoilerScheme = "lurk-spoiler"
 
@@ -858,7 +859,17 @@ enum RedditMarkdown {
                 // Grid builds every cell up front, and a short body of pipes can ask for a vast sparse table.
                 guard columns.count <= RedditMarkdown.maxTableColumns,
                       columns.count * children.count <= RedditMarkdown.maxTableCells else {
-                    return .paragraph(RedditMarkdown.tableText(children.map { $0.children.map(\.content) }))
+                    // Each cell keeps its column, so a row such as "x||z" stays "x |  | z"; a row pads only up
+                    // to its own last cell, so the text never outgrows the body.
+                    return .paragraph(RedditMarkdown.tableText(children.map { row in
+                        var cells: [AttributedString] = []
+                        for cell in row.children {
+                            guard case .tableCell(let column) = cell.intent?.kind, column >= cells.count else { continue }
+                            cells += Array(repeating: AttributedString(), count: column - cells.count)
+                            cells.append(cell.content)
+                        }
+                        return cells
+                    }))
                 }
                 var header: [AttributedString] = []
                 var rows: [[AttributedString]] = []

@@ -411,6 +411,9 @@ struct RedditMarkdownTests {
         #expect(outlines.components(separatedBy: "TABLE(").count == 3)
         #expect(outlines.contains("P(h | h | "))
         #expect(outline("x|y\n-|-\n[a](https://example.com/a)|b") == "TABLE(x|y / [a](https://example.com/a)|b)")
+        // An empty cell keeps its column in the text.
+        let wide = (1...25).map { "h\($0)" }.joined(separator: "|") + "\n" + String(repeating: "-|", count: 25) + "\nx||z"
+        #expect(outline(wide).hasSuffix("⏎x |  | z)"), "\(outline(wide).suffix(40))")
     }
 
     @Test("A literal capitulum, the character standing in for >! and !<, stays in text, code, and links")
