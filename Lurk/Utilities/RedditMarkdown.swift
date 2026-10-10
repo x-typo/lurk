@@ -119,15 +119,23 @@ enum RedditMarkdown {
                 nextLineFollowsSpoiler = false
             case .spoiler(let id, let content) where revealedSpoilers.contains(id):
                 // On Reddit, ">!" sits before a spoiler's first line and "!<" after its last, so the first
-                // can't open a block and the last can't underline a heading or draw a rule. Lines between
-                // them are ordinary lines there too.
-                piece = opensBlock(content) ? String(mark) + content : content
+                // can't open a block, and the last can't underline a heading, draw a rule, or be a bare list
+                // marker. Lines between them are ordinary lines there too. A mark goes only where a block
+                // could start: glued to "**" or "_", it would stop that emphasis closing or opening.
+                let startsLine = source.last.map { $0.isWhitespace || $0 == ">" } ?? true
+                piece = startsLine && opensBlock(content) ? String(mark) + content : content
                 nextLineFollowsSpoiler = false
                 if let lastBreak = content.lastIndex(of: "\n") {
                     let lastLine = content[content.index(after: lastBreak)...]
-                    let underline = lastLine.drop { $0 == " " || $0 == "\t" || $0 == ">" }
-                    if !underline.isEmpty, underline.allSatisfy({ "=-*_:| \t".contains($0) }) { piece.append(mark) }
-                    nextLineFollowsSpoiler = lastLine.allSatisfy(\.isWhitespace)
+                    let marker = lastLine.drop { $0 == " " || $0 == "\t" || $0 == ">" }
+                    let underline = !marker.isEmpty && marker.allSatisfy { "=-*_:| \t".contains($0) }
+                    let listMarker = marker.range(of: #"^(?:[-+*]|[0-9]{1,9}[.)])[ \t]*$"#, options: .regularExpression) != nil
+                    if underline || listMarker, let last = piece.lastIndex(where: { $0 != " " && $0 != "\t" }) {
+                        // Inside the line, so "_" or "*" after "!<" can still open emphasis; after a "*" or "_"
+                        // rather than before it, so the run itself stays whole.
+                        piece.insert(mark, at: "*_".contains(piece[last]) ? piece.index(after: last) : last)
+                    }
+                    nextLineFollowsSpoiler = lastLine.allSatisfy { $0.isWhitespace || $0 == ">" }
                 }
             case .spoiler(let id, _):
                 // Only the id reaches the parser; an angle autolink can't be joined by a "!" or a URL before it.
@@ -229,7 +237,8 @@ enum RedditMarkdown {
             }
             let opener = characters[titleStart]
             cursor = titleStart + 1
-            while cursor < characters.count, characters[cursor] != close, characters[cursor] != opener, characters[cursor] != "\n" {
+            while cursor < characters.count, characters[cursor] != close, characters[cursor] != opener, characters[cursor] != "\n",
+                  !startsLinkedImage(at: cursor) {
                 cursor = step(cursor)
             }
             guard cursor < characters.count, characters[cursor] == close else { return .unclosed(resume: titleStart) }

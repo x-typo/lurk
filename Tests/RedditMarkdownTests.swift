@@ -38,10 +38,10 @@ func outline(_ blocks: [MarkdownBlock]) -> String {
     }.joined(separator: " ")
 }
 
-// The text of every italic run, wherever it sits.
-func emphasized(_ text: String, revealed: Set<Int> = []) -> [String] {
+// The text of every italic run, or of every run with `intent`, wherever it sits.
+func emphasized(_ text: String, revealed: Set<Int> = [], intent: InlinePresentationIntent = .emphasized) -> [String] {
     func inline(_ text: AttributedString) -> [String] {
-        text.runs.filter { $0.inlinePresentationIntent?.contains(.emphasized) == true }.map { String(text[$0.range].characters) }
+        text.runs.filter { $0.inlinePresentationIntent?.contains(intent) == true }.map { String(text[$0.range].characters) }
     }
     func visit(_ blocks: [MarkdownBlock]) -> [String] {
         blocks.flatMap { block -> [String] in
@@ -269,6 +269,9 @@ struct RedditMarkdownTests {
             #expect(outline("\(unclosed) [![b](https://example.com/b.png)](https://example.com/page)")
                 == "P(\(unclosed)) IMG(https://example.com/b.png) P([https://example.com/page](https://example.com/page))")
         }
+        // A title that closes on the next linked image's own title doesn't hide that image either.
+        #expect(outline("[![a](https://i.imgur.com/a.png \"t)](https://p.com/x) and [![b](https://i.imgur.com/b.png \"w\")](https://q.com/y) end")
+            .hasSuffix("IMG(https://i.imgur.com/b.png) P([https://q.com/y](https://q.com/y) end)"))
         for prefix in ["`[![a]((x)](y)`", "`[![a](i)](x(y)`"] {
             for opener in ["\"", "'", "("] {
                 #expect(outline("\(prefix)[![b](https://example.com/b.png)](https://example.com/page) \(opener)")
@@ -288,6 +291,8 @@ struct RedditMarkdownTests {
         #expect(outline("x >!a\n___!<", revealed: [0]) == "P(x a⏎___)")
         #expect(outline("> >!a\n> ===!<", revealed: [0]) == "Q[P(a⏎===)]")
         #expect(outline(">!a\n!<- b", revealed: [0]) == "P(a⏎- b)")
+        #expect(outline("> >!a\n> !<- b", revealed: [0]) == "Q[P(a⏎- b)]")
+        #expect(outline("x >!a\n1.!< b", revealed: [0]) == "P(x a⏎1. b)")
         // Lines between ">!" and "!<" are ordinary lines on Reddit, where these spoilers don't even form.
         #expect(outline(">!\n# secret!<") == "SPOILER(0)")
         #expect(outline(">!\n# secret!<", revealed: [0]) == "H1(secret)")
@@ -296,6 +301,11 @@ struct RedditMarkdownTests {
         // outline() can't tell italics from literal underscores, so these check the attribute itself.
         #expect(emphasized(">!_it_ y!<", revealed: [0]) == ["it"])
         #expect(emphasized("before >!secret!< *italic* after") == ["italic"])
+        // A mark that guards a line never touches emphasis just before or after the spoiler.
+        #expect(emphasized("**Source:**>![link](https://example.com)!<", revealed: [0], intent: .stronglyEmphasized) == ["Source:"])
+        #expect(emphasized("*Note:*>![x](https://example.com)!<", revealed: [0]) == ["Note:"])
+        #expect(emphasized("_see_>!    x!<", revealed: [0]) == ["see"])
+        #expect(emphasized(">!The twist\n---!<_wow_", revealed: [0]) == ["wow"])
     }
 
     @Test("A long run of closing parentheses in a link is trimmed in linear time")
