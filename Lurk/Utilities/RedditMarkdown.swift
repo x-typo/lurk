@@ -59,9 +59,10 @@ enum RedditMarkdown {
             root.insert(inlineContent(parsed[run.range], intent: run.inlinePresentationIntent), along: path[...])
         }
         let blocks = root.children.compactMap(\.block)
-        // A lone marker, such as "2." before a hidden spoiler, parses to nothing; show it as written.
+        // A lone marker, such as "2." before a hidden spoiler, parses to nothing; show it as written. A lone
+        // quote marker before media stays out of sight, as its empty quote was before.
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        if blocks.isEmpty, !trimmed.isEmpty {
+        if blocks.isEmpty, !trimmed.isEmpty, !trimmed.allSatisfy({ $0 == ">" || $0.isWhitespace }) {
             return [.paragraph(AttributedString(trimmed))]
         }
         return blocks
@@ -71,27 +72,32 @@ enum RedditMarkdown {
     // table rows such as "#|Episode" are left alone.
     static func normalized(_ text: String) -> String {
         let lines = text.split(separator: "\n", omittingEmptySubsequences: false)
-        let untouched = fencedLines(lines).union(tableLines(lines))
-        return lines.enumerated()
-            .map { index, line in untouched.contains(index) ? String(line) : spacedHeading(line) ?? String(line) }
-            .joined(separator: "\n")
+        let fenced = fencedLines(lines)
+        let tables = tableLines(lines)
+        return lines.enumerated().map { index, line in
+            if fenced.contains(index) { return String(line) }
+            // Foundation reads "^[text](url)" as its attribute syntax and drops the link; on Reddit it's a
+            // caret and a link.
+            let line = line.replacingOccurrences(of: "^[", with: "\\^[")
+            return tables.contains(index) ? line : spacedHeading(Substring(line)) ?? line
+        }
+        .joined(separator: "\n")
     }
 
-    // Indexes of the lines in tables outside code: each header row, its delimiter row, and the rows
-    // after it. As on Reddit, a row carries a pipe, so a line without one, such as "#Next", ends the table.
+    // Indexes of the lines in tables: each header row, its delimiter row, and the rows after it. As on
+    // Reddit, a row carries a pipe, so a line without one, such as "#Next" or a closing code fence, ends
+    // the table. A table-shaped example in code counts too, which keeps its links from becoming media.
     static func tableLines(_ lines: [Substring]) -> Set<Int> {
-        let fenced = fencedLines(lines)
         var result: Set<Int> = []
         var index = 1
         while index < lines.count {
-            guard !fenced.contains(index - 1), !fenced.contains(index),
-                  isTableDelimiter(lines[index]), lines[index - 1].contains("|") else {
+            guard isTableDelimiter(lines[index]), hasCellPipe(lines[index - 1]) else {
                 index += 1
                 continue
             }
             result.formUnion([index - 1, index])
             index += 1
-            while index < lines.count, !fenced.contains(index), lines[index].contains("|") {
+            while index < lines.count, hasCellPipe(lines[index]) {
                 result.insert(index)
                 index += 1
             }
@@ -99,25 +105,25 @@ enum RedditMarkdown {
         return result
     }
 
-    // Indexes of fenced code lines, fences included.
+    // A giphy embed's own "|", as in "![gif](giphy|abc)", doesn't make a line a table row.
+    private static func hasCellPipe(_ line: Substring) -> Bool {
+        line.replacingOccurrences(of: #"!\[gif\]\(giphy\|[^)]*\)"#, with: "", options: .regularExpression).contains("|")
+    }
+
+    // Indexes of closed fenced code blocks' lines, fences included. Quote and list containers aren't
+    // modeled, so a fence never closed is left out rather than read as covering the rest of the body.
     static func fencedLines(_ lines: [Substring]) -> Set<Int> {
         var result: Set<Int> = []
-        var fence: (marker: Character, length: Int, depth: Int, column: Int)?
-        for (index, line) in lines.enumerated() {
-            let container = container(of: line)
-            // A fence ends with its quote or list item: a line with fewer quote markers, or a non-blank
-            // line indented less than the fence.
-            if let open = fence,
-               container.depth < open.depth || (!container.content.isEmpty && container.indent < open.column) {
-                fence = nil
+        var index = 0
+        while index < lines.count {
+            guard let open = openingFence(blockContent(of: lines[index])),
+                  let close = lines[(index + 1)...].firstIndex(where: { isClosingFence(blockContent(of: $0), of: open) })
+            else {
+                index += 1
+                continue
             }
-            if let open = fence {
-                result.insert(index)
-                if isClosingFence(container.content, of: (open.marker, open.length)) { fence = nil }
-            } else if let opened = openingFence(container.content) {
-                result.insert(index)
-                fence = (opened.marker, opened.length, container.depth, container.column)
-            }
+            result.formUnion(index...close)
+            index = close + 1
         }
         return result
     }
@@ -132,30 +138,20 @@ enum RedditMarkdown {
         return String(indent) + hashes + " " + rest
     }
 
-    // A line's quote depth; the indent after its quote markers; and its text after quote and list
-    // markers, where a code fence can start, which begins `column` characters after the quote markers.
-    private static func container(of line: Substring) -> (depth: Int, indent: Int, column: Int, content: Substring) {
-        var depth = 0
-        var afterQuotes = line
+    // A line's text after its quote and list markers, where a code fence can start.
+    private static func blockContent(of line: Substring) -> Substring {
+        var content = line.drop(while: { $0 == " " || $0 == "\t" })
         while true {
-            let trimmed = afterQuotes.drop(while: { $0 == " " })
-            guard trimmed.first == ">" else { break }
-            depth += 1
-            afterQuotes = trimmed.dropFirst()
-            if afterQuotes.first == " " { afterQuotes = afterQuotes.dropFirst() }
-        }
-        var content = afterQuotes.drop(while: { $0 == " " || $0 == "\t" })
-        let indent = afterQuotes.distance(from: afterQuotes.startIndex, to: content.startIndex)
-        while true {
-            if let marker = content.first, "*+-".contains(marker), content.dropFirst().first == " " {
+            if content.first == ">" {
+                content = content.dropFirst().drop(while: { $0 == " " })
+            } else if let marker = content.first, "*+-".contains(marker), content.dropFirst().first == " " {
                 content = content.dropFirst().drop(while: { $0 == " " })
             } else if let afterDigits = orderedMarkerEnd(content), content[afterDigits...].first == " " {
                 content = content[afterDigits...].drop(while: { $0 == " " })
             } else {
-                break
+                return content
             }
         }
-        return (depth, indent, afterQuotes.distance(from: afterQuotes.startIndex, to: content.startIndex), content)
     }
 
     // The index after an ordered-list marker such as "12." or "3)".
@@ -186,7 +182,7 @@ enum RedditMarkdown {
 
     // Text after media or a hidden spoiler is mid-line in the source, so a leading "-", "#", or "1."
     // there is prose, not a list or heading.
-    private static func escapingLeadingBlockMarker(_ text: String) -> String {
+    static func escapingLeadingBlockMarker(_ text: String) -> String {
         let start = text.drop(while: { $0 == " " || $0 == "\t" })
         guard let first = start.first, first != "\n" else { return text }
         let firstLine = start.prefix(while: { $0 != "\n" })
@@ -208,11 +204,16 @@ enum RedditMarkdown {
         if intent?.contains(.softBreak) == true {
             return AttributedString("\n")
         }
+        // Full syntax leaves block HTML, such as a "<sarcasm>" line and the lines after it, as raw text; its
+        // Markdown still renders inline, as before block parsing.
+        if intent?.contains(.blockHTML) == true {
+            var html = String(slice.characters)
+            if html.hasSuffix("\n") { html.removeLast() }
+            return (try? AttributedString(markdown: html, options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace)))
+                ?? AttributedString(html)
+        }
         var content = AttributedString(slice)
         content.presentationIntent = nil
-        if intent?.contains(.blockHTML) == true, content.characters.last == "\n" {
-            content.characters.removeLast()
-        }
         // "![clip](https://…)" to a page that isn't an image keeps its target as a link.
         if content.link == nil, let imageURL = slice.imageURL, ["http", "https"].contains(imageURL.scheme?.lowercased()) {
             content.link = imageURL

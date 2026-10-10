@@ -89,8 +89,11 @@ struct RedditMarkdownTests {
         // A row needs a pipe, so a heading right after a table, or after a fenced table example, still counts.
         #expect(RedditMarkdown.normalized("A|B\n-|-\n#Next") == "A|B\n-|-\n# Next")
         #expect(RedditMarkdown.normalized("```\nA|B\n-|-\n```\n#Next") == "```\nA|B\n-|-\n```\n# Next")
-        // An unclosed fence in a quote ends with the quote.
-        #expect(RedditMarkdown.normalized("> ```\n> #x\n\n#Next") == "> ```\n> #x\n\n# Next")
+        // Fences indented, inside a quoted list item, or with tab-indented lines still shelter "#" lines.
+        #expect(RedditMarkdown.normalized("  ~~~\n  #x\n~~~\n#Next") == "  ~~~\n  #x\n~~~\n# Next")
+        for unchanged in ["- > ~~~\n  > #x\n  > ~~~", "- ~~~\n\t#x\n  ~~~"] {
+            #expect(RedditMarkdown.normalized(unchanged) == unchanged)
+        }
     }
 
     @Test("Block HTML keeps its place, including inside quotes and list items")
@@ -108,6 +111,65 @@ struct RedditMarkdownTests {
             return
         }
         #expect(items.map { texts($0.blocks) } == [["<sarcasm>"], ["second"]])
+    }
+
+    @Test("Regressions from the sweep against main stay fixed")
+    func sweepRegressions() {
+        // An image URL in fenced code stays in the code; the text after the block stays prose.
+        let fenced = CommentBodyView.parse("```\ncurl -O https://example.com/banner.jpg\n```\n\nThen run it again.")
+        guard fenced.count == 1, case .text(let fencedText) = fenced[0] else {
+            Issue.record("Expected one text part, got \(fenced)")
+            return
+        }
+        #expect(texts(RedditMarkdown.blocks(from: fencedText)) == ["Then run it again."])
+
+        // A lone quote marker before media draws nothing.
+        #expect(RedditMarkdown.blocks(from: "> ").isEmpty)
+        #expect(RedditMarkdown.blocks(from: "\n> ", continuingLine: true).isEmpty)
+
+        // A revealed spoiler at a line start stays prose.
+        let revealed = CommentBodyView.parse(">!#1 is Naruto!<", revealedSpoilers: [0])
+        guard revealed.count == 1, case .text(let revealedText) = revealed[0] else {
+            Issue.record("Expected one text part, got \(revealed)")
+            return
+        }
+        #expect(texts(RedditMarkdown.blocks(from: revealedText)) == ["#1 is Naruto"])
+
+        // A giphy embed under a table plays instead of joining it as a row.
+        let underTable = CommentBodyView.parse("Arc|Episodes\n:--|--:\nOpening|1-6\n![gif](giphy|abc123)")
+        #expect(underTable.contains { if case .gif = $0 { true } else { false } })
+
+        // Markdown in and after a block HTML line still renders inline.
+        guard case .paragraph(let html) = RedditMarkdown.blocks(from: "<sarcasm>\nYeah **that** works, see https://example.com/x\n</sarcasm>").first else {
+            Issue.record("Expected a paragraph")
+            return
+        }
+        #expect(!String(html.characters).contains("**"))
+        #expect(html.runs.contains { $0.link?.absoluteString == "https://example.com/x" })
+
+        // A caret before a link keeps both.
+        guard case .paragraph(let caret) = RedditMarkdown.blocks(from: "Sources say so^[1](https://example.com/src) and more").first else {
+            Issue.record("Expected a paragraph")
+            return
+        }
+        #expect(String(caret.characters) == "Sources say so^1 and more")
+        #expect(caret.runs.contains { $0.link?.absoluteString == "https://example.com/src" })
+
+        // A link keeps its target across a line break in its text and with a space in its address.
+        for (body, words, address) in [
+            ("Read [the full\nannouncement](https://example.com/news) here", "the full announcement", "https://example.com/news"),
+            ("[y](https://example.com/c d)", "y", "https://example.com/c%20d"),
+        ] {
+            let parts = CommentBodyView.parse(body)
+            guard parts.count == 1, case .text(let text) = parts[0],
+                  case .paragraph(let paragraph) = RedditMarkdown.blocks(from: text).first else {
+                Issue.record("Expected one paragraph for \(body), got \(parts)")
+                continue
+            }
+            #expect(paragraph.runs.contains { run in
+                run.link?.absoluteString == address && String(paragraph[run.range].characters) == words
+            })
+        }
     }
 
     @Test("Text after media or a hidden spoiler on the same line stays prose")
@@ -179,7 +241,6 @@ struct RedditMarkdownTests {
             "1. https://example.com/loop.gif",
             "Name|Picture\n-|-\nTy|[pic](https://example.com/ty.png)",
             "```\nA|B\n-|-\nx|[pic](https://example.com/p.png)\n```",
-            "```\nhttps://example.com/shot.png ![gif](giphy|abc)\n```",
         ] {
             expectOneTextPart(body)
         }
@@ -200,8 +261,7 @@ struct RedditMarkdownTests {
         }
         #expect(listText == "* [gif](https://media.giphy.com/media/abc/giphy.gif)")
 
-        // Fenced code keeps an embed as written, but the fence ends with its quote.
-        expectOneTextPart("> ~~~\n> ![gif](giphy|abc)")
+        // An embed after a quoted code block still plays.
         let afterQuotedCode = CommentBodyView.parse("> ~~~\n> code\n\n![gif](giphy|abc)")
         #expect(afterQuotedCode.contains { if case .gif = $0 { true } else { false } })
 

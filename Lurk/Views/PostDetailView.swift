@@ -1167,7 +1167,9 @@ struct CommentBodyView: View {
                 visibleText += text
             case .spoiler(let id, let content):
                 if revealedSpoilers.contains(id) {
-                    visibleText += content
+                    // A spoiler is inline, so at a line start its "#1" or "- " stays prose.
+                    let startsLine = visibleText.isEmpty || visibleText.hasSuffix("\n")
+                    visibleText += startsLine ? RedditMarkdown.escapingLeadingBlockMarker(content) : content
                 } else {
                     if !visibleText.isEmpty {
                         parts += parseVisibleText(visibleText)
@@ -1220,7 +1222,7 @@ struct CommentBodyView: View {
             lastEnd = range.location + range.length
 
             let lineIndex = lineStarts.lastIndex { $0 <= range.location } ?? 0
-            // Fenced code shows its text as written.
+            // Fenced code shows its text as written; splitting it would turn the text after it into code.
             if fencedLines.contains(lineIndex) {
                 appendText(full)
                 continue
@@ -1242,7 +1244,9 @@ struct CommentBodyView: View {
                     }
                 }
             } else if keepsBlock {
-                appendText(full)
+                appendText(match.range(at: 2).location == NSNotFound
+                    ? full
+                    : inlineLink(nsText.substring(with: match.range(at: 2)), nsText.substring(with: match.range(at: 3))))
             } else if match.range(at: 2).location != NSNotFound {
                 // Markdown link: [text](url)
                 let linkText = nsText.substring(with: match.range(at: 2))
@@ -1252,7 +1256,7 @@ struct CommentBodyView: View {
                 } else if let url = URL(string: urlStr), isImageURL(url) {
                     parts.append(.image(url))
                 } else {
-                    appendText(full)
+                    appendText(inlineLink(linkText, urlStr))
                 }
             } else {
                 let (urlString, trailingText) = splitTrailingPunctuation(from: full)
@@ -1276,6 +1280,13 @@ struct CommentBodyView: View {
         }
 
         return parts
+    }
+
+    // Foundation's parser joins a link's words across a line break and drops a link whose address has a
+    // space, which the link buttons before block parsing kept.
+    private static func inlineLink(_ text: String, _ url: String) -> String {
+        let address = url.contains(where: \.isWhitespace) && !url.contains("\"") && !url.contains("'") ? "<\(url)>" : url
+        return "[\(text.replacingOccurrences(of: "\n", with: " "))](\(address))"
     }
 
     // A list item, ordered item, or heading marker, after any quote markers.
