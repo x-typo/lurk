@@ -309,17 +309,13 @@ struct PostDetailView: View {
                 await commentStore.load { try await fetchComments(wholeThread: showsFullThread) }
             }
             .navigationBarTitleDisplayMode(.inline)
+            .bottomCloseButton {
+                commentStore.cancel()
+                cancelMediaSaveTask()
+                teardownPlayer()
+                dismiss()
+            }
             .toolbar {
-                // Bottom center, within thumb reach.
-                ToolbarItem(placement: .status) {
-                    Button("Close") {
-                        commentStore.cancel()
-                        cancelMediaSaveTask()
-                        teardownPlayer()
-                        dismiss()
-                    }
-                    .foregroundStyle(Theme.primary)
-                }
                 if let action = removeAction {
                     ToolbarItem(placement: .confirmationAction) {
                         Button {
