@@ -176,6 +176,8 @@ struct RedditMarkdownTests {
             "* [screenshot](https://example.com/shot.png)",
             "1. https://example.com/loop.gif",
             "Name|Picture\n-|-\nTy|[pic](https://example.com/ty.png)",
+            "```\nA|B\n-|-\nx|[pic](https://example.com/p.png)\n```",
+            "```\nhttps://example.com/shot.png ![gif](giphy|abc)\n```",
         ] {
             expectOneTextPart(body)
         }

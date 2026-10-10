@@ -7,6 +7,9 @@ enum CommentSpoilers {
     }
 
     static func parse(_ text: String) -> [Part] {
+        // Swift reads "\r\n" as one Character, which hides line starts from the fence check and the
+        // body's later line scanning. Rendering and selection both parse here, so they number alike.
+        let text = text.replacingOccurrences(of: "\r\n", with: "\n").replacingOccurrences(of: "\r", with: "\n")
         var parts: [Part] = []
         var plainStart = text.startIndex
         var cursor = text.startIndex

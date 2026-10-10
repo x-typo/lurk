@@ -1159,8 +1159,6 @@ struct CommentBodyView: View {
 
     static func parse(_ text: String, revealedSpoilers: Set<Int> = []) -> [BodyPart] {
         guard !text.isEmpty else { return [.text(text)] }
-        // Swift reads "\r\n" as one Character, so line scanning below needs plain "\n" breaks.
-        let text = text.replacingOccurrences(of: "\r\n", with: "\n").replacingOccurrences(of: "\r", with: "\n")
         var parts: [BodyPart] = []
         var visibleText = ""
         for part in CommentSpoilers.parse(text) {
@@ -1204,6 +1202,7 @@ struct CommentBodyView: View {
         }
         let lines = text.split(separator: "\n", omittingEmptySubsequences: false)
         let tableLines = RedditMarkdown.tableLines(lines)
+        let fencedLines = RedditMarkdown.fencedLines(lines)
         var lineStarts: [Int] = []
         var offset = 0
         for line in lines {
@@ -1220,8 +1219,13 @@ struct CommentBodyView: View {
             let full = nsText.substring(with: range)
             lastEnd = range.location + range.length
 
-            // Media inside a list item, heading, or table row stays a link rather than splitting its block.
             let lineIndex = lineStarts.lastIndex { $0 <= range.location } ?? 0
+            // Fenced code shows its text as written.
+            if fencedLines.contains(lineIndex) {
+                appendText(full)
+                continue
+            }
+            // Media inside a list item, heading, or table row stays a link rather than splitting its block.
             let lineStart = nsText.substring(with: NSRange(location: lineStarts[lineIndex], length: range.location - lineStarts[lineIndex]))
             let keepsBlock = tableLines.contains(lineIndex)
                 || blockMarkerPattern.firstMatch(in: lineStart, range: NSRange(location: 0, length: (lineStart as NSString).length)) != nil

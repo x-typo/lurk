@@ -141,6 +141,18 @@ struct CommentSpoilerTests {
         ])
     }
 
+    @Test("CRLF bodies number spoilers the same for rendering and selection")
+    func crlfFences() {
+        let body = "intro\r\n~~~\r\n>!literal!<\r\n~~~\r\n>!first!<\r\n>!second!<"
+        let spoilers = CommentSpoilers.parse(body).compactMap { part -> String? in
+            if case .spoiler(_, let content) = part { content } else { nil }
+        }
+        #expect(spoilers == ["first", "second"])
+        let selection = CommentSpoilers.selectionText(from: body, revealed: [1])
+        #expect(selection.contains("second"))
+        #expect(!selection.contains("first"))
+    }
+
     @Test("An unmatched backtick run cannot become a shorter code opener and expose a spoiler")
     func unmatchedCodeRuns() {
         let body = "`` >!https://example.com/secret.gif!< `"

@@ -100,7 +100,7 @@ enum RedditMarkdown {
     }
 
     // Indexes of fenced code lines, fences included.
-    private static func fencedLines(_ lines: [Substring]) -> Set<Int> {
+    static func fencedLines(_ lines: [Substring]) -> Set<Int> {
         var result: Set<Int> = []
         var fence: (marker: Character, length: Int)?
         for (index, line) in lines.enumerated() {
