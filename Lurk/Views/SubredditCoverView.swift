@@ -8,12 +8,7 @@ struct SubredditCoverView: View {
     var body: some View {
         NavigationStack {
             SubredditPage(subreddit: subreddit, title: title)
-                .toolbar {
-                    ToolbarItem(placement: .status) {
-                        Button("Close") { onClose() }
-                            .foregroundStyle(Theme.primary)
-                    }
-                }
+                .bottomCloseButton { onClose() }
         }
         .preferredColorScheme(.dark)
     }

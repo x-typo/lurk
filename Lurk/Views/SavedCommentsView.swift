@@ -55,12 +55,7 @@ struct SavedCommentsView: View {
             .task { await loadComments() }
             .navigationTitle("Saved Comments")
             .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .status) {
-                    Button("Done") { dismiss() }
-                        .font(.body.weight(.medium))
-                }
-            }
+            .bottomCloseButton("Done") { dismiss() }
             .toolbarColorScheme(.dark, for: .navigationBar)
         }
         .preferredColorScheme(.dark)
