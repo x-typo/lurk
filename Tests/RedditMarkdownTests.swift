@@ -89,6 +89,8 @@ struct RedditMarkdownTests {
         // A row needs a pipe, so a heading right after a table, or after a fenced table example, still counts.
         #expect(RedditMarkdown.normalized("A|B\n-|-\n#Next") == "A|B\n-|-\n# Next")
         #expect(RedditMarkdown.normalized("```\nA|B\n-|-\n```\n#Next") == "```\nA|B\n-|-\n```\n# Next")
+        // An unclosed fence in a quote ends with the quote.
+        #expect(RedditMarkdown.normalized("> ```\n> #x\n\n#Next") == "> ```\n> #x\n\n# Next")
     }
 
     @Test("Block HTML keeps its place, including inside quotes and list items")
@@ -197,6 +199,11 @@ struct RedditMarkdownTests {
             return
         }
         #expect(listText == "* [gif](https://media.giphy.com/media/abc/giphy.gif)")
+
+        // Fenced code keeps an embed as written, but the fence ends with its quote.
+        expectOneTextPart("> ~~~\n> ![gif](giphy|abc)")
+        let afterQuotedCode = CommentBodyView.parse("> ~~~\n> code\n\n![gif](giphy|abc)")
+        #expect(afterQuotedCode.contains { if case .gif = $0 { true } else { false } })
 
         // Only a table's own rows keep media as links; an embed after the table still plays.
         let afterTable = CommentBodyView.parse("A|B\n-|-\n1|2\n\n![gif](giphy|abc)")

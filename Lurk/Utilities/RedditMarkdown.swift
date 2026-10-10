@@ -102,15 +102,21 @@ enum RedditMarkdown {
     // Indexes of fenced code lines, fences included.
     static func fencedLines(_ lines: [Substring]) -> Set<Int> {
         var result: Set<Int> = []
-        var fence: (marker: Character, length: Int)?
+        var fence: (marker: Character, length: Int, depth: Int, column: Int)?
         for (index, line) in lines.enumerated() {
-            let content = blockContent(of: line)
+            let container = container(of: line)
+            // A fence ends with its quote or list item: a line with fewer quote markers, or a non-blank
+            // line indented less than the fence.
+            if let open = fence,
+               container.depth < open.depth || (!container.content.isEmpty && container.indent < open.column) {
+                fence = nil
+            }
             if let open = fence {
                 result.insert(index)
-                if isClosingFence(content, of: open) { fence = nil }
-            } else if let opened = openingFence(content) {
+                if isClosingFence(container.content, of: (open.marker, open.length)) { fence = nil }
+            } else if let opened = openingFence(container.content) {
                 result.insert(index)
-                fence = opened
+                fence = (opened.marker, opened.length, container.depth, container.column)
             }
         }
         return result
@@ -126,20 +132,30 @@ enum RedditMarkdown {
         return String(indent) + hashes + " " + rest
     }
 
-    // A line's text after its quote and list markers, where a code fence can start.
-    private static func blockContent(of line: Substring) -> Substring {
-        var content = line.drop(while: { $0 == " " || $0 == "\t" })
+    // A line's quote depth; the indent after its quote markers; and its text after quote and list
+    // markers, where a code fence can start, which begins `column` characters after the quote markers.
+    private static func container(of line: Substring) -> (depth: Int, indent: Int, column: Int, content: Substring) {
+        var depth = 0
+        var afterQuotes = line
         while true {
-            if content.first == ">" {
-                content = content.dropFirst().drop(while: { $0 == " " })
-            } else if let marker = content.first, "*+-".contains(marker), content.dropFirst().first == " " {
+            let trimmed = afterQuotes.drop(while: { $0 == " " })
+            guard trimmed.first == ">" else { break }
+            depth += 1
+            afterQuotes = trimmed.dropFirst()
+            if afterQuotes.first == " " { afterQuotes = afterQuotes.dropFirst() }
+        }
+        var content = afterQuotes.drop(while: { $0 == " " || $0 == "\t" })
+        let indent = afterQuotes.distance(from: afterQuotes.startIndex, to: content.startIndex)
+        while true {
+            if let marker = content.first, "*+-".contains(marker), content.dropFirst().first == " " {
                 content = content.dropFirst().drop(while: { $0 == " " })
             } else if let afterDigits = orderedMarkerEnd(content), content[afterDigits...].first == " " {
                 content = content[afterDigits...].drop(while: { $0 == " " })
             } else {
-                return content
+                break
             }
         }
+        return (depth, indent, afterQuotes.distance(from: afterQuotes.startIndex, to: content.startIndex), content)
     }
 
     // The index after an ordered-list marker such as "12." or "3)".
