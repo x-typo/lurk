@@ -111,10 +111,19 @@ enum RedditMarkdown {
         var source = ""
         // A revealed spoiler that ends at a line break leaves "!<" at the start of the next line on Reddit.
         var nextLineFollowsSpoiler = false
-        // Whether the current line holds anything but whitespace and block syntax ("#", "- ", "1.", "> ").
+        // Whether the current line holds anything but whitespace and block syntax ("#", "- ", "1.", "|"), and
+        // whether it holds that syntax.
         var lineHasContent = false
+        var lineHasSyntax = false
         func isContent(_ character: Character) -> Bool {
-            !(character.isWhitespace || "#-+*=_.)>0123456789".contains(character) || character == mark)
+            !(character.isWhitespace || "#-+*=_.)>|:`~0123456789".contains(character) || character == mark)
+        }
+        // Whether the source ends with an emphasis closer, the "_" of "_1_" or "**" of "**1.**", which a mark
+        // right after it would stop closing.
+        func endsWithEmphasisCloser() -> Bool {
+            guard let last = source.last, last == "*" || last == "_" else { return false }
+            let beforeRun = source[..<source.endIndex].reversed().drop { $0 == last }.first
+            return beforeRun.map { !$0.isWhitespace } ?? false
         }
         for part in CommentSpoilers.parse(text) {
             var piece: String
@@ -125,9 +134,15 @@ enum RedditMarkdown {
             case .spoiler(let id, let content) where revealedSpoilers.contains(id):
                 // On Reddit, ">!" sits before a spoiler's first line and "!<" after its last, so the first
                 // can't open a block, and the last can't underline a heading, draw a rule, or be a bare list
-                // marker. Lines between them are ordinary lines there too. A mark goes only where the line
-                // holds no content yet: after "**Source:**", it would stop that emphasis closing.
-                piece = !lineHasContent && opensBlock(content) ? String(mark) + content : content
+                // marker. Lines between them are ordinary lines there too. The first line gets a mark only
+                // where it could open a block: alone on its line, or joining the block syntax before it, as
+                // "#" and "#1" or "-" and "    x" would. Never after text such as "**Source:**", or right
+                // after an emphasis closer, which the mark would stop closing.
+                let joinsSyntax = lineHasSyntax && content.first.map { first in
+                    first.isWhitespace || first == source.last || (source.last?.isNumber == true && ".)".contains(first))
+                } == true
+                let guardsFirstLine = !lineHasContent && !endsWithEmphasisCloser() && (opensBlock(content) || joinsSyntax)
+                piece = guardsFirstLine ? String(mark) + content : content
                 nextLineFollowsSpoiler = false
                 if let lastBreak = content.lastIndex(of: "\n") {
                     let lastLine = content[content.index(after: lastBreak)...]
@@ -153,10 +168,15 @@ enum RedditMarkdown {
                 source.append(mark)
             }
             source += piece
-            if let lastBreak = piece.lastIndex(of: "\n") {
-                lineHasContent = piece[piece.index(after: lastBreak)...].contains(where: isContent)
+            let lineStart = piece.lastIndex(of: "\n").map { piece.index(after: $0) }
+            if let lineStart {
+                lineHasContent = piece[lineStart...].contains(where: isContent)
+                lineHasSyntax = false
             } else if !lineHasContent {
                 lineHasContent = piece.contains(where: isContent)
+            }
+            if !lineHasContent, !lineHasSyntax {
+                lineHasSyntax = piece[(lineStart ?? piece.startIndex)...].contains { !$0.isWhitespace && $0 != ">" && $0 != mark }
             }
         }
         source = splittingLinkedImages(source)

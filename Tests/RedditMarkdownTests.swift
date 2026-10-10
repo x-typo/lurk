@@ -300,6 +300,12 @@ struct RedditMarkdownTests {
         // Block syntax before the spoiler on its line still can't join with what it reveals.
         #expect(outline("#>!#1 pick!<", revealed: [0]) == "H1(#1 pick)")
         #expect(outline("->!    secret!<", revealed: [0]) == "P(-    secret)")
+        #expect(outline("->! secret!<", revealed: [0]) == "P(- secret)")
+        let table = outline("A | B\n| >!---!< | --- |\na | b | lost", revealed: [0])
+        #expect(table.contains("lost") && !table.contains("TABLE"), "\(table)")
+        #expect(emphasized("- >!_it_ y!<", revealed: [0]) == ["it"])
+        #expect(emphasized("_1_>![x](https://example.com)!<", revealed: [0]) == ["1"])
+        #expect(emphasized("**1.**>![x](https://example.com)!<", revealed: [0], intent: .stronglyEmphasized) == ["1."])
         // Lines between ">!" and "!<" are ordinary lines on Reddit, where these spoilers don't even form.
         #expect(outline(">!\n# secret!<") == "SPOILER(0)")
         #expect(outline(">!\n# secret!<", revealed: [0]) == "H1(secret)")
