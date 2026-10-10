@@ -317,6 +317,12 @@ struct RedditMarkdownTests {
         // A URL ends where "!<" stood.
         #expect(outline("see >!https://example.com/a!< now", revealed: [0]) == "P(see [https://example.com/a](https://example.com/a) now)")
         #expect(outline("The link is >!www.example.com!<", revealed: [0]) == "P(The link is [www.example.com](http://www.example.com))")
+        #expect(outline("The answer: >!https://en.wikipedia.org/wiki/Rosebud.!<", revealed: [0])
+            == "P(The answer: [https://en.wikipedia.org/wiki/Rosebud](https://en.wikipedia.org/wiki/Rosebud).)")
+        #expect(outline("Source >!(https://en.wikipedia.org/wiki/Mercury_(planet))!<", revealed: [0])
+            == "P(Source ([https://en.wikipedia.org/wiki/Mercury_(planet)](https://en.wikipedia.org/wiki/Mercury_(planet))))")
+        #expect(outline("See >!https://example.com/a*!< ok", revealed: [0]) == "P(See [https://example.com/a](https://example.com/a)* ok)")
+        #expect(outline("See >!https://example.com/a,!< ok", revealed: [0]) == "P(See [https://example.com/a](https://example.com/a), ok)")
         // The line holding only "!<" isn't blank, so the paragraph goes on.
         #expect(outline(">!line one\nline two\n!<\nMy thoughts", revealed: [0]) == "P(line one⏎line two⏎⏎My thoughts)")
         #expect(emphasized("- >!_it_ y!<", revealed: [0]) == ["it"])

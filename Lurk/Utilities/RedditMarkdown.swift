@@ -381,10 +381,17 @@ enum RedditMarkdown {
             if let link = run.link, let cut = runText.firstIndex(of: delimiterMark), cut != runText.startIndex,
                ["http://", "https://", "www."].contains(where: lowered.hasPrefix),
                URL(string: lowered.hasPrefix("www.") ? "http://" + runText : runText) == link {
-                let address = String(runText[..<cut])
+                // The mark hid any trailing punctuation from Foundation, so trim it here as Foundation would.
+                var (address, trailing) = splitTrailingPunctuation(from: String(runText[..<cut]))
+                while let last = address.last, "*_~".contains(last) {
+                    trailing = String(address.removeLast()) + trailing
+                    let (head, tail) = splitTrailingPunctuation(from: address)
+                    address = head
+                    trailing = tail + trailing
+                }
                 var linked = AttributedString(address, attributes: run.attributes)
                 linked.link = URL(string: lowered.hasPrefix("www.") ? "http://" + address : address)
-                var rest = AttributedString(String(runText[cut...]), attributes: run.attributes)
+                var rest = AttributedString(trailing + String(runText[cut...]), attributes: run.attributes)
                 rest.link = nil
                 ended += linked + rest
             } else {
