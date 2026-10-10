@@ -330,6 +330,12 @@ struct RedditMarkdownTests {
             // Rescanning took 0.9 to 4.6 s at these sizes; linear passes take well under a second in Debug.
             #expect(elapsed < .seconds(1), "\(unit) ×\(count) took \(elapsed)")
         }
+        // Many nested addresses sharing one title that never closes.
+        for opener in ["\"", "'", "("] {
+            let body = String(repeating: "[![a](x", count: 8000) + " " + opener
+            let elapsed = ContinuousClock().measure { _ = RedditMarkdown.blocks(from: body) }
+            #expect(elapsed < .seconds(1), "unclosed \(opener) title took \(elapsed)")
+        }
     }
 
     @Test("A long run of quote markers parses in linear time")

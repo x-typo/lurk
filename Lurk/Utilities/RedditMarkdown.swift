@@ -190,17 +190,22 @@ enum RedditMarkdown {
                 && ##"!"#$%&'()*+,-./:;<=>?@[\]^_`{|}~"##.contains(characters[cursor + 1])
             return cursor + (isEscape ? 2 : 1)
         }
-        // The ")" that ends a link's address and optional title, or where the scan gave up. An address is
-        // "<…>", which may hold spaces and parentheses, or runs to whitespace past any balanced "(…)". nil:
-        // a "<…>" or title never closed, so the scan resumes at the next character rather than skipping what
-        // it read. Each of those scans also stops at its own opener, as CommonMark requires, so scans of
-        // one kind never overlap and the whole pass stays linear.
-        func destinationEnd(from start: Int) -> Int? {
+        // Where a link's address and optional title end: `.end` at the ")" that closes them, or where the
+        // scan gave up. An address is "<…>", which may hold spaces and parentheses, or runs to whitespace past
+        // any balanced "(…)". A "<…>" or title that never closes is `.unclosed`: the scan resumes at its
+        // opener, so a linked image inside it still counts, while the address before it isn't read again.
+        // Each of those scans stops at its own opener too, as CommonMark requires, so scans of one kind
+        // never overlap and the pass stays linear.
+        enum Destination {
+            case end(Int)
+            case unclosed(resume: Int)
+        }
+        func destinationEnd(from start: Int) -> Destination {
             var cursor = start
             if cursor < characters.count, characters[cursor] == "<" {
                 cursor += 1
                 while cursor < characters.count, !"<>\n".contains(characters[cursor]) { cursor = step(cursor) }
-                guard cursor < characters.count, characters[cursor] == ">" else { return nil }
+                guard cursor < characters.count, characters[cursor] == ">" else { return .unclosed(resume: start) }
                 cursor += 1
             } else {
                 var depth = 0
@@ -216,14 +221,16 @@ enum RedditMarkdown {
             }
             let titleStart = skipSpaces(from: cursor)
             let closers: [Character: Character] = ["\"": "\"", "'": "'", "(": ")"]
-            guard titleStart > cursor, titleStart < characters.count, let close = closers[characters[titleStart]] else { return titleStart }
+            guard titleStart > cursor, titleStart < characters.count, let close = closers[characters[titleStart]] else {
+                return .end(titleStart)
+            }
             let opener = characters[titleStart]
             cursor = titleStart + 1
             while cursor < characters.count, characters[cursor] != close, characters[cursor] != opener, characters[cursor] != "\n" {
                 cursor = step(cursor)
             }
-            guard cursor < characters.count, characters[cursor] == close else { return nil }
-            return skipSpaces(from: cursor + 1)
+            guard cursor < characters.count, characters[cursor] == close else { return .unclosed(resume: titleStart) }
+            return .end(skipSpaces(from: cursor + 1))
         }
         func skipSpaces(from start: Int) -> Int {
             var cursor = start
@@ -246,11 +253,12 @@ enum RedditMarkdown {
             }
             cursor += 2
             let imageStart = cursor
-            guard let imageDestinationEnd = destinationEnd(from: cursor) else {
-                index += 1
+            switch destinationEnd(from: cursor) {
+            case .end(let end): cursor = end
+            case .unclosed(let resume):
+                index = max(resume, index + 1)
                 continue
             }
-            cursor = imageDestinationEnd
             guard cursor > imageStart, cursor + 2 < characters.count,
                   characters[cursor] == ")", characters[cursor + 1] == "]", characters[cursor + 2] == "(" else {
                 index = max(cursor, index + 1)
@@ -259,11 +267,12 @@ enum RedditMarkdown {
             let imageEnd = cursor + 1
             cursor += 3
             let pageStart = cursor
-            guard let pageDestinationEnd = destinationEnd(from: cursor) else {
-                index += 1
+            switch destinationEnd(from: cursor) {
+            case .end(let end): cursor = end
+            case .unclosed(let resume):
+                index = max(resume, index + 1)
                 continue
             }
-            cursor = pageDestinationEnd
             guard cursor > pageStart, cursor < characters.count, characters[cursor] == ")" else {
                 index = max(cursor, index + 1)
                 continue
