@@ -418,8 +418,8 @@ struct GIFDecoderTests {
                 == "GIF(https://example.com/media/loop.gif) P(\(punctuation) next)")
         }
 
-        // GFM doesn't autolink a bracketed IPv6 host, an accepted trade for correct "**https://…**" links.
-        #expect(outline("https://[2001:db8::1]") == "P(https://[2001:db8::1])")
+        // GFM doesn't autolink a bracketed IPv6 host; Lurk's own matcher does, keeping the balanced "]".
+        #expect(outline("https://[2001:db8::1]") == "P([https://[2001:db8::1]](https://[2001:db8::1]))")
 
         // Only http and https media load.
         for unsafeURL in [

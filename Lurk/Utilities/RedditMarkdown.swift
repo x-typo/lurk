@@ -52,7 +52,8 @@ enum RedditMarkdown {
     private static let giphyPattern = try! NSRegularExpression(pattern: #"!\[gif\]\(giphy\|[^)\s]{0,100}\)"#, options: .caseInsensitive)
     // A hidden spoiler's placeholder that ended up as text, inside a link's label or a code span.
     private static let nestedSpoilerPattern = try! NSRegularExpression(pattern: #"<?lurk-spoiler:(\d+)>?"#)
-    private static let bareURLPattern = try! NSRegularExpression(pattern: #"https?://[^\s)"]+"#)
+    // Runs to whitespace; `splitTrailingPunctuation` then keeps a balanced "(…)" or "[…]" and drops the rest.
+    private static let bareURLPattern = try! NSRegularExpression(pattern: #"https?://[^\s"]+"#)
     private static let imageExtensions = ["jpg", "jpeg", "png", "gif", "webp"]
 
     static func blocks(from text: String, revealedSpoilers: Set<Int> = []) -> [MarkdownBlock] {
@@ -109,19 +110,30 @@ enum RedditMarkdown {
 
     private static func markedSource(_ text: String, revealedSpoilers: Set<Int>, hidden: inout Set<Int>) -> String {
         var source = ""
+        // A revealed spoiler that ends at a line break leaves "!<" at the start of the next line on Reddit.
+        var nextLineFollowsSpoiler = false
         for part in CommentSpoilers.parse(text) {
             var piece: String
             switch part {
             case .text(let text):
-                piece = text
+                piece = nextLineFollowsSpoiler && opensBlock(text) ? String(mark) + text : text
+                nextLineFollowsSpoiler = false
             case .spoiler(let id, let content) where revealedSpoilers.contains(id):
-                // A spoiler is inline on Reddit, so its own "#1" or "- " can't open a block.
-                let first = content.first { !$0.isWhitespace }
-                let opensBlock = first.map { "#-+*>=".contains($0) || ($0.isASCII && $0.isNumber) } ?? false
-                piece = opensBlock ? String(mark) + content : content
+                // On Reddit, ">!" sits before a spoiler's first line and "!<" after its last, so the first
+                // can't open a block and the last can't underline a heading or draw a rule. Lines between
+                // them are ordinary lines there too.
+                piece = opensBlock(content) ? String(mark) + content : content
+                nextLineFollowsSpoiler = false
+                if let lastBreak = content.lastIndex(of: "\n") {
+                    let lastLine = content[content.index(after: lastBreak)...]
+                    let underline = lastLine.drop { $0 == " " || $0 == "\t" || $0 == ">" }
+                    if !underline.isEmpty, underline.allSatisfy({ "=-*_:| \t".contains($0) }) { piece.append(mark) }
+                    nextLineFollowsSpoiler = lastLine.allSatisfy(\.isWhitespace)
+                }
             case .spoiler(let id, _):
                 // Only the id reaches the parser; an angle autolink can't be joined by a "!" or a URL before it.
                 hidden.insert(id)
+                nextLineFollowsSpoiler = false
                 piece = "<\(spoilerScheme):\(id)>"
             }
             // "!" before "[" would make an image, and a word glued to a revealed URL would stop it linking.
@@ -153,6 +165,19 @@ enum RedditMarkdown {
         )
     }
 
+    // Whether a spoiler's first line, or the line after it, would open a block: a heading, list, quote,
+    // fence, rule, setext underline, indented code, or link reference definition.
+    private static func opensBlock(_ text: String) -> Bool {
+        let line = text.prefix { $0 != "\n" }
+        let indent = line.prefix { $0 == " " || $0 == "\t" }
+        let rest = line.dropFirst(indent.count)
+        guard let first = rest.first else { return false }
+        if indent.count >= 4 || indent.contains("\t") { return true }
+        if "#-+*>=[".contains(first) || (first.isASCII && first.isNumber) { return true }
+        if rest.hasPrefix("```") || rest.hasPrefix("~~~") { return true }
+        return rest.allSatisfy { $0 == "_" || $0 == " " || $0 == "\t" } && rest.filter { $0 == "_" }.count >= 3
+    }
+
     // Rewrites "[![alt](image)](page)" as "<start>![alt](image)<split>[<mark>](page)", the image and a link
     // to the page, since Foundation flattens an image inside a link. In code, <start> becomes "[" again and
     // "<split>[<mark>" goes. One forward scan: a failed match resumes where it failed, so each character is
@@ -165,6 +190,40 @@ enum RedditMarkdown {
             let isEscape = characters[cursor] == "\\" && cursor + 1 < characters.count
                 && ##"!"#$%&'()*+,-./:;<=>?@[\]^_`{|}~"##.contains(characters[cursor + 1])
             return cursor + (isEscape ? 2 : 1)
+        }
+        // The ")" that ends a link's address and optional title, or where the scan gave up. An address is
+        // "<…>", which may hold spaces and parentheses, or runs to whitespace past any balanced "(…)".
+        func destinationEnd(from start: Int) -> Int {
+            var cursor = start
+            if cursor < characters.count, characters[cursor] == "<" {
+                cursor += 1
+                while cursor < characters.count, !"<>\n".contains(characters[cursor]) { cursor = step(cursor) }
+                guard cursor < characters.count, characters[cursor] == ">" else { return cursor }
+                cursor += 1
+            } else {
+                var depth = 0
+                while cursor < characters.count, !characters[cursor].isWhitespace {
+                    if characters[cursor] == "(" {
+                        depth += 1
+                    } else if characters[cursor] == ")" {
+                        if depth == 0 { break }
+                        depth -= 1
+                    }
+                    cursor = step(cursor)
+                }
+            }
+            let titleStart = skipSpaces(from: cursor)
+            let closers: [Character: Character] = ["\"": "\"", "'": "'", "(": ")"]
+            guard titleStart > cursor, titleStart < characters.count, let close = closers[characters[titleStart]] else { return titleStart }
+            cursor = titleStart + 1
+            while cursor < characters.count, characters[cursor] != close, characters[cursor] != "\n" { cursor = step(cursor) }
+            guard cursor < characters.count, characters[cursor] == close else { return cursor }
+            return skipSpaces(from: cursor + 1)
+        }
+        func skipSpaces(from start: Int) -> Int {
+            var cursor = start
+            while cursor < characters.count, characters[cursor] == " " || characters[cursor] == "\t" { cursor += 1 }
+            return cursor
         }
         var result = ""
         var copied = 0
@@ -182,7 +241,7 @@ enum RedditMarkdown {
             }
             cursor += 2
             let imageStart = cursor
-            while cursor < characters.count, characters[cursor] != ")", !characters[cursor].isWhitespace { cursor = step(cursor) }
+            cursor = destinationEnd(from: cursor)
             guard cursor > imageStart, cursor + 2 < characters.count,
                   characters[cursor] == ")", characters[cursor + 1] == "]", characters[cursor + 2] == "(" else {
                 index = max(cursor, index + 1)
@@ -191,16 +250,7 @@ enum RedditMarkdown {
             let imageEnd = cursor + 1
             cursor += 3
             let pageStart = cursor
-            var depth = 0
-            while cursor < characters.count, !characters[cursor].isWhitespace {
-                if characters[cursor] == "(" {
-                    depth += 1
-                } else if characters[cursor] == ")" {
-                    if depth == 0 { break }
-                    depth -= 1
-                }
-                cursor = step(cursor)
-            }
+            cursor = destinationEnd(from: cursor)
             guard cursor > pageStart, cursor < characters.count, characters[cursor] == ")" else {
                 index = max(cursor, index + 1)
                 continue
@@ -570,16 +620,17 @@ enum RedditMarkdown {
     // "[https://x/?q=why?](https://x/?q=why?)", which looks the same, keeps its own.
     private static func splitAutolinkTrailing(from token: String, cutAtSpace: Bool = false) -> (String, String) {
         let scalars = Array(token.unicodeScalars)
-        var unclosed = unclosedParentheses(scalars)
+        var unclosed = Unclosed(scalars)
         var end = scalars.endIndex
         var overran = cutAtSpace
         while end > 0, CharacterSet.punctuationCharacters.contains(scalars[end - 1]) {
             let scalar = scalars[end - 1]
-            let keptByFoundation = !scalar.isASCII || scalar == "]"
-            let partOfURL = preservedURLCharacters.contains(scalar) || (scalar == ")" && unclosed >= 0)
+            let closesOpener = unclosed.closesOpener(scalar)
+            let keptByFoundation = (!scalar.isASCII || scalar == "]") && !closesOpener
+            let partOfURL = preservedURLCharacters.contains(scalar) || closesOpener
             guard keptByFoundation || (overran && !partOfURL) else { break }
             if keptByFoundation { overran = true }
-            unclosed += scalar == ")" ? 1 : scalar == "(" ? -1 : 0
+            unclosed.drop(scalar)
             end -= 1
         }
         return split(scalars, at: end)
@@ -587,12 +638,11 @@ enum RedditMarkdown {
 
     private static func splitTrailingPunctuation(from token: String) -> (String, String) {
         let scalars = Array(token.unicodeScalars)
-        var unclosed = unclosedParentheses(scalars)
+        var unclosed = Unclosed(scalars)
         var end = scalars.endIndex
         while end > 0, CharacterSet.punctuationCharacters.contains(scalars[end - 1]),
-              !preservedURLCharacters.contains(scalars[end - 1]),
-              scalars[end - 1] != ")" || unclosed < 0 {
-            unclosed += scalars[end - 1] == ")" ? 1 : scalars[end - 1] == "(" ? -1 : 0
+              !preservedURLCharacters.contains(scalars[end - 1]), !unclosed.closesOpener(scalars[end - 1]) {
+            unclosed.drop(scalars[end - 1])
             end -= 1
         }
         return split(scalars, at: end)
@@ -601,9 +651,33 @@ enum RedditMarkdown {
     // Both splitters walk back once, keeping a running count, so a long run of ")" stays linear.
     private static let preservedURLCharacters = CharacterSet(charactersIn: "/-_~%+=&#@$*")
 
-    // "(" minus ")"; below zero means a ")" closes nothing.
-    private static func unclosedParentheses(_ scalars: [Unicode.Scalar]) -> Int {
-        scalars.reduce(0) { $0 + ($1 == "(" ? 1 : $1 == ")" ? -1 : 0) }
+    // "(" minus ")" and "[" minus "]" in a URL; below zero, a closer closes nothing.
+    private struct Unclosed {
+        var parentheses = 0
+        var brackets = 0
+
+        init(_ scalars: [Unicode.Scalar]) {
+            for scalar in scalars { count(scalar, by: 1) }
+        }
+
+        func closesOpener(_ scalar: Unicode.Scalar) -> Bool {
+            (scalar == ")" && parentheses >= 0) || (scalar == "]" && brackets >= 0)
+        }
+
+        // Takes a trailing character off the URL.
+        mutating func drop(_ scalar: Unicode.Scalar) {
+            count(scalar, by: -1)
+        }
+
+        private mutating func count(_ scalar: Unicode.Scalar, by sign: Int) {
+            switch scalar {
+            case "(": parentheses += sign
+            case ")": parentheses -= sign
+            case "[": brackets += sign
+            case "]": brackets -= sign
+            default: break
+            }
+        }
     }
 
     private static func split(_ scalars: [Unicode.Scalar], at end: Int) -> (String, String) {

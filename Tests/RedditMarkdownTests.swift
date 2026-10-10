@@ -38,6 +38,25 @@ func outline(_ blocks: [MarkdownBlock]) -> String {
     }.joined(separator: " ")
 }
 
+// The text of every italic run, wherever it sits.
+func emphasized(_ text: String, revealed: Set<Int> = []) -> [String] {
+    func inline(_ text: AttributedString) -> [String] {
+        text.runs.filter { $0.inlinePresentationIntent?.contains(.emphasized) == true }.map { String(text[$0.range].characters) }
+    }
+    func visit(_ blocks: [MarkdownBlock]) -> [String] {
+        blocks.flatMap { block -> [String] in
+            switch block {
+            case .paragraph(let text), .heading(_, let text): inline(text)
+            case .quote(let blocks): visit(blocks)
+            case .list(_, let items): items.flatMap { visit($0.blocks) }
+            case .table(let table): ([table.header] + table.rows).flatMap { $0.flatMap(inline) }
+            default: []
+            }
+        }
+    }
+    return visit(RedditMarkdown.blocks(from: text, revealedSpoilers: revealed))
+}
+
 @MainActor
 @Suite("Reddit Markdown blocks")
 struct RedditMarkdownTests {
@@ -226,6 +245,45 @@ struct RedditMarkdownTests {
         #expect(outline("> ~~~\n> code\n\nSources^[1](https://example.com/src)") == "Q[CODE(code)] P(Sources^[1](https://example.com/src))")
     }
 
+    @Test("URLs keep balanced parentheses and brackets, and linked images keep titles and <…> addresses")
+    func balancedURLs() {
+        // A bare URL after an unclosed "[" goes through Lurk's own matcher rather than Foundation's.
+        #expect(outline("[Source: https://example.com/a_(b).png]") == "P([Source:) IMG(https://example.com/a_(b).png) P(])")
+        #expect(outline("[source: https://en.wikipedia.org/wiki/Mercury_(planet)]")
+            == "P([source: [https://en.wikipedia.org/wiki/Mercury_(planet)](https://en.wikipedia.org/wiki/Mercury_(planet))])")
+        #expect(outline("[see https://example.com/a_((b))]") == "P([see [https://example.com/a_((b))](https://example.com/a_((b)))])")
+        #expect(outline("see https://example.com/?ids=[1,2] ok")
+            == "P(see [https://example.com/?ids=[1,2]](https://example.com/?ids=%5B1,2%5D) ok)")
+        #expect(outline("see http://[2001:db8::1] ok") == "P(see [http://[2001:db8::1]](http://[2001:db8::1]) ok)")
+        #expect(outline("[![a](https://example.com/a_(b).png)](https://example.com/full)")
+            == "IMG(https://example.com/a_(b).png) P([https://example.com/full](https://example.com/full))")
+        #expect(outline("Poster: [![](https://i.imgur.com/p.jpg \"t\")](https://example.com/full 'u') nice")
+            == "P(Poster:) IMG(https://i.imgur.com/p.jpg) P([https://example.com/full](https://example.com/full) nice)")
+        #expect(outline("Poster: [![](<https://example.com/a b.png>)](<https://example.com/c)d>) nice")
+            == "P(Poster:) IMG(https://example.com/a%20b.png) P([https://example.com/c)d](https://example.com/c)d) nice)")
+    }
+
+    @Test("A revealed spoiler's first line opens no block and its last line underlines nothing, as on Reddit")
+    func revealedSpoilerLines() {
+        #expect(outline(">!```!< and more\n\n# Heading", revealed: [0]) == "P(``` and more) H1(Heading)")
+        #expect(outline("intro\n\n>![x]: https://example.com!<\n\nmore", revealed: [0])
+            == "P(intro) P([x]: [https://example.com](https://example.com)) P(more)")
+        #expect(outline(">!___!<\nafter", revealed: [0]) == "P(___⏎after)")
+        #expect(outline("Intro\n\n>!    four spaces then text!<", revealed: [0]) == "P(Intro) P(four spaces then text)")
+        #expect(outline(">!a\n---!<", revealed: [0]) == "P(a⏎---)")
+        #expect(outline("x >!a\n___!<", revealed: [0]) == "P(x a⏎___)")
+        #expect(outline("> >!a\n> ===!<", revealed: [0]) == "Q[P(a⏎===)]")
+        #expect(outline(">!a\n!<- b", revealed: [0]) == "P(a⏎- b)")
+        // Lines between ">!" and "!<" are ordinary lines on Reddit, where these spoilers don't even form.
+        #expect(outline(">!\n# secret!<") == "SPOILER(0)")
+        #expect(outline(">!\n# secret!<", revealed: [0]) == "H1(secret)")
+        #expect(outline("x >!a\n# b!<", revealed: [0]) == "P(x a) H1(b)")
+        #expect(outline("> >!he dies\n> at the end!<", revealed: [0]) == "Q[P(he dies⏎at the end)]")
+        // outline() can't tell italics from literal underscores, so these check the attribute itself.
+        #expect(emphasized(">!_it_ y!<", revealed: [0]) == ["it"])
+        #expect(emphasized("before >!secret!< *italic* after") == ["italic"])
+    }
+
     @Test("A long run of closing parentheses in a link is trimmed in linear time")
     func parenthesisRun() {
         let body = "[" + String(repeating: ")", count: 8000) + "”](https://example.com/x)"
@@ -258,6 +316,7 @@ struct RedditMarkdownTests {
         for (unit, count) in [
             ("[![", 8000), ("[![x](y", 8000), ("![gif](giphy|", 8000),
             ("![gif](giphy|a) ", 2000), ("[![a](https://i.imgur.com/t.png)](https://e.com/p) ", 1000), ("~~~ x ", 8000),
+            ("https://(", 8000), ("[![a](((", 4000), ("[![a](<", 4000), ("[![a](x \"", 4000),
         ] {
             let body = String(repeating: unit, count: count)
             let elapsed = ContinuousClock().measure { _ = RedditMarkdown.blocks(from: body) }
