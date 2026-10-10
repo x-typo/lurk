@@ -422,8 +422,18 @@ struct RedditMarkdownTests {
         #expect(outline(wide).hasSuffix("⏎x |  | z)"), "\(outline(wide).suffix(40))")
     }
 
-    @Test("A literal capitulum, the character standing in for >! and !<, stays in text, code, and links")
+    @Test("A body's own copies of Lurk's mark characters stay as written in text, code, spoilers, and links")
     func literalDelimiter() {
+        // Private-use glyphs some games' players paste, the escape mark itself, and its stand-ins.
+        let glyphs = "\u{E000}\u{E001}\u{E003}\u{E004}\u{E005}\u{E006}\u{E009}\u{E00F}\u{F700}⸿"
+        #expect(outline("a \(glyphs) b `\(glyphs)`") == "P(a \(glyphs) b `\(glyphs)`)")
+        #expect(outline(">!\(glyphs)!<", revealed: [0]) == "P(\(glyphs))")
+        #expect(outline("\(glyphs)\u{E00F}") == "P(\(glyphs)\u{E00F})")
+        #expect(outline("[x](https://example.com/%EE%80%80%EE%80%86%EE%80%8F%EF%9C%80%E2%B8%BF)")
+            == "P([x](https://example.com/%EE%80%80%EE%80%86%EE%80%8F%EF%9C%80%E2%B8%BF))")
+        #expect(outline("[x](https://example.com/\u{E000}\u{E00F}⸿)") == "P([x](https://example.com/%EE%80%80%EE%80%8F%E2%B8%BF))")
+        #expect(outline("A|B\n-|-\n\u{E001}|x") == "TABLE(A|B / \u{E001}|x)")
+        #expect(outline("`%EE%80%80 %EE%80%8F%EF%9C%80` %ee%80%80") == "P(`%EE%80%80 %EE%80%8F%EF%9C%80` %ee%80%80)")
         #expect(outline("`a⸿b` and [capitulum](https://example.com/wiki/%E2%B8%BF) ⸿")
             == "P(`a⸿b` and [capitulum](https://example.com/wiki/%E2%B8%BF) ⸿)")
         #expect(outline("[c](https://example.com/wiki/⸿) >!x⸿y!<", revealed: [0])

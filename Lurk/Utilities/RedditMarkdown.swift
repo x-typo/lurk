@@ -30,8 +30,8 @@ struct MarkdownTable: Equatable {
 
 // Foundation's full Markdown parse decides a body's structure. Lurk adds only Reddit's own syntax, through
 // private-use marks that Foundation reads as text and that are removed after parsing, so code keeps its
-// bytes without Lurk having to find the code first. A body's own U+E000–U+E006, which Reddit text doesn't
-// use, are taken for those marks.
+// bytes without Lurk having to find the code first. A body's own copies of those characters, such as the
+// private-use glyphs some games' players paste, are escaped first and restored after.
 enum RedditMarkdown {
     static let spoilerScheme = "lurk-spoiler"
 
@@ -49,8 +49,11 @@ enum RedditMarkdown {
     // punctuation (U+2E3F CAPITULUM), as those delimiters are on Reddit, so emphasis beside it closes and
     // opens as it does there.
     private static let delimiterMark: Character = "\u{2E3F}"
-    // A capitulum the body itself holds, kept apart from the injected ones until they're gone.
-    private static let literalDelimiterMark: Character = "\u{E006}"
+    // Every character above, as the body itself holds it, becomes `escapeMark` and the stand-in at the same
+    // index from U+F700, so none can be taken for a mark; `unmarked` restores them.
+    private static let escapeMark: Unicode.Scalar = "\u{E00F}"
+    private static let reservedScalars: [Unicode.Scalar] = ["\u{E000}", "\u{E001}", "\u{E003}", "\u{E004}", "\u{E005}", "\u{2E3F}", "\u{E00F}"]
+    private static let standInBase: UInt32 = 0xF700
 
     // A top-level "#Title" line, which Reddit makes a heading and CommonMark doesn't. A line with a pipe
     // may be a table row, such as "#|Episode", so it's left alone.
@@ -117,7 +120,7 @@ enum RedditMarkdown {
 
     private static func markedSource(_ text: String, revealedSpoilers: Set<Int>, hidden: inout Set<Int>) -> String {
         var source = ""
-        let text = text.replacingOccurrences(of: String(delimiterMark), with: String(literalDelimiterMark))
+        let text = escapedReserved(text)
         for part in CommentSpoilers.parse(text) {
             switch part {
             case .text(let text):
@@ -301,14 +304,14 @@ enum RedditMarkdown {
 
     // Removes the marks, restoring the text as written.
     private static func unmarked(_ text: String) -> String {
-        let marks = [mark, pipeMark, headingMark, linkedImageMark, linkedImageStartMark, delimiterMark, literalDelimiterMark]
-        guard text.contains(where: marks.contains) else {
+        let marks = [mark, pipeMark, headingMark, linkedImageMark, linkedImageStartMark, delimiterMark, Character(escapeMark)]
+        guard text.contains(where: marks.contains) || text.contains("%EE%80%8F%EF%9C%8") else {
             return text
         }
         // Code holds a split linked image whole; parsed text has its pieces in separate runs.
         let split = String(linkedImageMark) + "[" + String(mark)
         let isWholeLinkedImage = text.contains(split)
-        return text
+        let unmarked = text
             .replacingOccurrences(of: split, with: "")
             .replacingOccurrences(of: String(linkedImageStartMark), with: isWholeLinkedImage ? "[" : "")
             .replacingOccurrences(of: String(linkedImageMark), with: "")
@@ -316,8 +319,91 @@ enum RedditMarkdown {
             .replacingOccurrences(of: String(headingMark), with: "")
             .replacingOccurrences(of: String(mark), with: "")
             .replacingOccurrences(of: String(delimiterMark), with: "")
-            .replacingOccurrences(of: String(literalDelimiterMark), with: String(delimiterMark))
             .replacingOccurrences(of: String(pipeMark), with: "|")
+        return restoringEncodedReserved(restoringReserved(unmarked))
+    }
+
+    private static func percentEncoded(_ scalar: Unicode.Scalar) -> String {
+        String(scalar).utf8.map { String(format: "%%%02X", $0) }.joined()
+    }
+
+    // A body's own percent-encoded copies, as in a link, in Foundation's uppercase form; the URL clean-up
+    // reads only that form.
+    private static let encodedReservedPattern = try! NSRegularExpression(pattern: "%EE%80%8[01345F]|%E2%B8%BF")
+
+    private static func escapedReserved(_ text: String) -> String {
+        escapedEncodedReserved(escapedReservedScalars(text))
+    }
+
+    private static func escapedEncodedReserved(_ text: String) -> String {
+        let nsText = text as NSString
+        var escaped = ""
+        var copied = 0
+        for match in encodedReservedPattern.matches(in: text, range: NSRange(location: 0, length: nsText.length)) {
+            let encoded = nsText.substring(with: match.range)
+            guard let index = reservedScalars.firstIndex(where: { percentEncoded($0) == encoded }),
+                  let standIn = Unicode.Scalar(standInBase + UInt32(index)) else { continue }
+            escaped += nsText.substring(with: NSRange(location: copied, length: match.range.location - copied))
+            escaped += percentEncoded(escapeMark) + percentEncoded(standIn)
+            copied = NSMaxRange(match.range)
+        }
+        return copied == 0 ? text : escaped + nsText.substring(from: copied)
+    }
+
+    private static func escapedReservedScalars(_ text: String) -> String {
+        guard text.unicodeScalars.contains(where: reservedScalars.contains) else { return text }
+        var escaped = String.UnicodeScalarView()
+        for scalar in text.unicodeScalars {
+            if let index = reservedScalars.firstIndex(of: scalar), let standIn = Unicode.Scalar(standInBase + UInt32(index)) {
+                escaped.append(escapeMark)
+                escaped.append(standIn)
+            } else {
+                escaped.append(scalar)
+            }
+        }
+        return String(escaped)
+    }
+
+    private static func restoringReserved(_ text: String) -> String {
+        guard text.unicodeScalars.contains(escapeMark) else { return text }
+        var restored = String.UnicodeScalarView()
+        var escaping = false
+        for scalar in text.unicodeScalars {
+            if escaping {
+                escaping = false
+                let index = Int(scalar.value) - Int(standInBase)
+                if reservedScalars.indices.contains(index) {
+                    restored.append(reservedScalars[index])
+                    continue
+                }
+                restored.append(escapeMark)
+            }
+            if scalar == escapeMark {
+                escaping = true
+            } else {
+                restored.append(scalar)
+            }
+        }
+        if escaping { restored.append(escapeMark) }
+        return String(restored)
+    }
+
+    // The same pairs, percent-encoded, in one pass.
+    private static let encodedEscapePattern = try! NSRegularExpression(pattern: "%EE%80%8F%EF%9C%8([0-9A-F])")
+
+    private static func restoringEncodedReserved(_ text: String) -> String {
+        let nsText = text as NSString
+        var restored = ""
+        var copied = 0
+        for match in encodedEscapePattern.matches(in: text, range: NSRange(location: 0, length: nsText.length)) {
+            guard let index = Int(nsText.substring(with: match.range(at: 1)), radix: 16), reservedScalars.indices.contains(index) else {
+                continue
+            }
+            restored += nsText.substring(with: NSRange(location: copied, length: match.range.location - copied))
+            restored += percentEncoded(reservedScalars[index])
+            copied = NSMaxRange(match.range)
+        }
+        return restored + nsText.substring(from: copied)
     }
 
     private static func unmarked(_ url: URL) -> URL {
@@ -329,9 +415,8 @@ enum RedditMarkdown {
             .replacingOccurrences(of: "%EE%80%80", with: "")
             .replacingOccurrences(of: "%EE%80%84", with: "")
             .replacingOccurrences(of: "%EE%80%85", with: "")
-            .replacingOccurrences(of: "%EE%80%86", with: "%E2%B8%BF")
             .replacingOccurrences(of: "%EE%80%81", with: "%7C")
-        return URL(string: restored) ?? url
+        return URL(string: restoringEncodedReserved(restored)) ?? url
     }
 
     private static func unmarked(_ text: AttributedString) -> AttributedString {
