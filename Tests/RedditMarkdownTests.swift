@@ -255,12 +255,19 @@ struct RedditMarkdownTests {
         #expect(outline("see https://example.com/?ids=[1,2] ok")
             == "P(see [https://example.com/?ids=[1,2]](https://example.com/?ids=%5B1,2%5D) ok)")
         #expect(outline("see http://[2001:db8::1] ok") == "P(see [http://[2001:db8::1]](http://[2001:db8::1]) ok)")
+        // A ")" or "]" that closes nothing ends the URL.
+        #expect(outline("[Source: (https://example.com/a.png),caption]") == "P([Source: () IMG(https://example.com/a.png) P(),caption])")
         #expect(outline("[![a](https://example.com/a_(b).png)](https://example.com/full)")
             == "IMG(https://example.com/a_(b).png) P([https://example.com/full](https://example.com/full))")
         #expect(outline("Poster: [![](https://i.imgur.com/p.jpg \"t\")](https://example.com/full 'u') nice")
             == "P(Poster:) IMG(https://i.imgur.com/p.jpg) P([https://example.com/full](https://example.com/full) nice)")
         #expect(outline("Poster: [![](<https://example.com/a b.png>)](<https://example.com/c)d>) nice")
             == "P(Poster:) IMG(https://example.com/a%20b.png) P([https://example.com/c)d](https://example.com/c)d) nice)")
+        // A "<…>" or title that never closes doesn't hide a linked image after it.
+        for unclosed in ["`[![a](<`", "`[![a](x \"`", "`[![a](x (`"] {
+            #expect(outline("\(unclosed) [![b](https://example.com/b.png)](https://example.com/page)")
+                == "P(\(unclosed)) IMG(https://example.com/b.png) P([https://example.com/page](https://example.com/page))")
+        }
     }
 
     @Test("A revealed spoiler's first line opens no block and its last line underlines nothing, as on Reddit")
@@ -316,7 +323,7 @@ struct RedditMarkdownTests {
         for (unit, count) in [
             ("[![", 8000), ("[![x](y", 8000), ("![gif](giphy|", 8000),
             ("![gif](giphy|a) ", 2000), ("[![a](https://i.imgur.com/t.png)](https://e.com/p) ", 1000), ("~~~ x ", 8000),
-            ("https://(", 8000), ("[![a](((", 4000), ("[![a](<", 4000), ("[![a](x \"", 4000),
+            ("https://(", 8000), ("[![a](((", 4000), ("[![a](<", 4000), ("[![a](x \"", 4000), ("[![a](x (", 4000),
         ] {
             let body = String(repeating: unit, count: count)
             let elapsed = ContinuousClock().measure { _ = RedditMarkdown.blocks(from: body) }

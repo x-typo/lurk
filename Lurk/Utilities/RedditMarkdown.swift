@@ -52,8 +52,7 @@ enum RedditMarkdown {
     private static let giphyPattern = try! NSRegularExpression(pattern: #"!\[gif\]\(giphy\|[^)\s]{0,100}\)"#, options: .caseInsensitive)
     // A hidden spoiler's placeholder that ended up as text, inside a link's label or a code span.
     private static let nestedSpoilerPattern = try! NSRegularExpression(pattern: #"<?lurk-spoiler:(\d+)>?"#)
-    // Runs to whitespace; `splitTrailingPunctuation` then keeps a balanced "(…)" or "[…]" and drops the rest.
-    private static let bareURLPattern = try! NSRegularExpression(pattern: #"https?://[^\s"]+"#)
+    private static let bareURLStartPattern = try! NSRegularExpression(pattern: #"https?://"#)
     private static let imageExtensions = ["jpg", "jpeg", "png", "gif", "webp"]
 
     static func blocks(from text: String, revealedSpoilers: Set<Int> = []) -> [MarkdownBlock] {
@@ -192,13 +191,16 @@ enum RedditMarkdown {
             return cursor + (isEscape ? 2 : 1)
         }
         // The ")" that ends a link's address and optional title, or where the scan gave up. An address is
-        // "<…>", which may hold spaces and parentheses, or runs to whitespace past any balanced "(…)".
-        func destinationEnd(from start: Int) -> Int {
+        // "<…>", which may hold spaces and parentheses, or runs to whitespace past any balanced "(…)". nil:
+        // a "<…>" or title never closed, so the scan resumes at the next character rather than skipping what
+        // it read. Each of those scans also stops at its own opener, as CommonMark requires, so scans of
+        // one kind never overlap and the whole pass stays linear.
+        func destinationEnd(from start: Int) -> Int? {
             var cursor = start
             if cursor < characters.count, characters[cursor] == "<" {
                 cursor += 1
                 while cursor < characters.count, !"<>\n".contains(characters[cursor]) { cursor = step(cursor) }
-                guard cursor < characters.count, characters[cursor] == ">" else { return cursor }
+                guard cursor < characters.count, characters[cursor] == ">" else { return nil }
                 cursor += 1
             } else {
                 var depth = 0
@@ -215,9 +217,12 @@ enum RedditMarkdown {
             let titleStart = skipSpaces(from: cursor)
             let closers: [Character: Character] = ["\"": "\"", "'": "'", "(": ")"]
             guard titleStart > cursor, titleStart < characters.count, let close = closers[characters[titleStart]] else { return titleStart }
+            let opener = characters[titleStart]
             cursor = titleStart + 1
-            while cursor < characters.count, characters[cursor] != close, characters[cursor] != "\n" { cursor = step(cursor) }
-            guard cursor < characters.count, characters[cursor] == close else { return cursor }
+            while cursor < characters.count, characters[cursor] != close, characters[cursor] != opener, characters[cursor] != "\n" {
+                cursor = step(cursor)
+            }
+            guard cursor < characters.count, characters[cursor] == close else { return nil }
             return skipSpaces(from: cursor + 1)
         }
         func skipSpaces(from start: Int) -> Int {
@@ -241,7 +246,11 @@ enum RedditMarkdown {
             }
             cursor += 2
             let imageStart = cursor
-            cursor = destinationEnd(from: cursor)
+            guard let imageDestinationEnd = destinationEnd(from: cursor) else {
+                index += 1
+                continue
+            }
+            cursor = imageDestinationEnd
             guard cursor > imageStart, cursor + 2 < characters.count,
                   characters[cursor] == ")", characters[cursor + 1] == "]", characters[cursor + 2] == "(" else {
                 index = max(cursor, index + 1)
@@ -250,7 +259,11 @@ enum RedditMarkdown {
             let imageEnd = cursor + 1
             cursor += 3
             let pageStart = cursor
-            cursor = destinationEnd(from: cursor)
+            guard let pageDestinationEnd = destinationEnd(from: cursor) else {
+                index += 1
+                continue
+            }
+            cursor = pageDestinationEnd
             guard cursor > pageStart, cursor < characters.count, characters[cursor] == ")" else {
                 index = max(cursor, index + 1)
                 continue
@@ -406,17 +419,45 @@ enum RedditMarkdown {
         let nsText = text as NSString
         var result = AttributedString()
         var last = 0
-        for match in bareURLPattern.matches(in: text, range: NSRange(location: 0, length: nsText.length)) {
-            let (address, _) = splitTrailingPunctuation(from: nsText.substring(with: match.range))
+        for range in bareURLRanges(in: nsText) {
+            let (address, _) = splitTrailingPunctuation(from: nsText.substring(with: range))
             guard let url = URL(string: address) else { continue }
-            result += AttributedString(nsText.substring(with: NSRange(location: last, length: match.range.location - last)), attributes: plain)
+            result += AttributedString(nsText.substring(with: NSRange(location: last, length: range.location - last)), attributes: plain)
             var linked = AttributedString(address, attributes: plain)
             linked.link = url
             result += linked
-            last = match.range.location + (address as NSString).length
+            last = range.location + (address as NSString).length
         }
         result += AttributedString(nsText.substring(from: last), attributes: plain)
         return result
+    }
+
+    // A bare URL runs to whitespace or a quote, keeping a balanced "(…)" or "[…]" but stopping at a ")" or
+    // "]" that closes nothing, as in "(https://example.com/a.png),caption".
+    private static func bareURLRanges(in nsText: NSString) -> [NSRange] {
+        var ranges: [NSRange] = []
+        var scanned = 0
+        for start in bareURLStartPattern.matches(in: nsText as String, range: NSRange(location: 0, length: nsText.length)) {
+            guard start.range.location >= scanned else { continue }
+            var end = NSMaxRange(start.range)
+            var parentheses = 0
+            var brackets = 0
+            scan: while end < nsText.length {
+                switch nsText.character(at: end) {
+                case 0x28: parentheses += 1
+                case 0x29 where parentheses == 0, 0x5D where brackets == 0, 0x22: break scan
+                case 0x29: parentheses -= 1
+                case 0x5B: brackets += 1
+                case 0x5D: brackets -= 1
+                case let unit:
+                    if let scalar = Unicode.Scalar(unit), CharacterSet.whitespacesAndNewlines.contains(scalar) { break scan }
+                }
+                end += 1
+            }
+            ranges.append(NSRange(location: start.range.location, length: end - start.range.location))
+            scanned = end
+        }
+        return ranges
     }
 
     // MARK: Lifting
