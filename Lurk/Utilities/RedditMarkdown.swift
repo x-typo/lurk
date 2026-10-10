@@ -52,9 +52,6 @@ enum RedditMarkdown {
     private static let linkedImageRestorePattern = try! NSRegularExpression(
         pattern: #"(!\[[^\]\n]*\]\([^)\s]+\))"# + String(linkedImageMark) + #"\["# + String(mark) + #"?\]\(([^)\s]+)\)"#
     )
-    // A line starting with "<", which CommonMark may start an HTML block on. Reddit shows HTML as text, and
-    // an HTML block would swallow the quote or heading below it.
-    private static let htmlLinePattern = try! NSRegularExpression(pattern: #"(?m)^((?:[ \t]{0,3}>[ \t]?)*[ \t]{0,3})(?=<)"#)
     // A hidden spoiler's placeholder that ended up as text, inside a link's label or a code span.
     private static let nestedSpoilerPattern = try! NSRegularExpression(pattern: #"<?lurk-spoiler:(\d+)>?"#)
     private static let bareURLPattern = try! NSRegularExpression(pattern: #"https?://[^\s)"]+"#)
@@ -146,12 +143,35 @@ enum RedditMarkdown {
             guard let range = Range(match.range, in: source) else { continue }
             source.replaceSubrange(range, with: source[range].replacingOccurrences(of: "|", with: String(pipeMark)))
         }
-        source = htmlLinePattern.stringByReplacingMatches(
-            in: source, range: NSRange(source.startIndex..., in: source), withTemplate: "$1" + String(mark)
-        )
+        source = markingHTMLLines(source)
         return compactHeadingPattern.stringByReplacingMatches(
             in: source, range: NSRange(source.startIndex..., in: source), withTemplate: "$1 " + String(headingMark)
         )
+    }
+
+    // A line starting with "<", after any quote markers, gets a mark: CommonMark could open an HTML block
+    // there, which would swallow the quote or heading below it, and Reddit shows HTML as text. A scan, not a
+    // regex: a repeated optional prefix backtracks exponentially on a long run of "> ".
+    private static func markingHTMLLines(_ source: String) -> String {
+        source.split(separator: "\n", omittingEmptySubsequences: false).map { line -> String in
+            var index = line.startIndex
+            func skipIndent() {
+                var count = 0
+                while index < line.endIndex, count < 3, line[index] == " " || line[index] == "\t" {
+                    index = line.index(after: index)
+                    count += 1
+                }
+            }
+            skipIndent()
+            while index < line.endIndex, line[index] == ">" {
+                index = line.index(after: index)
+                if index < line.endIndex, line[index] == " " || line[index] == "\t" { index = line.index(after: index) }
+                skipIndent()
+            }
+            guard index < line.endIndex, line[index] == "<" else { return String(line) }
+            return String(line[..<index]) + String(mark) + line[index...]
+        }
+        .joined(separator: "\n")
     }
 
     // Removes the marks, restoring the text as written.
@@ -242,7 +262,7 @@ enum RedditMarkdown {
                 result += AttributedString(text[run.range])
             } else if let link = run.link {
                 let cut = runText.firstIndex(where: \.isWhitespace) ?? runText.endIndex
-                let (address, punctuation) = splitTrailingPunctuation(from: String(runText[..<cut]))
+                let (address, punctuation) = splitAutolinkTrailing(from: String(runText[..<cut]))
                 guard isWebURL(link), URL(string: runText) == link, address != runText, let url = URL(string: address) else {
                     result += AttributedString(text[run.range])
                     continue
@@ -431,7 +451,7 @@ enum RedditMarkdown {
         }
         guard let link = run.link, isWebURL(link), !text.lowercased().hasPrefix("www.") else { return nil }
         if URL(string: text) == link {
-            let (address, trailing) = splitTrailingPunctuation(from: text)
+            let (address, trailing) = splitAutolinkTrailing(from: text)
             guard let url = URL(string: address), let block = mediaBlock(url) else { return nil }
             return (block, trailing)
         }
@@ -471,6 +491,20 @@ enum RedditMarkdown {
 
     private static func isWebURL(_ url: URL) -> Bool {
         ["http", "https"].contains(url.scheme?.lowercased())
+    }
+
+    // What Foundation's autolinks keep that Reddit leaves as prose: non-ASCII punctuation such as "…", "”",
+    // or "。", and "]". ASCII punctuation Foundation already leaves out, and an explicit link such as
+    // "[https://x/?q=why?](https://x/?q=why?)", which looks the same, keeps its own.
+    private static func splitAutolinkTrailing(from token: String) -> (String, String) {
+        var address = token
+        var trailing = ""
+        while let scalar = address.unicodeScalars.last,
+              CharacterSet.punctuationCharacters.contains(scalar),
+              !scalar.isASCII || scalar == "]" {
+            trailing.insert(address.removeLast(), at: trailing.startIndex)
+        }
+        return (address, trailing)
     }
 
     private static func splitTrailingPunctuation(from token: String) -> (String, String) {

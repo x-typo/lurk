@@ -200,6 +200,17 @@ struct RedditMarkdownTests {
         #expect(outline("<sarcasm>\n> Nobody could have predicted this").hasPrefix("P(<sarcasm>) Q["))
         // A body of only spaces, such as "&nbsp;", shows nothing.
         #expect(outline("&nbsp;").isEmpty)
+        // An explicit link that looks like an autolink keeps its own punctuation.
+        #expect(outline("[https://example.com/search?q=why?](https://example.com/search?q=why?)")
+            == "P([https://example.com/search?q=why?](https://example.com/search?q=why?))")
+    }
+
+    @Test("A long run of quote markers parses in linear time")
+    func quoteMarkerRun() {
+        let body = String(repeating: "> ", count: 60) + "x"
+        let elapsed = ContinuousClock().measure { _ = RedditMarkdown.blocks(from: body) }
+        // A backtracking pattern took 6.7 s at 26 markers; a linear scan takes milliseconds.
+        #expect(elapsed < .seconds(1))
     }
 
     @Test("A body that parses to nothing shows as written")
