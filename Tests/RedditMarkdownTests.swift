@@ -114,6 +114,15 @@ struct RedditMarkdownTests {
         ] {
             #expect(texts(RedditMarkdown.blocks(from: text, continuingLine: true)) == [expected])
         }
+        // Inline emphasis isn't a block marker.
+        for (text, expected) in [(" **important** stuff", "important stuff"), (" *italic* stuff", "italic stuff")] {
+            guard case .paragraph(let paragraph) = RedditMarkdown.blocks(from: text, continuingLine: true).first else {
+                Issue.record("Expected a paragraph for \(text)")
+                continue
+            }
+            #expect(String(paragraph.characters) == expected)
+            #expect(paragraph.runs.contains { $0.inlinePresentationIntent != nil })
+        }
         guard case .list = RedditMarkdown.blocks(from: "\n- next line", continuingLine: true).first else {
             Issue.record("A list on the next line should stay a list")
             return
@@ -167,6 +176,18 @@ struct RedditMarkdownTests {
         ] {
             expectOneTextPart(body)
         }
+
+        // A giphy embed kept in a list becomes a link to the GIF.
+        let listGiphy = CommentBodyView.parse("* ![gif](giphy|abc)")
+        guard listGiphy.count == 1, case .text(let listText) = listGiphy[0] else {
+            Issue.record("Expected one text part, got \(listGiphy)")
+            return
+        }
+        #expect(listText == "* [gif](https://media.giphy.com/media/abc/giphy.gif)")
+
+        // Only a table's own rows keep media as links; an embed after the table still plays.
+        let afterTable = CommentBodyView.parse("A|B\n-|-\n1|2\n\n![gif](giphy|abc)")
+        #expect(afterTable.contains { if case .gif = $0 { true } else { false } })
 
         let prose = CommentBodyView.parse("Look https://example.com/shot.png wow")
         guard prose.count == 3, case .image = prose[1] else {

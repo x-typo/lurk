@@ -1200,7 +1200,14 @@ struct CommentBodyView: View {
                 parts.append(.text(text))
             }
         }
-        let hasTable = RedditMarkdown.tableDelimiterPattern.firstMatch(in: text, range: fullRange) != nil
+        let lines = text.split(separator: "\n", omittingEmptySubsequences: false)
+        let tableLines = RedditMarkdown.tableLines(lines)
+        var lineStarts: [Int] = []
+        var offset = 0
+        for line in lines {
+            lineStarts.append(offset)
+            offset += line.utf16.count + 1
+        }
 
         for match in matches {
             let range = match.range
@@ -1212,21 +1219,24 @@ struct CommentBodyView: View {
             lastEnd = range.location + range.length
 
             // Media inside a list item, heading, or table row stays a link rather than splitting its block.
-            let line = nsText.lineRange(for: range)
-            let lineStart = nsText.substring(with: NSRange(location: line.location, length: range.location - line.location))
-            if blockMarkerPattern.firstMatch(in: lineStart, range: NSRange(location: 0, length: (lineStart as NSString).length)) != nil
-                || (hasTable && nsText.substring(with: line).contains("|")) {
-                appendText(full)
-                continue
-            }
+            let lineIndex = lineStarts.lastIndex { $0 <= range.location } ?? 0
+            let lineStart = nsText.substring(with: NSRange(location: lineStarts[lineIndex], length: range.location - lineStarts[lineIndex]))
+            let keepsBlock = tableLines.contains(lineIndex)
+                || blockMarkerPattern.firstMatch(in: lineStart, range: NSRange(location: 0, length: (lineStart as NSString).length)) != nil
 
             if match.range(at: 1).location != NSNotFound {
                 // Giphy: ![gif](giphy|ID) or ![gif](giphy|ID|variant)
                 let giphyParts = nsText.substring(with: match.range(at: 1)).components(separatedBy: "|")
                 let giphyID = giphyParts.first ?? ""
                 if let url = URL(string: "https://media.giphy.com/media/\(giphyID)/giphy.gif") {
-                    parts.append(.gif(url))
+                    if keepsBlock {
+                        appendText("[gif](\(url.absoluteString))")
+                    } else {
+                        parts.append(.gif(url))
+                    }
                 }
+            } else if keepsBlock {
+                appendText(full)
             } else if match.range(at: 2).location != NSNotFound {
                 // Markdown link: [text](url)
                 let linkText = nsText.substring(with: match.range(at: 2))

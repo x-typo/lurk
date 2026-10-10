@@ -25,7 +25,7 @@ struct MarkdownTable: Equatable {
 
 enum RedditMarkdown {
     // A GFM table's delimiter row, such as ":-:|:-:" or "|---|---|".
-    static let tableDelimiterPattern = try! NSRegularExpression(
+    private static let tableDelimiterPattern = try! NSRegularExpression(
         pattern: #"^\s*\|?\s*:?-+:?\s*(?:\|\s*:?-+:?\s*)+\|?\s*$"#,
         options: .anchorsMatchLines
     )
@@ -71,8 +71,8 @@ enum RedditMarkdown {
     // table rows such as "#|Episode" are left alone.
     static func normalized(_ text: String) -> String {
         let lines = text.split(separator: "\n", omittingEmptySubsequences: false)
+        let tableRows = tableLines(lines)
         var fence: (marker: Character, length: Int)?
-        var inTable = false
         var result: [String] = []
         for (index, line) in lines.enumerated() {
             let content = blockContent(of: line)
@@ -86,13 +86,27 @@ enum RedditMarkdown {
                 result.append(String(line))
                 continue
             }
-            if line.allSatisfy(\.isWhitespace) { inTable = false }
-            if isTableDelimiter(line) { inTable = true }
-            let isTableRow = line.contains("|")
-                && (inTable || (index + 1 < lines.count && isTableDelimiter(lines[index + 1])))
-            result.append(isTableRow ? String(line) : spacedHeading(line) ?? String(line))
+            result.append(tableRows.contains(index) ? String(line) : spacedHeading(line) ?? String(line))
         }
         return result.joined(separator: "\n")
+    }
+
+    // Indexes of the lines in GFM tables: each header row, its delimiter row, and the rows up to a blank line.
+    static func tableLines(_ lines: [Substring]) -> Set<Int> {
+        var result: Set<Int> = []
+        var index = 1
+        while index < lines.count {
+            guard isTableDelimiter(lines[index]), lines[index - 1].contains("|") else {
+                index += 1
+                continue
+            }
+            result.insert(index - 1)
+            while index < lines.count, !lines[index].allSatisfy(\.isWhitespace) {
+                result.insert(index)
+                index += 1
+            }
+        }
+        return result
     }
 
     private static func spacedHeading(_ line: Substring) -> String? {
@@ -152,7 +166,11 @@ enum RedditMarkdown {
     private static func escapingLeadingBlockMarker(_ text: String) -> String {
         let start = text.drop(while: { $0 == " " || $0 == "\t" })
         guard let first = start.first, first != "\n" else { return text }
-        if "-+*#>".contains(first) {
+        let firstLine = start.prefix(while: { $0 != "\n" })
+        // "*" opens a block only as a list marker or a "***" rule; "**bold**" is inline.
+        let opensBlock = "-+#>".contains(first) || (first == "*"
+            && ((firstLine.dropFirst().first?.isWhitespace ?? true) || firstLine.allSatisfy { $0 == "*" || $0 == " " }))
+        if opensBlock {
             return "\\" + start
         }
         if let afterMarker = orderedMarkerEnd(start) {
