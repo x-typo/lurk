@@ -9,7 +9,7 @@
 
 ## Local Testing and Generated State
 
-- Use Xcode's Device Hub as the default UI for simulator and physical-phone inspection, interaction, and debugging. Report access failures before switching to another UI. Continue using Xcode command-line tools for builds, tests, installation, inventory, and cleanup.
+- Use Xcode's Device Hub as the default UI for simulator and physical-phone inspection, interaction, and debugging. If it fails on a host that normally drives it, report that before switching to another UI. Hosts without Device Hub access, such as Claude Code with its iOS Simulator tool, use their own simulator tools without stopping to report, and name the tool behind the evidence. Continue using Xcode command-line tools for builds, tests, installation, inventory, and cleanup.
 - Run the smallest checks that establish changed behavior and all required coverage. Documentation-only edits need read-back and diff checks, not Xcode builds or simulator runs. A build does not replace required runtime or UI checks.
 - Reuse one compatible, available simulator selected by exact UDID. Pass `-parallel-testing-enabled NO` for local `xcodebuild test`; the shared scheme permits parallel testing, so do not rely on its default. Additional destinations or workers need a concrete coverage reason and bounded ownership. Do not routinely create or reset devices.
 - Reuse stable, checkout-local paths under ignored `DerivedData/`, separated by configuration and destination type, such as `DerivedData/SimulatorDebug` and `DerivedData/DeviceRelease`. Avoid new build directories or clean builds on every retry unless isolation or a diagnosed build issue requires them.
