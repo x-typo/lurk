@@ -57,6 +57,26 @@ func emphasized(_ text: String, revealed: Set<Int> = [], intent: InlinePresentat
     return visit(RedditMarkdown.blocks(from: text, revealedSpoilers: revealed))
 }
 
+// The fastest of three runs of `work`, in this thread's CPU time: every suite runs at once, so on a runner
+// with few cores the wall clock also counts the time a run waits for one.
+func cpuTime(_ work: () -> Void) -> Duration {
+    (0..<3).map { _ in
+        let start = clock_gettime_nsec_np(CLOCK_THREAD_CPUTIME_ID)
+        work()
+        return .nanoseconds(clock_gettime_nsec_np(CLOCK_THREAD_CPUTIME_ID) - start)
+    }.min()!
+}
+
+// Expects `work` to take under 8× as long at `count` as at a quarter of it, which holds on any machine: a
+// linear pass takes about 4×, and a rescanning one about 16×. A quarter-size run under 10 ms is too quick to
+// time reliably, so it counts as 10 ms.
+func expectLinear(_ label: String, count: Int, sourceLocation: SourceLocation = #_sourceLocation, _ work: (Int) -> Void) {
+    let quarter = cpuTime { work(count / 4) }
+    let full = cpuTime { work(count) }
+    #expect(full < max(quarter, .milliseconds(10)) * 8, "\(label) took \(quarter) at ×\(count / 4) and \(full) at ×\(count)",
+            sourceLocation: sourceLocation)
+}
+
 @MainActor
 @Suite("Reddit Markdown blocks")
 struct RedditMarkdownTests {
@@ -345,10 +365,10 @@ struct RedditMarkdownTests {
 
     @Test("A long run of closing parentheses in a link is trimmed in linear time")
     func parenthesisRun() {
-        let body = "[" + String(repeating: ")", count: 8000) + "”](https://example.com/x)"
-        let elapsed = ContinuousClock().measure { _ = RedditMarkdown.blocks(from: body) }
         // Rescanning for every trimmed character took 0.62 s on a Mac; one pass takes milliseconds.
-        #expect(elapsed < .seconds(0.2))
+        expectLinear("closing parentheses", count: 8000) { count in
+            _ = RedditMarkdown.blocks(from: "[" + String(repeating: ")", count: count) + "”](https://example.com/x)")
+        }
     }
 
     @Test("Linked images keep their image and link at any length, with brackets in the address")
@@ -377,42 +397,39 @@ struct RedditMarkdownTests {
             ("![gif](giphy|a) ", 2000), ("[![a](https://i.imgur.com/t.png)](https://e.com/p) ", 1000), ("~~~ x ", 8000),
             ("https://(", 8000), ("[![a](((", 4000), ("[![a](<", 4000), ("[![a](x \"", 4000), ("[![a](x (", 4000),
         ] {
-            let body = String(repeating: unit, count: count)
-            let elapsed = ContinuousClock().measure { _ = RedditMarkdown.blocks(from: body) }
-            // Rescanning took 0.9 to 4.6 s at these sizes; linear passes take well under a second in Debug.
-            #expect(elapsed < .seconds(1), "\(unit) ×\(count) took \(elapsed)")
+            // Rescanning took 0.9 to 4.6 s at these sizes; linear passes take at most about 0.2 s in Debug.
+            expectLinear(unit, count: count) { _ = RedditMarkdown.blocks(from: String(repeating: unit, count: $0)) }
         }
         // Many revealed spoilers, each checking for an emphasis closer before it.
-        let revealedRun = "-*" + String(repeating: ">!*!<", count: 8000)
-        let revealedElapsed = ContinuousClock().measure {
-            _ = RedditMarkdown.blocks(from: revealedRun, revealedSpoilers: Set(0..<8000))
+        expectLinear("revealed spoiler run", count: 8000) { count in
+            _ = RedditMarkdown.blocks(from: "-*" + String(repeating: ">!*!<", count: count), revealedSpoilers: Set(0..<count))
         }
-        #expect(revealedElapsed < .seconds(1), "revealed spoiler run took \(revealedElapsed)")
         // A revealed URL followed by a long run of trailing emphasis characters.
-        let underscores = "x >!https://example.com/a" + String(repeating: "_", count: 8000) + "!<"
-        let trimElapsed = ContinuousClock().measure { _ = RedditMarkdown.blocks(from: underscores, revealedSpoilers: [0]) }
-        #expect(trimElapsed < .seconds(1), "revealed URL trim took \(trimElapsed)")
+        expectLinear("revealed URL trim", count: 8000) { count in
+            _ = RedditMarkdown.blocks(from: "x >!https://example.com/a" + String(repeating: "_", count: count) + "!<", revealedSpoilers: [0])
+        }
         // Many nested addresses sharing one title that never closes.
         for opener in ["\"", "'", "("] {
-            let body = String(repeating: "[![a](x", count: 8000) + " " + opener
-            let elapsed = ContinuousClock().measure { _ = RedditMarkdown.blocks(from: body) }
-            #expect(elapsed < .seconds(1), "unclosed \(opener) title took \(elapsed)")
+            expectLinear("unclosed \(opener) title", count: 8000) { count in
+                _ = RedditMarkdown.blocks(from: String(repeating: "[![a](x", count: count) + " " + opener)
+            }
         }
     }
 
     @Test("A long run of quote markers parses in linear time")
     func quoteMarkerRun() {
-        let body = String(repeating: "> ", count: 60) + "x"
-        let elapsed = ContinuousClock().measure { _ = RedditMarkdown.blocks(from: body) }
         // A backtracking pattern took 6.7 s at 26 markers; a linear scan takes milliseconds.
-        #expect(elapsed < .seconds(1))
+        expectLinear("quote markers", count: 60) { _ = RedditMarkdown.blocks(from: String(repeating: "> ", count: $0) + "x") }
     }
 
     @Test("A table too large to lay out shows as text rows, alone or across a body")
     func tableBudget() {
         let sparse = String(repeating: "a|", count: 400) + "\n" + String(repeating: "-|", count: 400) + "\n"
             + String(repeating: "x|\n", count: 400)
-        let elapsed = ContinuousClock().measure { #expect(outline(sparse).hasPrefix("P(a | a | ")) }
+        #expect(outline(sparse).hasPrefix("P(a | a | "))
+        // Foundation's own parse of a sparse table grows with rows × columns, so this is bounded rather than
+        // scaled: it takes about 65 ms in Debug, 15× under the bound.
+        let elapsed = cpuTime { _ = outline(sparse) }
         #expect(elapsed < .seconds(1), "sparse table took \(elapsed)")
         // 20 columns by 60 rows is 1,220 cells; the third such table passes the body's 3,000.
         let table = String(repeating: "h|", count: 20) + "\n" + String(repeating: "-|", count: 20) + "\n"
