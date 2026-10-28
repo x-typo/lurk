@@ -80,6 +80,9 @@ enum RedditClientError: LocalizedError {
 
 actor RedditClient {
     private let baseURL = "https://www.reddit.com"
+    // www.reddit.com answers morechildren with 403 even with the sign-in cookies; old.reddit.com still
+    // serves it to a signed-in session (checked 2026-10-27).
+    private let moreChildrenBaseURL = "https://old.reddit.com"
     private static let pageSize = "25"
     private static let profilePageSize = "20"
     private static let moreChildrenBatchSize = 100
@@ -152,16 +155,20 @@ actor RedditClient {
         return CommentNode.parse(from: listings[1])
     }
 
+    // Reddit answers `/by_id` with 403 even signed in, so the post comes from the head of its comments page.
     func fetchPost(id: String) async throws -> Post {
         guard Comment.isRedditID(id) else { throw URLError(.badURL) }
-        var components = try buildComponents(path: "/by_id/t3_\(id).json")
-        components.queryItems = [URLQueryItem(name: "raw_json", value: "1")]
+        var components = try buildComponents(path: "/comments/\(id).json")
+        components.queryItems = [
+            URLQueryItem(name: "limit", value: "1"),
+            URLQueryItem(name: "raw_json", value: "1"),
+        ]
         guard let url = components.url else { throw URLError(.badURL) }
 
         let (data, response) = try await session.data(from: url)
         try validateHTTPResponse(response, data: data)
 
-        let listing = try RedditAPI.decoder.decode(RedditListing.self, from: data)
+        let listing = try RedditAPI.decoder.decode(ThreadPostResponse.self, from: data).listing
         guard let post = listing.data.children.first?.data else { throw URLError(.fileDoesNotExist) }
         return post
     }
@@ -193,7 +200,7 @@ actor RedditClient {
         }
 
         let batch = Array(more.childIDs.prefix(Self.moreChildrenBatchSize))
-        var components = try buildComponents(path: "/api/morechildren.json")
+        var components = try buildComponents(path: "/api/morechildren.json", base: moreChildrenBaseURL)
         components.queryItems = [
             URLQueryItem(name: "api_type", value: "json"),
             URLQueryItem(name: "link_id", value: "t3_\(postID)"),
@@ -363,8 +370,8 @@ actor RedditClient {
         return names
     }
 
-    private func buildComponents(path: String) throws -> URLComponents {
-        guard let components = URLComponents(string: "\(baseURL)\(path)") else {
+    private func buildComponents(path: String, base: String? = nil) throws -> URLComponents {
+        guard let components = URLComponents(string: "\(base ?? baseURL)\(path)") else {
             throw URLError(.badURL)
         }
         return components

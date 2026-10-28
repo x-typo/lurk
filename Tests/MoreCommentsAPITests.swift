@@ -20,7 +20,7 @@ struct MoreCommentsAPITests {
 
         let url = try #require(MoreCommentsURLProtocol.requests.first?.url)
         #expect(MoreCommentsURLProtocol.requests.count == 1)
-        #expect(url.host == "www.reddit.com")
+        #expect(url.host == "old.reddit.com")
         #expect(url.path == "/api/morechildren.json")
         #expect(query(url, "api_type") == "json")
         #expect(query(url, "link_id") == "t3_post1")
@@ -154,22 +154,28 @@ struct MoreCommentsAPITests {
         #expect(CommentNode.rows(from: nodes, collapsed: []).map(\.id) == ["top", "focus"])
     }
 
-    @Test("A linked post loads by its ID")
+    @Test("A linked post loads from the head of its comments page")
     func postByIDRequest() async throws {
         let session = makeSession()
         defer { session.invalidateAndCancel() }
-        MoreCommentsURLProtocol.stub(data: try json(["data": ["after": NSNull(), "children": [["data": [
-            "id": "post1", "title": "A post", "author": "reader", "subreddit": "swift",
-            "subreddit_name_prefixed": "r/swift", "score": 5, "num_comments": 2, "created_utc": 0,
-            "permalink": "/r/swift/comments/post1/a_post/", "url": "https://example.com", "selftext": "",
-            "is_self": true, "is_video": false, "stickied": false, "over_18": false,
-        ]]]]]))
+        MoreCommentsURLProtocol.stub(data: try json([
+            ["kind": "Listing", "data": ["after": NSNull(), "children": [["kind": "t3", "data": [
+                "id": "post1", "title": "A post", "author": "reader", "subreddit": "swift",
+                "subreddit_name_prefixed": "r/swift", "score": 5, "num_comments": 2, "created_utc": 0,
+                "permalink": "/r/swift/comments/post1/a_post/", "url": "https://example.com", "selftext": "",
+                "is_self": true, "is_video": false, "stickied": false, "over_18": false,
+            ]]]]],
+            ["kind": "Listing", "data": ["children": [thing("x", parent: "t3_post1")]]],
+        ]))
         let client = RedditClient(session: session)
 
         let post = try await client.fetchPost(id: "post1")
 
         let url = try #require(MoreCommentsURLProtocol.requests.first?.url)
-        #expect(url.path == "/by_id/t3_post1.json")
+        #expect(url.host == "www.reddit.com")
+        #expect(url.path == "/comments/post1.json")
+        #expect(query(url, "limit") == "1")
+        #expect(query(url, "raw_json") == "1")
         #expect(post.id == "post1")
         #expect(post.permalink == "/r/swift/comments/post1/a_post/")
     }

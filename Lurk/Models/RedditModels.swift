@@ -7,6 +7,16 @@ nonisolated struct RedditListing: Decodable {
     let data: ListingData
 }
 
+// A comments page is `[post listing, comment listing]`; this keeps the post listing and skips the comments.
+nonisolated struct ThreadPostResponse: Decodable {
+    let listing: RedditListing
+
+    init(from decoder: Decoder) throws {
+        var container = try decoder.unkeyedContainer()
+        listing = try container.decode(RedditListing.self)
+    }
+}
+
 struct ListingData: Decodable {
     let after: String?
     let children: [PostWrapper]
