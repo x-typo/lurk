@@ -5,7 +5,7 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$REPO_ROOT"
 
 load_env_local_defaults() {
-    [[ -f .env.local ]] || return
+    [[ -f .env.local ]] || return 0
 
     local line key value
     while IFS= read -r line || [[ -n "$line" ]]; do
