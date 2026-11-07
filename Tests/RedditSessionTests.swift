@@ -75,6 +75,33 @@ struct RedditSessionTests {
         #expect(session.username == nil)
     }
 
+    @Test("Writes ask Reddit to report refusals in the JSON envelope the client checks")
+    func writesAskForJSONErrors() async throws {
+        let stub = LoginCheckStub([.response(200, Self.me)])
+        let session = RedditSession(storedCookies: [try cookie()], sendLoginCheck: stub.send)
+        await session.restoreTask?.value
+
+        let request = session.authenticatedRequest(
+            url: RedditAPI.comment,
+            formData: ["thing_id": "t1_abc", "text": "Nice & tidy"]
+        )
+
+        let body = try #require(request.httpBody.flatMap { String(data: $0, encoding: .utf8) })
+        #expect(request.httpMethod == "POST")
+        #expect(request.value(forHTTPHeaderField: "Cookie") == "reddit_session=abc")
+        #expect(formFields(body) == ["thing_id": "t1_abc", "text": "Nice & tidy", "api_type": "json", "uh": "hash"])
+    }
+
+    private func formFields(_ body: String) -> [String: String] {
+        let decode = { (value: Substring) in
+            value.replacingOccurrences(of: "+", with: " ").removingPercentEncoding ?? String(value)
+        }
+        return Dictionary(uniqueKeysWithValues: body.split(separator: "&").map { pair in
+            let parts = pair.split(separator: "=", maxSplits: 1, omittingEmptySubsequences: false)
+            return (decode(parts[0]), parts.count > 1 ? decode(parts[1]) : "")
+        })
+    }
+
     private func cookie() throws -> HTTPCookie {
         try #require(HTTPCookie(properties: [
             .domain: ".reddit.com", .path: "/", .name: "reddit_session", .value: "abc",
