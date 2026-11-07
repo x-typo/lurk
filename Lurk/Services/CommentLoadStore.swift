@@ -42,7 +42,7 @@ final class CommentLoadStore {
         }
     }
 
-    // Reddit allows one morechildren request at a time, so overlapping requests are ignored.
+    // One load-more runs at a time (a top-level one sends a request per comment), so overlapping requests are ignored.
     // The store owns the request so `cancel()` can stop it when the view goes away.
     func loadMore(_ more: CommentMore, fetch: @escaping FetchMore) async {
         guard state == .loaded, loadingMoreID == nil else { return }

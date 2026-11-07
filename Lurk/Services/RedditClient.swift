@@ -80,12 +80,10 @@ enum RedditClientError: LocalizedError {
 
 actor RedditClient {
     private let baseURL = "https://www.reddit.com"
-    // www.reddit.com answers morechildren with 403 even with the sign-in cookies; old.reddit.com still
-    // serves it to a signed-in session (checked 2026-10-27).
-    private let moreChildrenBaseURL = "https://old.reddit.com"
     private static let pageSize = "25"
     private static let profilePageSize = "20"
-    private static let moreChildrenBatchSize = 100
+    // Each comment loaded on its own is one request.
+    private static let separateCommentBatchSize = 10
     private let session: URLSession
 
     init() {
@@ -193,27 +191,64 @@ actor RedditClient {
     }
 
     // Returns loaded nodes, each paired with its parent, for `CommentNode.merging`.
+    // Signed in, Reddit answers `/api/morechildren.json` with 403 on www.reddit.com and, since early November,
+    // on old.reddit.com too; its path without `.json` returns rendered HTML, not comments (checked 2026-11-07).
+    // So hidden replies come from their parent comment's thread, and other hidden comments from their own.
     func fetchMoreComments(postID: String, more: CommentMore) async throws -> [LoadedCommentNode] {
         guard Comment.isRedditID(postID) else { throw URLError(.badURL) }
-        if more.continuesThread {
-            return try await fetchContinuedThread(postID: postID, more: more)
+        if more.isTopLevel {
+            return try await fetchSeparately(postID: postID, more: more)
         }
 
-        let batch = Array(more.childIDs.prefix(Self.moreChildrenBatchSize))
-        var components = try buildComponents(path: "/api/morechildren.json", base: moreChildrenBaseURL)
-        components.queryItems = [
-            URLQueryItem(name: "api_type", value: "json"),
-            URLQueryItem(name: "link_id", value: "t3_\(postID)"),
-            URLQueryItem(name: "children", value: batch.joined(separator: ",")),
-            URLQueryItem(name: "raw_json", value: "1"),
-        ]
-        guard let url = components.url else { throw URLError(.badURL) }
-
-        let (data, response) = try await session.data(from: url)
+        let commentID = String(more.parentID.dropFirst(3))
+        guard more.parentID.hasPrefix("t1_"), Comment.isRedditID(commentID) else { throw URLError(.badURL) }
+        let (data, response) = try await session.data(from: try commentThreadURL(postID: postID, commentID: commentID))
         try validateHTTPResponse(response, data: data)
-        try validateRedditErrors(in: data)
+        guard let parent = try focusedComment(commentID, in: data),
+              case .listing(let replies) = parent.data.replies
+        else { return more.continuesThread ? [] : try await fetchSeparately(postID: postID, more: more) }
 
-        let things = try RedditAPI.decoder.decode(MoreChildrenResponse.self, from: data).json.data?.things ?? []
+        if more.continuesThread {
+            return CommentNode.flatten(CommentNode.parse(replies.data.children, parentID: more.parentID), under: more.parentID)
+        }
+        // Replies already showing are left out with their subtrees; their own placeholders still cover those.
+        // Listed IDs the thread neither shows nor places in a placeholder aren't kept: in live checks, Reddit
+        // didn't return those even on their own (deleted or removed), and keeping them left rows that load nothing.
+        let hidden = Set(more.childIDs)
+        let listed = replies.data.children.filter { $0.kind == "t1" && $0.data.id.map(hidden.contains) == true }
+        // A parent with more replies than one thread holds can leave the listed ones out.
+        guard !listed.isEmpty else { return try await fetchSeparately(postID: postID, more: more) }
+        let placeholders = replies.data.children.filter { $0.kind == "more" }
+        return CommentNode.flatten(CommentNode.parse(listed + placeholders, parentID: more.parentID), under: more.parentID)
+    }
+
+    // Loads the placeholder's next comments from their own threads, in parallel, each placed under its
+    // `parent_id`, and keeps the rest in a new placeholder.
+    private func fetchSeparately(postID: String, more: CommentMore) async throws -> [LoadedCommentNode] {
+        let batch = Array(more.childIDs.prefix(Self.separateCommentBatchSize))
+        guard !batch.isEmpty, batch.allSatisfy(Comment.isRedditID) else { throw URLError(.badURL) }
+        let urls = try batch.map { try commentThreadURL(postID: postID, commentID: $0) }
+        let session = self.session
+
+        let responses = try await withThrowingTaskGroup(of: (Int, Data, URLResponse).self) { group in
+            for (index, url) in urls.enumerated() {
+                group.addTask {
+                    let (data, response) = try await session.data(from: url)
+                    return (index, data, response)
+                }
+            }
+            var ordered = [(Data, URLResponse)?](repeating: nil, count: urls.count)
+            for try await (index, data, response) in group {
+                ordered[index] = (data, response)
+            }
+            return ordered.compactMap { $0 }
+        }
+
+        var things: [CommentWrapper] = []
+        for (id, (data, response)) in zip(batch, responses) {
+            try validateHTTPResponse(response, data: data)
+            if let thing = try focusedComment(id, in: data) { things.append(thing) }
+        }
         var loaded = CommentNode.loaded(fromFlat: things)
         let remaining = Array(more.childIDs.dropFirst(batch.count))
         if !remaining.isEmpty {
@@ -226,29 +261,21 @@ actor RedditClient {
         return loaded
     }
 
-    private func fetchContinuedThread(postID: String, more: CommentMore) async throws -> [LoadedCommentNode] {
-        let commentID = String(more.parentID.dropFirst(3))
-        guard more.parentID.hasPrefix("t1_"), Comment.isRedditID(commentID) else { throw URLError(.badURL) }
-
+    private func commentThreadURL(postID: String, commentID: String) throws -> URL {
         var components = try buildComponents(path: "/comments/\(postID).json")
         components.queryItems = [
             URLQueryItem(name: "comment", value: commentID),
             URLQueryItem(name: "raw_json", value: "1"),
         ]
         guard let url = components.url else { throw URLError(.badURL) }
+        return url
+    }
 
-        let (data, response) = try await session.data(from: url)
-        try validateHTTPResponse(response, data: data)
-
+    // The comment a `?comment=` thread focuses on, with its replies.
+    private func focusedComment(_ commentID: String, in data: Data) throws -> CommentWrapper? {
         let listings = try RedditAPI.decoder.decode([CommentListing].self, from: data)
-        guard listings.count >= 2,
-              let parent = listings[1].data.children.first(where: { $0.kind == "t1" && $0.data.id == commentID }),
-              case .listing(let replies) = parent.data.replies
-        else { return [] }
-        return CommentNode.flatten(
-            CommentNode.parse(replies.data.children, parentID: more.parentID),
-            under: more.parentID
-        )
+        guard listings.count >= 2 else { return nil }
+        return listings[1].data.children.first { $0.kind == "t1" && $0.data.id == commentID }
     }
 
     func execute(_ request: URLRequest) async throws {
