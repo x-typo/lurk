@@ -85,19 +85,6 @@ enum CommentReplies: Decodable {
     }
 }
 
-// `api/morechildren` returns loaded comments flat, linked to their parents by `parent_id`.
-nonisolated struct MoreChildrenResponse: Decodable {
-    let json: Envelope
-
-    struct Envelope: Decodable {
-        let data: Things?
-    }
-
-    struct Things: Decodable {
-        let things: [CommentWrapper]
-    }
-}
-
 // MARK: - Parsed Comment
 
 struct Comment: Identifiable {
@@ -177,7 +164,7 @@ extension CommentNode {
         children.compactMap { node(from: $0, parentID: parentID) }
     }
 
-    // `api/morechildren` returns comments flat, linked to their parents by `parent_id`.
+    // Comments loaded on their own, each placed under its `parent_id`.
     nonisolated static func loaded(fromFlat things: [CommentWrapper]) -> [LoadedCommentNode] {
         things.flatMap { thing -> [LoadedCommentNode] in
             guard let parentID = thing.data.parentId,
@@ -299,11 +286,17 @@ extension CommentNode {
     // Comments and placeholders already in the tree are skipped, keeping their new replies.
     static func merging(_ loaded: [LoadedCommentNode], replacing more: CommentMore, in nodes: [CommentNode]) -> [CommentNode] {
         var seen = rowIDs(in: nodes)
+        var releasedReplacedID = false
         var childrenByParent: [String: [CommentNode]] = [:]
         for entry in loaded {
             let id = switch entry.node {
             case .comment(let comment, _): comment.id
             case .more(let placeholder): placeholder.id
+            }
+            // The placeholder being replaced can come back once under the same ID with fewer replies left.
+            if !releasedReplacedID, case .more(let placeholder) = entry.node, placeholder.id == more.id, placeholder != more {
+                seen.remove(id)
+                releasedReplacedID = true
             }
             guard seen.insert(id).inserted else { continue }
             childrenByParent[entry.parentID, default: []].append(entry.node)

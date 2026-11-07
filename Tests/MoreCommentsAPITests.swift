@@ -5,98 +5,142 @@ import Testing
 @Suite("More comments API", .serialized)
 @MainActor
 struct MoreCommentsAPITests {
-    @Test("Placeholders load through morechildren and nest under their parent")
-    func moreChildrenRequest() async throws {
+    @Test("Hidden replies load from their parent's thread, without the replies already showing")
+    func hiddenRepliesFromParentThread() async throws {
         let session = makeSession()
         defer { session.invalidateAndCancel() }
-        MoreCommentsURLProtocol.stub(data: try json(["json": ["errors": [], "data": ["things": [
-            thing("x", parent: "t1_a"), thing("y", parent: "t1_x"),
-        ]]]]))
+        MoreCommentsURLProtocol.stub(data: try thread(node("a", parent: "t3_post1", replies: [
+            node("s", parent: "t1_a", replies: [node("s2", parent: "t1_s")]),
+            node("x", parent: "t1_a", replies: [node("y", parent: "t1_x")]),
+            placeholder(parent: "t1_a", children: ["z"], count: 1),
+        ])))
+        let client = RedditClient(session: session)
+
+        let more = CommentMore(parentID: "t1_a", count: 3, childIDs: ["x", "y"])
+        let loaded = try await client.fetchMoreComments(postID: "post1", more: more)
+        let rows = CommentNode.rows(
+            from: CommentNode.merging(loaded, replacing: more, in: [comment("a", [comment("s"), .more(more)])]),
+            collapsed: []
+        )
+
+        let url = try #require(MoreCommentsURLProtocol.requests.first?.url)
+        #expect(MoreCommentsURLProtocol.requests.count == 1)
+        #expect(url.host == "www.reddit.com")
+        #expect(url.path == "/comments/post1.json")
+        #expect(query(url, "comment") == "a")
+        #expect(query(url, "raw_json") == "1")
+        #expect(rows.map(\.id) == ["a", "s", "x", "y", "more:t1_a:z"])
+        #expect(rows.map { depth($0) } == [0, 1, 1, 2, 1])
+    }
+
+    @Test("A placeholder that comes back under the same ID keeps its replies reachable")
+    func returnedPlaceholderWithSameID() async throws {
+        let session = makeSession()
+        defer { session.invalidateAndCancel() }
+        MoreCommentsURLProtocol.stub(data: try thread(node("a", parent: "t3_post1", replies: [
+            node("y", parent: "t1_a"),
+            placeholder(parent: "t1_a", children: ["x"], count: 1),
+        ])))
         let client = RedditClient(session: session)
 
         let more = CommentMore(parentID: "t1_a", count: 2, childIDs: ["x", "y"])
         let loaded = try await client.fetchMoreComments(postID: "post1", more: more)
         let rows = CommentNode.rows(from: CommentNode.merging(loaded, replacing: more, in: [comment("a", [.more(more)])]), collapsed: [])
 
-        let url = try #require(MoreCommentsURLProtocol.requests.first?.url)
-        #expect(MoreCommentsURLProtocol.requests.count == 1)
-        #expect(url.host == "old.reddit.com")
-        #expect(url.path == "/api/morechildren.json")
-        #expect(query(url, "api_type") == "json")
-        #expect(query(url, "link_id") == "t3_post1")
-        #expect(query(url, "children") == "x,y")
-        #expect(query(url, "raw_json") == "1")
-        #expect(rows.map(\.id) == ["a", "x", "y"])
-        #expect(rows.map { depth($0) } == [0, 1, 2])
+        #expect(rows.map(\.id) == ["a", "y", "more:t1_a:x"])
     }
 
-    @Test("Large placeholders load 100 replies and keep the rest for later")
-    func batchesLargePlaceholders() async throws {
+    @Test("Replies the parent's thread leaves out load from their own threads")
+    func hiddenRepliesMissingFromParentThread() async throws {
         let session = makeSession()
         defer { session.invalidateAndCancel() }
-        MoreCommentsURLProtocol.stub(data: try json(["json": ["errors": [], "data": ["things": []]]]))
+        MoreCommentsURLProtocol.stub { url in
+            switch self.query(url, "comment") {
+            case "a": (200, try! self.thread(node("a", parent: "t3_post1", replies: [node("s", parent: "t1_a")])))
+            case "x": (200, try! self.thread(node("x", parent: "t1_a")))
+            default: (404, Data())
+            }
+        }
         let client = RedditClient(session: session)
-        let childIDs = (0..<130).map { "c\($0)" }
 
-        let loaded = try await client.fetchMoreComments(
-            postID: "post1",
-            more: CommentMore(parentID: "t3_post1", count: 150, childIDs: childIDs)
+        let more = CommentMore(parentID: "t1_a", count: 1, childIDs: ["x"])
+        let loaded = try await client.fetchMoreComments(postID: "post1", more: more)
+        let rows = CommentNode.rows(
+            from: CommentNode.merging(loaded, replacing: more, in: [comment("a", [comment("s"), .more(more)])]),
+            collapsed: []
         )
 
-        let url = try #require(MoreCommentsURLProtocol.requests.first?.url)
-        #expect(query(url, "children")?.split(separator: ",").map(String.init) == Array(childIDs.prefix(100)))
+        #expect(MoreCommentsURLProtocol.requests.compactMap { $0.url.flatMap { query($0, "comment") } } == ["a", "x"])
+        #expect(rows.map(\.id) == ["a", "s", "x"])
+        #expect(rows.map { depth($0) } == [0, 1, 1])
+    }
+
+    @Test("Top-level placeholders load their next 10 comments from their own threads and keep the rest")
+    func topLevelBatch() async throws {
+        let session = makeSession()
+        defer { session.invalidateAndCancel() }
+        MoreCommentsURLProtocol.stub { url in
+            (200, try! self.thread(node(self.query(url, "comment") ?? "", parent: "t3_post1")))
+        }
+        let client = RedditClient(session: session)
+        let childIDs = (0..<13).map { "c\($0)" }
+
+        let more = CommentMore(parentID: "t3_post1", count: 15, childIDs: childIDs)
+        let loaded = try await client.fetchMoreComments(postID: "post1", more: more)
+
+        let urls = MoreCommentsURLProtocol.requests.compactMap(\.url)
+        #expect(urls.count == 10)
+        #expect(Set(urls.compactMap { query($0, "comment") }) == Set(childIDs.prefix(10)))
+        #expect(urls.allSatisfy { $0.host == "www.reddit.com" && $0.path == "/comments/post1.json" })
+        let rows = CommentNode.rows(from: CommentNode.merging(loaded, replacing: more, in: [.more(more)]), collapsed: [])
+        #expect(rows.map(\.id) == Array(childIDs.prefix(10)) + ["more:t3_post1:c10"])
         guard let entry = loaded.last, case .more(let remaining) = entry.node else {
-            Issue.record("Expected a placeholder for the remaining replies")
+            Issue.record("Expected a placeholder for the remaining comments")
             return
         }
         #expect(entry.parentID == "t3_post1")
-        #expect(remaining == CommentMore(parentID: "t3_post1", count: 50, childIDs: Array(childIDs.dropFirst(100))))
+        #expect(remaining == CommentMore(parentID: "t3_post1", count: 5, childIDs: ["c10", "c11", "c12"]))
     }
 
-    @Test("A child in the second batch stays under its parent from the first batch")
-    func batchedParentAndChild() async throws {
+    @Test("A reply loaded on its own lands under its parent, once")
+    func separateReplyUnderParent() async throws {
         let session = makeSession()
         defer { session.invalidateAndCancel() }
+        MoreCommentsURLProtocol.stub { url in
+            switch self.query(url, "comment") {
+            case "p": (200, try! self.thread(node("p", parent: "t3_post1", replies: [node("c", parent: "t1_p")])))
+            case "c": (200, try! self.thread(node("c", parent: "t1_p", replies: [node("d", parent: "t1_c")])))
+            default: (404, Data())
+            }
+        }
         let client = RedditClient(session: session)
-        let childIDs = ["p"] + (0..<99).map { "f\($0)" } + ["c"]
-        let first = CommentMore(parentID: "t1_root", count: childIDs.count, childIDs: childIDs)
-        var nodes = [comment("root", [.more(first)])]
 
-        MoreCommentsURLProtocol.stub(data: try json(["json": ["errors": [], "data": ["things": [
-            thing("p", parent: "t1_root"),
-        ]]]]))
-        nodes = CommentNode.merging(try await client.fetchMoreComments(postID: "post1", more: first), replacing: first, in: nodes)
-        let second = try #require(CommentNode.rows(from: nodes, collapsed: []).compactMap { row -> CommentMore? in
-            guard case .more(let more, _) = row else { return nil }
-            return more
-        }.last)
-        #expect(second.childIDs == ["c"])
+        let more = CommentMore(parentID: "t3_post1", count: 2, childIDs: ["p", "c"])
+        let loaded = try await client.fetchMoreComments(postID: "post1", more: more)
+        let rows = CommentNode.rows(from: CommentNode.merging(loaded, replacing: more, in: [comment("t"), .more(more)]), collapsed: [])
 
-        MoreCommentsURLProtocol.stub(data: try json(["json": ["errors": [], "data": ["things": [
-            thing("c", parent: "t1_p"),
-        ]]]]))
-        nodes = CommentNode.merging(try await client.fetchMoreComments(postID: "post1", more: second), replacing: second, in: nodes)
-
-        let rows = CommentNode.rows(from: nodes, collapsed: [])
-        #expect(rows.map(\.id) == ["root", "p", "c"])
-        #expect(rows.map { depth($0) } == [0, 1, 2])
+        #expect(rows.map(\.id) == ["t", "p", "c", "d"])
+        #expect(rows.map { depth($0) } == [0, 0, 1, 2])
     }
 
-    @Test("Reddit errors in the morechildren envelope surface as failures")
-    func moreChildrenErrors() async throws {
+    @Test("A refused thread request fails the whole load")
+    func refusedThreadRequest() async throws {
         let session = makeSession()
         defer { session.invalidateAndCancel() }
-        MoreCommentsURLProtocol.stub(data: try json(["json": ["errors": [
-            ["RATELIMIT", "You are doing that too much.", "ratelimit"],
-        ]]]))
+        MoreCommentsURLProtocol.stub { url in
+            self.query(url, "comment") == "c1"
+                ? (403, Data("You've been blocked by network security".utf8))
+                : (200, try! self.thread(node(self.query(url, "comment") ?? "", parent: "t3_post1")))
+        }
         let client = RedditClient(session: session)
 
-        await #expect(throws: RedditClientError.self) {
+        let error = await #expect(throws: RedditClientError.self) {
             try await client.fetchMoreComments(
                 postID: "post1",
-                more: CommentMore(parentID: "t1_a", count: 1, childIDs: ["x"])
+                more: CommentMore(parentID: "t3_post1", count: 3, childIDs: ["c0", "c1", "c2"])
             )
         }
+        #expect(error?.deniesAccess == true)
     }
 
     @Test("Continuations load the parent comment's thread and keep its depth")
@@ -205,6 +249,7 @@ struct MoreCommentsAPITests {
             ("POST1", valid),
             ("post1", CommentMore(parentID: "t1_../x", count: 0, childIDs: [])),
             ("post1", CommentMore(parentID: "t3_post1", count: 0, childIDs: [])),
+            ("post1", CommentMore(parentID: "t3_post1", count: 1, childIDs: ["../x"])),
         ] {
             await #expect(throws: URLError.self) {
                 try await client.fetchMoreComments(postID: postID, more: more)
@@ -219,13 +264,30 @@ struct MoreCommentsAPITests {
         return URLSession(configuration: configuration)
     }
 
-    private func query(_ url: URL, _ name: String) -> String? {
+    nonisolated private func query(_ url: URL, _ name: String) -> String? {
         URLComponents(url: url, resolvingAgainstBaseURL: false)?
             .queryItems?.first(where: { $0.name == name })?.value
     }
 
-    private func json(_ object: Any) throws -> Data {
+    nonisolated private func json(_ object: Any) throws -> Data {
         try JSONSerialization.data(withJSONObject: object)
+    }
+
+    // A `?comment=` thread response focused on `focus`.
+    nonisolated private func thread(_ focus: [String: Any]) throws -> Data {
+        try json([
+            ["kind": "Listing", "data": ["children": []]],
+            ["kind": "Listing", "data": ["children": [focus]]],
+        ])
+    }
+
+    nonisolated private func node(_ id: String, parent: String, replies: [[String: Any]] = []) -> [String: Any] {
+        ["kind": "t1", "data": ["id": id, "author": "reader", "body": "body", "score": 1, "parent_id": parent,
+                                "replies": replies.isEmpty ? "" as Any : ["kind": "Listing", "data": ["children": replies]] as Any]]
+    }
+
+    nonisolated private func placeholder(parent: String, children: [String], count: Int) -> [String: Any] {
+        ["kind": "more", "data": ["id": children[0], "count": count, "parent_id": parent, "children": children]]
     }
 
     private func thing(_ id: String, parent: String) -> [String: Any] {
@@ -248,7 +310,7 @@ struct MoreCommentsAPITests {
 
 private nonisolated final class MoreCommentsURLProtocol: URLProtocol, @unchecked Sendable {
     private static let lock = NSLock()
-    nonisolated(unsafe) private static var responseData = Data()
+    nonisolated(unsafe) private static var respond: @Sendable (URL) -> (status: Int, data: Data) = { _ in (200, Data()) }
     nonisolated(unsafe) private static var recordedRequests: [URLRequest] = []
 
     static var requests: [URLRequest] {
@@ -258,9 +320,13 @@ private nonisolated final class MoreCommentsURLProtocol: URLProtocol, @unchecked
     }
 
     static func stub(data: Data) {
+        stub { _ in (200, data) }
+    }
+
+    static func stub(_ respond: @escaping @Sendable (URL) -> (status: Int, data: Data)) {
         lock.lock()
         defer { lock.unlock() }
-        responseData = data
+        self.respond = respond
         recordedRequests = []
     }
 
@@ -270,11 +336,14 @@ private nonisolated final class MoreCommentsURLProtocol: URLProtocol, @unchecked
     override func startLoading() {
         Self.lock.lock()
         Self.recordedRequests.append(request)
-        let data = Self.responseData
+        let respond = Self.respond
         Self.lock.unlock()
-        guard let url = request.url,
-              let response = HTTPURLResponse(url: url, statusCode: 200, httpVersion: nil, headerFields: nil)
-        else {
+        guard let url = request.url else {
+            client?.urlProtocol(self, didFailWithError: URLError(.badServerResponse))
+            return
+        }
+        let (status, data) = respond(url)
+        guard let response = HTTPURLResponse(url: url, statusCode: status, httpVersion: nil, headerFields: nil) else {
             client?.urlProtocol(self, didFailWithError: URLError(.badServerResponse))
             return
         }

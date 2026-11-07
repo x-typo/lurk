@@ -143,6 +143,22 @@ struct CommentThreadTests {
         #expect(ids(merged) == ["root", "a", other.id])
     }
 
+    @Test("A revised copy of the replaced placeholder is kept once")
+    func mergeKeepsRevisedPlaceholderOnce() {
+        let placeholder = CommentMore(parentID: "t1_root", count: 2, childIDs: ["x", "y"])
+        let revised = CommentMore(parentID: "t1_root", count: 1, childIDs: ["x"])
+        let merged = CommentNode.merging(
+            [
+                loaded("t1_root", comment("y")),
+                loaded("t1_root", .more(revised)),
+                loaded("t1_root", .more(revised)),
+            ],
+            replacing: placeholder,
+            in: [comment("root", [.more(placeholder)])]
+        )
+        #expect(ids(merged) == ["root", "y", revised.id])
+    }
+
     @Test("Indentation grows per level and stops at the cap")
     func indentation() {
         #expect(CommentRails.indent(for: 0) == 0)
