@@ -121,6 +121,9 @@ final class RedditSession {
         request.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
 
         var params = formData
+        // Reddit reports a refused write (rate limit, locked thread, expired sign-in) in the `json.errors`
+        // envelope `RedditClient.execute` checks only when asked; otherwise its older format reads as success.
+        params["api_type"] = params["api_type"] ?? "json"
         if let mh = modhash {
             params["uh"] = mh
         }
