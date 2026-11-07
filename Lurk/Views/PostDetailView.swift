@@ -1314,6 +1314,12 @@ struct ComposeReplySheet: View {
         text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
+    // Without `api_type=json`, Reddit reports a refused reply (rate limit, locked or archived thread) in an
+    // older format that `execute` doesn't read, so the sheet cleared the draft as if it posted.
+    static func formData(thingID: String, text: String) -> [String: String] {
+        ["thing_id": thingID, "text": text, "api_type": "json"]
+    }
+
     var body: some View {
         NavigationStack {
             VStack(spacing: 0) {
@@ -1383,10 +1389,7 @@ struct ComposeReplySheet: View {
         do {
             let request = session.authenticatedRequest(
                 url: RedditAPI.comment,
-                formData: [
-                    "thing_id": thingID,
-                    "text": text
-                ]
+                formData: Self.formData(thingID: thingID, text: text)
             )
             try await client.execute(request)
             text = ""
