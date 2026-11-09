@@ -126,13 +126,11 @@ actor RedditClient {
         return try await fetch(url)
     }
 
-    func fetchSubredditPosts(
-        _ subreddit: String,
-        sort: SortType = .hot,
-        after: String? = nil
-    ) async throws -> RedditListing {
+    // Signed in, Reddit answers `/r/<name>/hot.json` with 403 on www and old.reddit.com, and `/new.json` on www,
+    // subscribed or not. The bare listing matched Reddit's hot page post for post in two subreddits (2026-11-08).
+    func fetchSubredditPosts(_ subreddit: String, after: String? = nil) async throws -> RedditListing {
         let encoded = subreddit.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? subreddit
-        var components = try buildComponents(path: "/r/\(encoded)/\(sort.rawValue).json")
+        var components = try buildComponents(path: "/r/\(encoded)/.json")
         components.queryItems = baseQueryItems(after: after)
         guard let url = components.url else { throw URLError(.badURL) }
         return try await fetch(url)
