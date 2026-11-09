@@ -126,8 +126,8 @@ actor RedditClient {
         return try await fetch(url)
     }
 
-    // Signed in, Reddit answers `/r/<name>/hot.json` and `/new.json` with 403 on www and old.reddit.com,
-    // subscribed or not; the bare listing is the same hot sort (checked 2026-11-08).
+    // Signed in, Reddit answers `/r/<name>/hot.json` with 403 on www and old.reddit.com, and `/new.json` on www,
+    // subscribed or not. The bare listing matched Reddit's hot page post for post in two subreddits (2026-11-08).
     func fetchSubredditPosts(_ subreddit: String, after: String? = nil) async throws -> RedditListing {
         let encoded = subreddit.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? subreddit
         var components = try buildComponents(path: "/r/\(encoded)/.json")
