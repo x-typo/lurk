@@ -285,7 +285,8 @@ private struct UserCommentRow: View {
                     thingID: "t1_\(comment.id)",
                     score: comment.score,
                     loadedVote: comment.initialVote,
-                    inactiveColor: Theme.textMuted
+                    inactiveColor: Theme.textMuted,
+                    colorsScoreBySign: true
                 )
 
                 Button(action: editComment) {
