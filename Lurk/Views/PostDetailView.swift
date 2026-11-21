@@ -1178,6 +1178,9 @@ struct VoteControlsView: View {
     let score: Int
     let loadedVote: Int
     var inactiveColor: Color = Theme.textSecondary
+    // The viewer's own comments carry Reddit's automatic self-upvote, so vote
+    // coloring would paint every score orange; color those by the score's sign.
+    var colorsScoreBySign = false
 
     @Environment(RedditSession.self) private var session
     @Environment(EngagementStore.self) private var engagement
@@ -1185,14 +1188,31 @@ struct VoteControlsView: View {
 
     @State private var voteError: String?
 
-    init(thingID: String, score: Int, loadedVote: Int, inactiveColor: Color = Theme.textSecondary) {
+    init(
+        thingID: String,
+        score: Int,
+        loadedVote: Int,
+        inactiveColor: Color = Theme.textSecondary,
+        colorsScoreBySign: Bool = false
+    ) {
         self.thingID = thingID
         self.score = score
         self.loadedVote = loadedVote
         self.inactiveColor = inactiveColor
+        self.colorsScoreBySign = colorsScoreBySign
     }
 
     private var voted: Int { engagement.vote(for: thingID, loaded: loadedVote) }
+
+    // Reddit's score already includes the loaded vote.
+    private var displayedScore: Int { score - loadedVote + voted }
+
+    private var scoreColor: Color {
+        if colorsScoreBySign {
+            return displayedScore > 0 ? Theme.primary : displayedScore < 0 ? Theme.downvote : Theme.amber
+        }
+        return voted == 1 ? Theme.primary : voted == -1 ? Theme.downvote : Theme.textSecondary
+    }
 
     var body: some View {
         HStack(spacing: session.isLoggedIn ? 8 : 6) {
@@ -1209,9 +1229,8 @@ struct VoteControlsView: View {
                     .foregroundStyle(inactiveColor)
             }
 
-            // Reddit's score already includes the loaded vote.
-            Text(Formatters.score(score - loadedVote + voted))
-                .foregroundStyle(voted == 1 ? Theme.primary : voted == -1 ? Theme.downvote : Theme.textSecondary)
+            Text(Formatters.score(displayedScore))
+                .foregroundStyle(scoreColor)
 
             if session.isLoggedIn {
                 Button {
