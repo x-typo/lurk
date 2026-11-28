@@ -155,7 +155,8 @@ resolve_coredevice_id() {
         }
         !name_width && /^Name / && index($0, "Identifier") {
             name_width = index($0, "Hostname") ? index($0, "Hostname") - 1 : index($0, "Identifier") - 1
-            titles = split(substr($0, index($0, "Identifier")), title, "  +")
+            header = substr($0, index($0, "Identifier")); sub(/ +$/, "", header)
+            titles = split(header, title, "  +")
             for (t = 2; t <= titles; t++) if (title[t] != "") column[title[t]] = t - 1
             next
         }
@@ -165,7 +166,7 @@ resolve_coredevice_id() {
             if (device_name != "" && index(name, device_name) == 0) next
             rest = substr($0, byte_at($0, name_width))
             if (!match(rest, /[0-9A-Fa-f]{8}-([0-9A-Fa-f]{16}|[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12})/)) next
-            if (substr(rest, RSTART - 1, 1) !~ /^ ?$/ || substr(rest, RSTART + RLENGTH, 1) !~ /^ ?$/) next
+            if ((RSTART > 1 && substr(rest, RSTART - 1, 1) !~ /^ ?$/) || substr(rest, RSTART + RLENGTH, 1) !~ /^ ?$/) next
             id = substr(rest, RSTART, RLENGTH)
             after = substr(rest, RSTART + RLENGTH)
             sub(/^ [(][^)]*[)]/, "", after)
