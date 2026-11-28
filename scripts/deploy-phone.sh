@@ -139,45 +139,52 @@ resolve_coredevice_id() {
         return
     fi
 
-    local devices line resolved
+    local devices resolved
     devices="$(xcrun devicectl list devices 2>&1 || true)"
-    # Columns are split on runs of 2+ spaces, not header offsets: macOS awk counts bytes,
-    # so a name with a curly apostrophe shifts offsets. An empty Hostname collapses, so State
-    # is found as the column after the identifier. A booted simulator shows "connected",
-    # so when the table has a Reality column only "physical" rows qualify.
-    line="$(printf '%s\n' "$devices" | awk -F '  +' -v device_name="$DEVICE_NAME" '
-        function trim(s) { sub(/^[[:space:]]+/, "", s); sub(/[[:space:]]+$/, "", s); return s }
-        !header_seen {
-            for (i = 1; i <= NF; i++) {
-                if (trim($i) == "Identifier") header_seen = 1
-                if (trim($i) == "Reality") has_reality = 1
-            }
+    # Name ends where the header's next column starts. devicectl pads by characters but
+    # macOS awk counts bytes, so that offset is converted per row (names can hold a curly
+    # apostrophe or double spaces). The Identifier is the UDID (8-16 hex) or a CoreDevice
+    # UUID, which --device takes, and the columns after it are written by devicectl, so
+    # they split on runs of 2+ spaces in header order. Booted simulators show "connected",
+    # so where the table has a Reality column only "physical" rows qualify.
+    resolved="$(printf '%s\n' "$devices" | awk -v device_name="$DEVICE_NAME" '
+        function byte_at(s, chars,   b) {
+            for (b = 1; chars > 0; chars--)
+                for (b++; substr(s, b, 1) ~ /^[\200-\277]$/; b++) {}
+            return b
+        }
+        !name_width && /^Name / && index($0, "Identifier") {
+            name_width = index($0, "Hostname") ? index($0, "Hostname") - 1 : index($0, "Identifier") - 1
+            titles = split(substr($0, index($0, "Identifier")), title, "  +")
+            for (t = 2; t <= titles; t++) if (title[t] != "") column[title[t]] = t - 1
             next
         }
-        /iPhone/ {
-            if (device_name != "" && index(trim($1), device_name) == 0) next
-            state = ""; physical = 0
-            for (i = 2; i <= NF; i++) {
-                field = trim($i); id = field; sub(/ [(][^)]*[)]$/, "", id)
-                if (state == "" && id ~ /^[0-9A-Fa-f]+-[0-9A-Fa-f-]+$/ && (length(id) == 25 || length(id) == 36)) state = trim($(i + 1))
-                if (field == "physical") physical = 1
-            }
-            if (has_reality && !physical) next
-            if (state ~ /^(available|connected)([[:space:]]|[(]|$)/) {
-                print
+        name_width {
+            name = substr($0, 1, byte_at($0, name_width) - 1)
+            sub(/ +$/, "", name)
+            if (device_name != "" && index(name, device_name) == 0) next
+            rest = substr($0, byte_at($0, name_width))
+            if (!match(rest, /[0-9A-Fa-f]{8}-([0-9A-Fa-f]{16}|[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12})/)) next
+            if (substr(rest, RSTART - 1, 1) !~ /^ ?$/ || substr(rest, RSTART + RLENGTH, 1) !~ /^ ?$/) next
+            id = substr(rest, RSTART, RLENGTH)
+            after = substr(rest, RSTART + RLENGTH)
+            sub(/^ [(][^)]*[)]/, "", after)
+            sub(/^ +/, "", after)
+            sub(/ +$/, "", after)
+            split(after, cell, "  +")
+            if (cell[column["Model"]] !~ /^iPhone/) next
+            if (("Reality" in column) && cell[column["Reality"]] != "physical") next
+            if (cell[column["State"]] ~ /^(available|connected)( |[(]|$)/) {
+                print id
                 exit
             }
         }
     ')"
 
-    if [[ -z "$line" ]]; then
+    if [[ -z "$resolved" ]]; then
         printf '%s\n' "$devices" >&2
         die "No paired CoreDevice iPhone found. Set DEVICE_ID or DEVICE_NAME."
     fi
-
-    # The Identifier column shows the UDID (8-16 hex) or a CoreDevice UUID; --device takes either.
-    resolved="$(printf '%s\n' "$line" | sed -nE 's/.*([0-9A-Fa-f]{8}-([0-9A-Fa-f]{16}|[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12})).*/\1/p' | xargs)"
-    [[ -n "$resolved" ]] || die "Could not parse CoreDevice id from: $line"
     printf '%s\n' "$resolved"
 }
 
