@@ -142,7 +142,7 @@ resolve_coredevice_id() {
     local devices line resolved
     devices="$(xcrun devicectl list devices 2>&1 || true)"
     line="$(printf '%s\n' "$devices" | awk -v device_name="$DEVICE_NAME" '
-        $0 ~ /iPhone/ && ($0 ~ /(^|[[:space:]])(available|connected)([[:space:]]|\\()/) {
+        $0 ~ /iPhone/ && ($0 ~ /(^|[[:space:]])(available|connected)([[:space:]]|[(])/) {
             if (device_name == "" || index($0, device_name) > 0) {
                 print
                 exit
@@ -155,7 +155,8 @@ resolve_coredevice_id() {
         die "No paired CoreDevice iPhone found. Set DEVICE_ID or DEVICE_NAME."
     fi
 
-    resolved="$(printf '%s\n' "$line" | sed -nE 's/.*([0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}).*/\1/p' | xargs)"
+    # The Identifier column shows the UDID (8-16 hex) or a CoreDevice UUID; --device takes either.
+    resolved="$(printf '%s\n' "$line" | sed -nE 's/.*([0-9A-Fa-f]{8}-([0-9A-Fa-f]{16}|[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12})).*/\1/p' | xargs)"
     [[ -n "$resolved" ]] || die "Could not parse CoreDevice id from: $line"
     printf '%s\n' "$resolved"
 }
