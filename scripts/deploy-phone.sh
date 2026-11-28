@@ -141,9 +141,29 @@ resolve_coredevice_id() {
 
     local devices line resolved
     devices="$(xcrun devicectl list devices 2>&1 || true)"
-    line="$(printf '%s\n' "$devices" | awk -v device_name="$DEVICE_NAME" '
-        $0 ~ /iPhone/ && ($0 ~ /(^|[[:space:]])(available|connected)([[:space:]]|[(])/) {
-            if (device_name == "" || index($0, device_name) > 0) {
+    # Columns are split on runs of 2+ spaces, not header offsets: macOS awk counts bytes,
+    # so a name with a curly apostrophe shifts offsets. An empty Hostname collapses, so State
+    # is found as the column after the identifier. A booted simulator shows "connected",
+    # so when the table has a Reality column only "physical" rows qualify.
+    line="$(printf '%s\n' "$devices" | awk -F '  +' -v device_name="$DEVICE_NAME" '
+        function trim(s) { sub(/^[[:space:]]+/, "", s); sub(/[[:space:]]+$/, "", s); return s }
+        !header_seen {
+            for (i = 1; i <= NF; i++) {
+                if (trim($i) == "Identifier") header_seen = 1
+                if (trim($i) == "Reality") has_reality = 1
+            }
+            next
+        }
+        /iPhone/ {
+            if (device_name != "" && index(trim($1), device_name) == 0) next
+            state = ""; physical = 0
+            for (i = 2; i <= NF; i++) {
+                field = trim($i); id = field; sub(/ [(][^)]*[)]$/, "", id)
+                if (state == "" && id ~ /^[0-9A-Fa-f]+-[0-9A-Fa-f-]+$/ && (length(id) == 25 || length(id) == 36)) state = trim($(i + 1))
+                if (field == "physical") physical = 1
+            }
+            if (has_reality && !physical) next
+            if (state ~ /^(available|connected)([[:space:]]|[(]|$)/) {
                 print
                 exit
             }
